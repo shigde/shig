@@ -1,7 +1,7 @@
 name: Build and Release
 on:
   release:
-    types: [created]
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,8 +53,13 @@ jobs:
           echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV  
 
       - name: Upload Release Asset
-        run: |
-          gh release upload ${{github.event.release.tag_name}} ${{ env.ASSET }}
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ github.TOKEN }}
-        shell: bash
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./${{ env.ASSET }}
+          asset_name: ${{ env.ASSET }}
+          asset_content_type: application/zip
+
