@@ -28,7 +28,7 @@ This guide explains how to set up a Shig server as a `systemd` service and manag
 ### Step 1: Create the Service File
 
 #### Create User and Group
-Create Group:
+Create group:
 ```shell
     sudo groupadd shig
 ```
@@ -46,7 +46,8 @@ Explanation:
 Set ownership of the application directory:
 
 ```shell
-sudo chown -R shig:shig /opt/shig
+  sudo chown -R shig:shig /opt/shig
+  sudo chmod -R 750 /opt/shig
 ```
 
 #### Create system demon
