@@ -53,7 +53,8 @@ jobs:
           echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV  
 
       - name: Upload Release Asset
+        run: |
+          gh release upload ${{github.event.release.tag_name}} ${{ env.ASSET }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run:
-          gh release upload ${{ env.VERSION }} ${{ env.ASSET }}
+          GITHUB_TOKEN: ${{ github.TOKEN }}
+        shell: bash
