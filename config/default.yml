@@ -1,0 +1,8 @@
+server:
+  port: 8080
+  host: '127.0.0.1'
+  tls:
+    cert: "config/certs/cert.pem"
+    key: "config/certs/key.pem"
+
+
