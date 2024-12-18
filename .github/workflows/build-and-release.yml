@@ -50,12 +50,13 @@ jobs:
           mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
           mv "config/default.toml" "$dirname"
           tar -czf "$dirname.tar.gz" "$dirname"
-          echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV  
-
-      - name: Upload assets
-        uses: jasonetco/upload-to-release@v0.1.1
+          echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
         with:
-          args: ${{ env.ASSET }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{env.ASSET }}
+          asset_name: ${{ env.ASSET }}
+          tag: ${{ github.ref }}
+          file_glob: true
 
