@@ -1,7 +1,8 @@
 name: Build and Release
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,19 +45,19 @@ jobs:
       - name: Build archive
         shell: bash
         run: |
-          binary_name="shig_server"
-          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+          dirname="shig_server-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
-          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+          mv "target/${{ matrix.target }}/release/shig_server" "$dirname"
           mv "config/default.toml" "$dirname"
           tar -czf "$dirname.tar.gz" "$dirname"
           echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
-          mv "$dirname.tar.gz" "/tmp"
+          echo "---"
+          ls -la
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: /tmp/${{env.ASSET }}
+          file: ${{env.ASSET }}
           asset_name: ${{ env.ASSET }}
           tag: ${{ github.ref }}
 
