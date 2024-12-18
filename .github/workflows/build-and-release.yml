@@ -46,11 +46,12 @@ jobs:
         run: |
           binary_name="shig_server"
           dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
-          mkdir "/tmp/$dirname"
-          mv "target/${{ matrix.target }}/release/$binary_name" "/tmp/$dirname"
-          mv "config/default.toml" "/tmp/$dirname"
-          tar -czf "/tmp/$dirname.tar.gz" "/tmp/$dirname"
+          mkdir "$dirname"
+          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+          mv "config/default.toml" "$dirname"
+          tar -czf "$dirname.tar.gz" "$dirname"
           echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+          mv "$dirname.tar.gz" "/tmp"
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
@@ -58,4 +59,5 @@ jobs:
           file: /tmp/${{env.ASSET }}
           asset_name: ${{ env.ASSET }}
           tag: ${{ github.ref }}
+
 
