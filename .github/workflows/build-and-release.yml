@@ -1,8 +1,7 @@
 name: Build and Release
 on:
-  push:
-    tags:
-      - '*'
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout
