@@ -8,7 +8,7 @@ Use `curl` to download the Shig directly from the release page. Replace ` APP_RE
 
 ```bash
   export APP_REL=0.1.0
-  curl -L -o shig_server.tar.gz https://github.com/shigde/shig/releases/download/${APP_REL}/shig_server-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+  curl -L -o shig_server.tar.gz https://github.com/shigde/shig/releases/download/${APP_REL}/shig_server-${APP_REL}-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 ### 2. Extract artefact
