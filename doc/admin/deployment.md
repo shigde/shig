@@ -15,6 +15,7 @@ This guide explains how to set up a Shig server as a `systemd` service and manag
 
 - A Linux-based server
 - Root or sudo access
+- Downloaded application. Please read the installation instructions: [Install](install.md).
 - Create Application Directory
 ```shell
     sudo mkdir -p /opt/shig
