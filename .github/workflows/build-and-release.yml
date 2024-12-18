@@ -55,7 +55,7 @@ jobs:
       - name: Upload assets
         uses: jasonetco/upload-to-release@v0.1.1
         with:
-          args: ${{ env.ASSET }} application/tar+gzip
+          args: ${{ env.ASSET }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
