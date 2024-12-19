@@ -24,3 +24,4 @@ Cargo.lock
 # Project specific
 config/prod.toml
 .deploy.sh
+.env
