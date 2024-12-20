@@ -7,4 +7,5 @@ enabled = false
 cert = "config/certs/cert.pem"
 key = "config/certs/key.pem"
 
-
+[database]
+name = "database.db"
