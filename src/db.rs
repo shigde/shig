@@ -1,3 +1,9 @@
+mod actors;
+mod instances;
+mod schema;
+mod users;
+mod user_roles;
+
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool,  PoolError};
 use serde_derive::Deserialize;

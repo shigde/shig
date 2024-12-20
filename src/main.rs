@@ -1,5 +1,6 @@
 extern crate core;
 
+mod api;
 mod db;
 mod server;
 
