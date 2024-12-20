@@ -1,8 +1,10 @@
 use diesel::prelude::*;
-use crate::db::schema::{instances, actors};
+use crate::db::schema::{instances};
+use crate::db::actors::{Actor};
 use chrono::NaiveDateTime;
 
-#[derive(Queryable, Identifiable, Selectable, Debug, PartialEq)]
+#[derive(Queryable, Identifiable, Selectable, Associations, Debug, PartialEq)]
+#[diesel(belongs_to(Actor))]
 #[diesel(table_name = instances)]
 pub struct User {
     pub id: i32,

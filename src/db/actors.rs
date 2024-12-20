@@ -4,7 +4,7 @@ use chrono::NaiveDateTime;
 
 #[derive(Queryable, Identifiable, Selectable, Debug, PartialEq)]
 #[diesel(table_name = actors)]
-pub struct User {
+pub struct Actor {
     pub id: i32,
     pub preferred_username:String,
     pub actor_type: String,

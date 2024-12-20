@@ -42,7 +42,7 @@ diesel::table! {
         name -> Text,
         email -> Text,
         uuid -> Text,
-        role_id -> Integer,
+        user_role_id -> Integer,
         password -> Text,
         active -> Bool,
         actor_id -> Integer,
@@ -53,7 +53,7 @@ diesel::table! {
 
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(users -> actors (actor_id));
-diesel::joinable!(users -> user_roles (role_id));
+diesel::joinable!(users -> user_roles (user_role_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     actors,
