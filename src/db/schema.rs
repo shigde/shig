@@ -41,7 +41,7 @@ diesel::table! {
         id -> Integer,
         name -> Text,
         email -> Text,
-        uuid -> Text,
+        user_uuid -> Text,
         user_role_id -> Integer,
         password -> Text,
         active -> Bool,

@@ -1,9 +1,11 @@
+use uuid::Uuid;
 use diesel::prelude::*;
 use crate::db::schema::{users};
 use crate::db::schema::users::dsl::*;
 use crate::db::actors::{Actor};
 use crate::db::user_roles::{Role, UserRole};
 use chrono::{NaiveDateTime, Utc};
+use bcrypt::{DEFAULT_COST, hash, verify};
 
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(Actor))]
@@ -13,19 +15,25 @@ pub struct User {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub uuid: String,
+    pub user_uuid: String,
     pub user_role_id: i32,
     pub password: String,
     pub active: bool,
     pub actor_id: i32,
     pub created_at: NaiveDateTime,
-    pub updated_at:  Option<NaiveDateTime>,
+    pub updated_at: Option<NaiveDateTime>,
 }
+
+// impl User {
+//     pub fn verify(&self, password: String) -> bool {
+//         verify(password, &self.password).unwrap()
+//     }
+// }
 
 #[derive(Insertable, Debug)]
 #[table_name = "users"]
 pub struct NewUser<'a> {
-    pub uuid: &'a str,
+    pub user_uuid: &'a str,
     pub name: &'a str,
     pub email: &'a str,
     pub user_role_id: i32,
@@ -43,19 +51,19 @@ fn insert_new_user(
     user_role: Role,
 ) -> QueryResult<User> {
     // Create insertion model
-    let uid = "123";
+    let hashed_pass: String = hash(user_pass, DEFAULT_COST).unwrap();
+    let uid = Uuid::new_v4().to_string();
     let new_user = NewUser {
-        uuid: &uid,
+        user_uuid: &uid,
         name: &user_name,
         email: &user_email,
-        password: &user_pass,
+        password: &hashed_pass,
         user_role_id: user_role.val(),
         active: true,
         actor_id: 0,
         created_at: Utc::now().naive_utc(),
     };
 
-    // normal diesel operations
     diesel::insert_into(users)
         .values(&new_user)
         .execute(conn)?;

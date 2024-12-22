@@ -45,6 +45,19 @@ impl From<diesel::r2d2::PoolError> for ServerError {
     }
 }
 
+impl From<diesel::result::Error> for ServerError {
+    fn from(_: diesel::result::Error) -> Self {
+        ServerError::InternalServerError
+    }
+}
+
+impl From<Box<dyn StdError + Send + Sync>> for ServerError {
+    fn from(_: Box<dyn StdError + Send + Sync>) -> Self {
+        ServerError::InternalServerError
+    }
+}
+
+
 impl From<openssl::error::ErrorStack> for ServerError {
     fn from(_: openssl::error::ErrorStack) -> Self {
         ServerError::InternalServerError

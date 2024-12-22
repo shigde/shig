@@ -3,6 +3,8 @@ extern crate core;
 mod api;
 mod db;
 mod server;
+mod util;
+mod federation;
 
 use clap::ArgAction;
 use clap::Parser;

@@ -1,11 +1,13 @@
 mod error;
 
-use crate::db::{build_pool, DbConfig};
+use std::sync::{Arc, Mutex};
+use crate::db::{build_pool, run_migrations, DbConfig};
 use crate::server::error::ServerResult;
 
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde_derive::Deserialize;
+use crate::federation::FederationConfig;
 use crate::server;
 
 #[get("/")]
@@ -17,6 +19,7 @@ async fn index(_req: HttpRequest) -> impl Responder {
 #[derive(Deserialize)]
 pub struct ConfigFile {
     server: ServerConfig,
+    federation: FederationConfig,
     database: DbConfig,
 }
 
@@ -38,9 +41,14 @@ pub struct TlsConfig {
 pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
     // Set up the connection pool
     let pool = build_pool(cfg.database.name.clone())?;
+    let mut conn = pool.get().unwrap();
+    run_migrations(&mut conn).map_err(server::error::ServerError::from)?;
+
+    let federation = Arc::new(Mutex::new(cfg.federation));
     let svs = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(Arc::clone(&federation)))
             .service(index)
     });
 

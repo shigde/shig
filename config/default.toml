@@ -7,5 +7,12 @@ enabled = false
 cert = "config/certs/cert.pem"
 key = "config/certs/key.pem"
 
+[federation]
+enable = true
+domain = "localhost"
+instance = "shig"
+token = "this-token-must-be-changed-in-public"
+tls = true
+
 [database]
 name = "database.db"
