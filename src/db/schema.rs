@@ -13,7 +13,7 @@ diesel::table! {
         inbox_iri -> Nullable<Text>,
         outbox_iri -> Nullable<Text>,
         shared_inbox_iri -> Nullable<Text>,
-        server_id -> Nullable<Integer>,
+        instance_id -> Nullable<Integer>,
         remote_created_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
         updated_at -> Nullable<Timestamp>,

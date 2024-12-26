@@ -11,7 +11,7 @@ create table actors
     inbox_iri          VARCHAR,
     outbox_iri         VARCHAR,
     shared_inbox_iri   VARCHAR,
-    server_id          INTEGER,
+    instance_id        INTEGER,
     remote_created_at  TIMESTAMP,
     created_at         TIMESTAMP      NOT NULL,
     updated_at         TIMESTAMP

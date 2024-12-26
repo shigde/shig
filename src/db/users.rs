@@ -5,7 +5,7 @@ use crate::db::schema::users::dsl::*;
 use crate::db::actors::{Actor};
 use crate::db::user_roles::{Role, UserRole};
 use chrono::{NaiveDateTime, Utc};
-use bcrypt::{DEFAULT_COST, hash, verify};
+use bcrypt::{DEFAULT_COST, hash};
 
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(Actor))]
@@ -31,7 +31,7 @@ pub struct User {
 // }
 
 #[derive(Insertable, Debug)]
-#[table_name = "users"]
+#[diesel(table_name = crate::db::schema::users)]
 pub struct NewUser<'a> {
     pub user_uuid: &'a str,
     pub name: &'a str,
@@ -50,7 +50,6 @@ fn insert_new_user(
     user_pass: String,
     user_role: Role,
 ) -> QueryResult<User> {
-    // Create insertion model
     let hashed_pass: String = hash(user_pass, DEFAULT_COST).unwrap();
     let uid = Uuid::new_v4().to_string();
     let new_user = NewUser {

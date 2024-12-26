@@ -1,6 +1,7 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::Error as IoError;
+use crate::federation::error::FederationError;
 
 pub type ServerResult<T> = Result<T, ServerError>;
 
@@ -60,6 +61,12 @@ impl From<Box<dyn StdError + Send + Sync>> for ServerError {
 
 impl From<openssl::error::ErrorStack> for ServerError {
     fn from(_: openssl::error::ErrorStack) -> Self {
+        ServerError::InternalServerError
+    }
+}
+
+impl From<FederationError> for ServerError {
+    fn from(_: FederationError) -> Self {
         ServerError::InternalServerError
     }
 }
