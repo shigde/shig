@@ -1,54 +1,57 @@
-use std::error::{Error as StdError};
+use std::error::Error as StdError;
 use std::fmt;
 
 pub type FederationResult<T> = Result<T, FederationError>;
 
 #[derive(Debug)]
-pub enum FederationError {
-    SignError,
-    PersistenceError,
-    InternalServerError,
+pub struct FederationError {
+    details: String,
+}
+
+impl FederationError {
+    #[inline(always)]
+    fn new(msg: String) -> FederationError {
+        FederationError { details: msg }
+    }
 }
 
 impl fmt::Display for FederationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            FederationError::SignError => f.write_str("SignError"),
-            FederationError::PersistenceError => f.write_str("PersistenceError"),
-            FederationError::InternalServerError => f.write_str("InternalError"),
-        }
+        write!(f, "federation: {}", self.details)
     }
 }
 impl StdError for FederationError {
     fn description(&self) -> &str {
-        match *self {
-            FederationError::SignError => "SignError",
-            FederationError::PersistenceError => "Persistence error",
-            FederationError::InternalServerError => "Internal error",
-        }
+        &self.details
     }
 }
 
 impl From<diesel::r2d2::Error> for FederationError {
-    fn from(_: diesel::r2d2::Error) -> Self {
-        FederationError::InternalServerError
+    fn from(e: diesel::r2d2::Error) -> Self {
+        FederationError::new(e.to_string())
     }
 }
 
 impl From<diesel::r2d2::PoolError> for FederationError {
-    fn from(_: diesel::r2d2::PoolError) -> Self {
-        FederationError::InternalServerError
+    fn from(e: diesel::r2d2::PoolError) -> Self {
+        FederationError::new(e.to_string())
     }
 }
 
 impl From<diesel::result::Error> for FederationError {
-    fn from(_: diesel::result::Error) -> Self {
-        FederationError::InternalServerError
+    fn from(e: diesel::result::Error) -> Self {
+        FederationError::new(e.to_string())
     }
 }
 
 impl From<Box<dyn StdError + Send + Sync>> for FederationError {
-    fn from(_: Box<dyn StdError + Send + Sync>) -> Self {
-        FederationError::InternalServerError
+    fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
+        FederationError::new(e.to_string())
+    }
+}
+
+impl From<String> for FederationError {
+    fn from(e: String) -> Self {
+        FederationError::new(e.clone())
     }
 }

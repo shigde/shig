@@ -6,67 +6,66 @@ use crate::federation::error::FederationError;
 pub type ServerResult<T> = Result<T, ServerError>;
 
 #[derive(Debug)]
-pub enum ServerError {
-    IOError,
-    InternalServerError,
+pub struct  ServerError {
+    details: String,
+}
+
+impl ServerError {
+    fn new(msg: String) -> ServerError {
+        ServerError { details: msg }
+    }
 }
 
 impl fmt::Display for ServerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            ServerError::IOError => f.write_str("ConnectionError"),
-            ServerError::InternalServerError => f.write_str("InternalServerError"),
-        }
+        write!(f, "server: {}", self.details)
     }
 }
 impl StdError for ServerError {
     fn description(&self) -> &str {
-        match *self {
-            ServerError::IOError => "Connection error",
-            ServerError::InternalServerError => "Internal server error",
-        }
+        &self.details
     }
 }
 
 impl From<IoError> for ServerError {
-    fn from(_: IoError) -> Self {
-        ServerError::IOError
+    fn from(e: IoError) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 impl From<diesel::r2d2::Error> for ServerError {
-    fn from(_: diesel::r2d2::Error) -> Self {
-        ServerError::InternalServerError
+    fn from(e: diesel::r2d2::Error) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 impl From<diesel::r2d2::PoolError> for ServerError {
-    fn from(_: diesel::r2d2::PoolError) -> Self {
-        ServerError::InternalServerError
+    fn from(e: diesel::r2d2::PoolError) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 impl From<diesel::result::Error> for ServerError {
-    fn from(_: diesel::result::Error) -> Self {
-        ServerError::InternalServerError
+    fn from(e: diesel::result::Error) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 impl From<Box<dyn StdError + Send + Sync>> for ServerError {
-    fn from(_: Box<dyn StdError + Send + Sync>) -> Self {
-        ServerError::InternalServerError
+    fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 
 impl From<openssl::error::ErrorStack> for ServerError {
-    fn from(_: openssl::error::ErrorStack) -> Self {
-        ServerError::InternalServerError
+    fn from(e: openssl::error::ErrorStack) -> Self {
+        ServerError::new(e.to_string())
     }
 }
 
 impl From<FederationError> for ServerError {
-    fn from(_: FederationError) -> Self {
-        ServerError::InternalServerError
+    fn from(e: FederationError) -> Self {
+        ServerError::new(e.to_string())
     }
 }

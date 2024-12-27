@@ -1,6 +1,7 @@
 use crate::db::actors::{Actor, ActorType};
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, QueryResult, RunQueryDsl, Selectable, SelectableHelper, SqliteConnection};
+use diesel::{Insertable, RunQueryDsl, Selectable, SelectableHelper, SqliteConnection};
+use crate::db::error::DbResult;
 use crate::util::iri::IriSet;
 use crate::util::rsa::{KeyPair};
 
@@ -26,7 +27,7 @@ pub fn upsert_new_instance_actor(
     inst_name: &str,
     domain: &str,
     tls: bool,
-) -> QueryResult<Actor> {
+) -> DbResult<Actor> {
     let actor = insert_new_actor(conn, inst_name, domain, ActorType::Application, tls, None, true)?;
     Ok(actor)
 }
@@ -37,7 +38,7 @@ pub fn insert_new_person_actor(
     domain: &str,
     tls: bool,
     inst_id: i32,
-) -> QueryResult<Actor> {
+) -> DbResult<Actor> {
     let actor = insert_new_actor(conn, inst_name, domain, ActorType::Person, tls, Some(inst_id), false)?;
     Ok(actor)
 }
@@ -48,7 +49,7 @@ pub fn insert_new_group_actor(
     domain: &str,
     tls: bool,
     inst_id: i32,
-) -> QueryResult<Actor> {
+) -> DbResult<Actor> {
     let actor = insert_new_actor(conn, inst_name, domain, ActorType::Group, tls, Some(inst_id), false)?;
     Ok(actor)
 }
@@ -61,8 +62,8 @@ pub fn insert_new_actor(
     tls: bool,
     id_of_instance: Option<i32>,
     upsert: bool,
-) -> QueryResult<Actor> {
-    let keys = KeyPair::new().map_err(|_| diesel::NotFound)?;
+) -> DbResult<Actor> {
+    let keys = KeyPair::new().map_err(|e| -> String { format!("create keys: {}", e) })?;
     let iri_set = IriSet::new(user_name, domain, tls);
 
     let new_actor = NewActor {
@@ -84,6 +85,7 @@ pub fn insert_new_actor(
         use crate::db::schema::actors::dsl::*;
         let actor = diesel::insert_into(actors)
             .values(&new_actor)
+            .returning(Actor::as_returning())
             .on_conflict(actor_iri)
             .do_nothing()
             .get_result(conn)?;

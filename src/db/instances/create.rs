@@ -4,6 +4,10 @@ use diesel::{
     Connection, Insertable, QueryResult, RunQueryDsl, SelectableHelper, SqliteConnection,
 };
 use crate::db::actors::create::upsert_new_instance_actor;
+use crate::db::actors::read::exists_instance_actor;
+use crate::db::error::DbResult;
+use crate::db::instances::read::find_instance_by_actor_iri;
+use crate::util::iri::build_actor_iri;
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::instances)]
@@ -17,9 +21,23 @@ pub fn upsert_new_instance(
     name: &str,
     domain: &str,
     tls: bool,
-) -> QueryResult<Instance> {
+) -> DbResult<Instance> {
     conn.transaction(move |conn| {
-        let new_actor = upsert_new_instance_actor(conn, name, domain, tls)?;
+        let iri = build_actor_iri(name, domain, tls);
+        let  exists=  exists_instance_actor(conn, iri.as_str())
+            .map_err(|e| -> String { format!("checking existing instance: {}", e) })?;
+
+        if exists {
+            let current_inst = find_instance_by_actor_iri(conn, iri.as_str())
+                .map_err(|e| -> String { format!("reading existing instance: {}", e) })?;
+
+            return Ok(current_inst)
+        }
+
+
+        let new_actor = upsert_new_instance_actor(conn, name, domain, tls)
+            .map_err(|e| -> String { format!("upsert new inst actor: {}", e) })?;
+
         let new_instance = NewInstance {
             actor_id: new_actor.id,
             created_at: Utc::now().naive_utc(),
@@ -29,7 +47,8 @@ pub fn upsert_new_instance(
         let inst = diesel::insert_into(instances)
             .values(&new_instance)
             .returning(Instance::as_returning())
-            .get_result(conn)?;
+            .get_result(conn)
+            .map_err(|e| -> String { format!("query instance: {}", e) })?;
 
         Ok(inst)
     })

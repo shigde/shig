@@ -3,6 +3,7 @@ pub mod actors;
 pub mod instances;
 pub mod users;
 pub mod user_roles;
+mod error;
 
 use std::error::Error;
 use diesel::prelude::*;

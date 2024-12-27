@@ -54,7 +54,7 @@ async fn main() {
             return
         },
         Err(e) => {
-            log::error!("web server fails: `{}`", e);
+            log::error!("{}", e);
             exit(1);
         }
     };
