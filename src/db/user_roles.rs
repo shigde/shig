@@ -8,6 +8,7 @@ pub struct UserRole {
     pub name: String,
 }
 
+#[allow(dead_code)]
 pub enum Role {
     Admin,
     User,
@@ -16,6 +17,7 @@ pub enum Role {
     Service,
 }
 
+#[allow(dead_code)]
 impl Role {
     pub fn val(&self) -> i32 {
         match self {

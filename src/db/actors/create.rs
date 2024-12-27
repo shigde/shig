@@ -32,6 +32,7 @@ pub fn insert_new_instance_actor(
     Ok(actor)
 }
 
+#[allow(dead_code)]
 pub fn insert_new_person_actor(
     conn: &mut SqliteConnection,
     inst_name: &str,
@@ -43,6 +44,7 @@ pub fn insert_new_person_actor(
     Ok(actor)
 }
 
+#[allow(dead_code)]
 pub fn insert_new_group_actor(
     conn: &mut SqliteConnection,
     inst_name: &str,

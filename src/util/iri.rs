@@ -25,18 +25,22 @@ pub fn build_actor_iri(actor: &str, domain: &str, tls: bool) -> String {
     format!("{}://{}/federation/accounts/{}", http, domain, actor)
 }
 
+#[allow(dead_code)]
 pub fn build_following_iri(actor: &str, domain: &str, tls: bool) -> String {
     format!("{}/following", build_actor_iri(actor, domain, tls))
 }
 
+#[allow(dead_code)]
 pub fn build_followers_iri(actor: &str, domain: &str, tls: bool) -> String {
     format!("{}/followers", build_actor_iri(actor, domain, tls))
 }
 
+#[allow(dead_code)]
 pub fn build_inbox_iri(actor: &str, domain: &str, tls: bool) -> String {
     format!("{}/inbox", build_actor_iri(actor, domain, tls))
 }
 
+#[allow(dead_code)]
 pub fn build_outbox_iri(actor: &str, domain: &str, tls: bool) -> String {
     format!("{}/outbox", build_actor_iri(actor, domain, tls))
 }

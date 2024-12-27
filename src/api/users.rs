@@ -1,6 +1,7 @@
 use actix_web::{Responder};
 use serde_derive::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InputUser {
     pub name: String,
@@ -27,14 +28,17 @@ pub struct InputUser {
 //     //Ok(items)
 // }
 
+#[allow(dead_code)]
 pub async fn get_user_by_id() -> impl Responder {
     format!("hello from get users by id")
 }
 
+#[allow(dead_code)]
 pub async fn add_user() -> impl Responder {
     format!("hello from add user")
 }
 
+#[allow(dead_code)]
 pub async fn delete_user() -> impl Responder {
     format!("hello from delete user")
 }

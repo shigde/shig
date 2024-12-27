@@ -25,6 +25,7 @@ pub struct Actor {
     pub updated_at: Option<NaiveDateTime>,
 }
 
+#[allow(dead_code)]
 pub enum ActorType {
     Person,
     Group,

@@ -1,12 +1,11 @@
 pub mod error;
 
-use std::error::Error;
 use crate::db::instances::create::upsert_new_instance;
-use crate::federation::error::{FederationError, FederationResult};
+use crate::federation::error::{FederationResult};
 use diesel::SqliteConnection;
-use serde::__private::de::IdentifierDeserializer;
 use serde_derive::Deserialize;
 
+#[allow(dead_code)]
 #[derive(Deserialize, Clone)]
 pub struct FederationConfig {
     pub enable: bool,

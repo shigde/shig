@@ -4,6 +4,7 @@ use crate::db::instances::Instance;
 use crate::util::iri::build_actor_iri;
 use diesel::{BelongingToDsl, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
 
+#[allow(dead_code)]
 pub fn find_instance_by_actor(
     conn: &mut SqliteConnection,
     name: &str,

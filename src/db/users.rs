@@ -43,6 +43,7 @@ pub struct NewUser<'a> {
     pub created_at: NaiveDateTime,
 }
 
+#[allow(dead_code)]
 fn insert_new_user(
     conn: &mut SqliteConnection,
     user_name: String,
