@@ -22,13 +22,13 @@ pub struct NewActor<'a> {
     pub created_at: NaiveDateTime,
 }
 
-pub fn upsert_new_instance_actor(
+pub fn insert_new_instance_actor(
     conn: &mut SqliteConnection,
     inst_name: &str,
     domain: &str,
     tls: bool,
 ) -> DbResult<Actor> {
-    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Application, tls, None, true)?;
+    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Application, tls, None)?;
     Ok(actor)
 }
 
@@ -39,7 +39,7 @@ pub fn insert_new_person_actor(
     tls: bool,
     inst_id: i32,
 ) -> DbResult<Actor> {
-    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Person, tls, Some(inst_id), false)?;
+    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Person, tls, Some(inst_id))?;
     Ok(actor)
 }
 
@@ -50,7 +50,7 @@ pub fn insert_new_group_actor(
     tls: bool,
     inst_id: i32,
 ) -> DbResult<Actor> {
-    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Group, tls, Some(inst_id), false)?;
+    let actor = insert_new_actor(conn, inst_name, domain, ActorType::Group, tls, Some(inst_id))?;
     Ok(actor)
 }
 
@@ -61,7 +61,6 @@ pub fn insert_new_actor(
     type_of_actor: ActorType,
     tls: bool,
     id_of_instance: Option<i32>,
-    upsert: bool,
 ) -> DbResult<Actor> {
     let keys = KeyPair::new().map_err(|e| -> String { format!("create keys: {}", e) })?;
     let iri_set = IriSet::new(user_name, domain, tls);
@@ -80,17 +79,6 @@ pub fn insert_new_actor(
         instance_id: id_of_instance,
         created_at: Utc::now().naive_utc(),
     };
-
-    if upsert {
-        use crate::db::schema::actors::dsl::*;
-        let actor = diesel::insert_into(actors)
-            .values(&new_actor)
-            .returning(Actor::as_returning())
-            .on_conflict(actor_iri)
-            .do_nothing()
-            .get_result(conn)?;
-        return Ok(actor)
-    }
 
     use crate::db::schema::actors::dsl::*;
     let actor = diesel::insert_into(actors)

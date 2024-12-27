@@ -1,9 +1,9 @@
 use crate::db::instances::Instance;
 use chrono::{NaiveDateTime, Utc};
 use diesel::{
-    Connection, Insertable, QueryResult, RunQueryDsl, SelectableHelper, SqliteConnection,
+    Connection, Insertable, RunQueryDsl, SelectableHelper, SqliteConnection,
 };
-use crate::db::actors::create::upsert_new_instance_actor;
+use crate::db::actors::create::insert_new_instance_actor;
 use crate::db::actors::read::exists_instance_actor;
 use crate::db::error::DbResult;
 use crate::db::instances::read::find_instance_by_actor_iri;
@@ -35,8 +35,8 @@ pub fn upsert_new_instance(
         }
 
 
-        let new_actor = upsert_new_instance_actor(conn, name, domain, tls)
-            .map_err(|e| -> String { format!("upsert new inst actor: {}", e) })?;
+        let new_actor = insert_new_instance_actor(conn, name, domain, tls)
+            .map_err(|e| -> String { format!("insert new inst actor: {}", e) })?;
 
         let new_instance = NewInstance {
             actor_id: new_actor.id,
