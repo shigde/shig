@@ -2,10 +2,12 @@ use crate::db::actors::read::find_actor_by_actor_iri;
 use crate::db::error::DbResult;
 use crate::db::instances::Instance;
 use crate::util::iri::build_actor_iri;
-use diesel::{BelongingToDsl, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{select, BelongingToDsl, EqAll, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::dsl::exists;
+use crate::db::actors::Actor;
 
 #[allow(dead_code)]
-pub fn find_instance_by_actor(
+pub fn find_instance_by_domain(
     conn: &mut SqliteConnection,
     name: &str,
     domain: &str,
@@ -23,6 +25,22 @@ pub fn find_instance_by_actor_iri(conn: &mut SqliteConnection, iri: &str) -> DbR
     let inst = Instance::belonging_to(&actor)
         .select(Instance::as_select())
         .first(conn)?;
+
+    Ok(inst)
+}
+
+pub fn exists_home_instance(conn: &mut SqliteConnection) -> DbResult<bool> {
+    use crate::db::schema::instances::dsl::*;
+    let exists = select(exists(instances.filter(is_home.eq_all(true)))).get_result(conn)?;
+    Ok(exists)
+}
+
+pub fn find_home_instance(conn: &mut SqliteConnection) -> DbResult<Instance> {
+    use crate::db::schema::instances;
+    let inst = instances::table
+        .filter(instances::is_home.eq_all(true))
+        .select(Instance::as_select())
+        .get_result(conn)?;
 
     Ok(inst)
 }

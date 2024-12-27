@@ -13,7 +13,7 @@ pub fn find_actor_by_actor_iri(conn: &mut SqliteConnection, iri: &str) -> QueryR
     Ok(actor)
 }
 
-pub fn exists_instance_actor(conn: &mut SqliteConnection, iri: &str) -> DbResult<bool> {
+pub fn exists_actor(conn: &mut SqliteConnection, iri: &str) -> DbResult<bool> {
     use crate::db::schema::actors::dsl::*;
     let exists = select(exists(actors.filter(actor_iri.eq_all(iri)))).get_result(conn)?;
     Ok(exists)

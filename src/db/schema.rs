@@ -24,6 +24,7 @@ diesel::table! {
     instances (id) {
         id -> Integer,
         actor_id -> Integer,
+        is_home -> Bool,
         created_at -> Timestamp,
         updated_at -> Nullable<Timestamp>,
     }

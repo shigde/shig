@@ -1,5 +1,5 @@
 pub mod create;
-mod read;
+pub mod read;
 
 use crate::db::actors::Actor;
 use crate::db::schema::instances;
@@ -12,6 +12,7 @@ use diesel::prelude::*;
 pub struct Instance {
     pub id: i32,
     pub actor_id: i32,
+    pub is_home: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: Option<NaiveDateTime>,
 }

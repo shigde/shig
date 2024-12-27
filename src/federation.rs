@@ -20,7 +20,7 @@ pub fn create_server_instance(
     cfg: FederationConfig,
 ) -> FederationResult<()> {
     if cfg.enable {
-        upsert_new_instance(conn, cfg.instance.as_str(), cfg.domain.as_str(), cfg.tls)
+        upsert_new_instance(conn, cfg.instance.as_str(), true, cfg.domain.as_str(), cfg.tls)
             .map_err(|e| -> String { format!("upsert new instance: {}", e) })?;
         Ok(())
     } else {

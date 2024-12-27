@@ -9,7 +9,7 @@ pub struct DbError {
 }
 
 impl DbError {
-    fn new(msg: String) -> DbError {
+    pub fn new(msg: String) -> DbError {
         DbError { details: msg }
     }
 }
