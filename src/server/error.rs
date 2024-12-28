@@ -1,12 +1,13 @@
+use crate::db::error::DbError;
+use crate::federation::error::FederationError;
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::Error as IoError;
-use crate::federation::error::FederationError;
 
 pub type ServerResult<T> = Result<T, ServerError>;
 
 #[derive(Debug)]
-pub struct  ServerError {
+pub struct ServerError {
     details: String,
 }
 
@@ -57,7 +58,6 @@ impl From<Box<dyn StdError + Send + Sync>> for ServerError {
     }
 }
 
-
 impl From<openssl::error::ErrorStack> for ServerError {
     fn from(e: openssl::error::ErrorStack) -> Self {
         ServerError::new(e.to_string())
@@ -66,6 +66,12 @@ impl From<openssl::error::ErrorStack> for ServerError {
 
 impl From<FederationError> for ServerError {
     fn from(e: FederationError) -> Self {
+        ServerError::new(e.to_string())
+    }
+}
+
+impl From<DbError> for ServerError {
+    fn from(e: DbError) -> Self {
         ServerError::new(e.to_string())
     }
 }

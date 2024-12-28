@@ -1,13 +1,16 @@
 use std::error::Error as StdError;
 use std::fmt;
 
+#[allow(dead_code)]
 pub type FederationResult<T> = Result<T, FederationError>;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FederationError {
     details: String,
 }
 
+#[allow(dead_code)]
 impl FederationError {
     #[inline(always)]
     fn new(msg: String) -> FederationError {

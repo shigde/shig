@@ -4,7 +4,6 @@ use crate::db::instances::Instance;
 use crate::util::iri::build_actor_iri;
 use diesel::{select, BelongingToDsl, EqAll, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
 use diesel::dsl::exists;
-use crate::db::actors::Actor;
 
 #[allow(dead_code)]
 pub fn find_instance_by_domain(
