@@ -13,6 +13,9 @@ pub struct Instance {
     pub id: i32,
     pub actor_id: i32,
     pub is_home: bool,
+    pub domain: String,
+    pub tls: bool,
+    pub token: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: Option<NaiveDateTime>,
 }

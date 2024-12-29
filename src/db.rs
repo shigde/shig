@@ -5,6 +5,7 @@ pub mod users;
 pub mod user_roles;
 pub mod error;
 pub mod fixtures;
+mod channels;
 
 use std::error::Error;
 use diesel::prelude::*;

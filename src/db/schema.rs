@@ -21,10 +21,27 @@ diesel::table! {
 }
 
 diesel::table! {
+    channels (id) {
+        id -> Integer,
+        user_id -> Integer,
+        actor_id -> Integer,
+        name -> Text,
+        description -> Nullable<Text>,
+        support -> Nullable<Text>,
+        public -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
     instances (id) {
         id -> Integer,
         actor_id -> Integer,
         is_home -> Bool,
+        domain -> Text,
+        tls -> Bool,
+        token -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Nullable<Timestamp>,
     }
@@ -52,12 +69,15 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(channels -> actors (actor_id));
+diesel::joinable!(channels -> users (user_id));
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(users -> actors (actor_id));
 diesel::joinable!(users -> user_roles (user_role_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     actors,
+    channels,
     instances,
     user_roles,
     users,

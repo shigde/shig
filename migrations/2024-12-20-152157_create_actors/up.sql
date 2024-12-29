@@ -16,3 +16,6 @@ create table actors
     created_at         TIMESTAMP      NOT NULL,
     updated_at         TIMESTAMP
 );
+
+CREATE INDEX index_actors_preferred_username ON actors (preferred_username);
+CREATE INDEX index_actors_actor_iri ON actors (actor_iri);

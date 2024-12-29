@@ -1,3 +1,4 @@
+use bcrypt::{hash, DEFAULT_COST};
 use crate::db::actors::create::insert_new_instance_actor;
 use crate::db::actors::read::exists_actor;
 use crate::db::error::{DbResult};
@@ -12,6 +13,9 @@ use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, SqliteConnec
 pub struct NewInstance {
     pub actor_id: i32,
     pub is_home: bool,
+    pub domain: String,
+    pub tls: bool,
+    pub token: Option<String>,
     pub created_at: NaiveDateTime,
 }
 
@@ -21,6 +25,7 @@ pub fn upsert_new_instance(
     home: bool,
     domain: &str,
     tls: bool,
+    token_opt: Option<&str>,
 ) -> DbResult<Instance> {
     conn.transaction(move |conn| {
 
@@ -53,9 +58,20 @@ pub fn upsert_new_instance(
         let new_actor = insert_new_instance_actor(conn, name, domain, tls)
             .map_err(|e| -> String { format!("insert new inst actor: {}", e) })?;
 
+        let token = match token_opt {
+            Some(origin) => {
+                let hashed = hash(origin, DEFAULT_COST).unwrap();
+                Some(hashed)
+            },
+            None => None
+        };
+
         let new_instance = NewInstance {
             actor_id: new_actor.id,
             is_home: home,
+            domain: String::from(domain),
+            tls,
+            token,
             created_at: Utc::now().naive_utc(),
         };
 

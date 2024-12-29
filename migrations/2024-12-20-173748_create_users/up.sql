@@ -12,4 +12,9 @@ CREATE TABLE users
     updated_at   TIMESTAMP,
     FOREIGN KEY (actor_id) REFERENCES actors (id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (user_role_id) REFERENCES user_roles (id)
-)
+);
+
+CREATE INDEX index_user_name ON users (name);
+CREATE INDEX index_user_email ON users (email);
+CREATE INDEX index_user_user_uuid ON users (user_uuid);
+CREATE INDEX index_user_actor_id ON users (actor_id);

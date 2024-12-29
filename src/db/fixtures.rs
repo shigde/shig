@@ -20,6 +20,7 @@ pub fn create_home_instance(conn: &mut SqliteConnection, cfg: FederationConfig) 
             true,
             cfg.domain.as_str(),
             cfg.tls,
+            Some(cfg.token.as_str()),
         )
         .map_err(|e| -> String { format!("upsert new instance: {}", e) })?;
         Ok(())
