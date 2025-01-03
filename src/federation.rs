@@ -1,6 +1,6 @@
 pub mod error;
 
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 #[allow(dead_code)]
 #[derive(Deserialize, Clone)]

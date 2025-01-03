@@ -5,13 +5,13 @@ pub mod users;
 pub mod user_roles;
 pub mod error;
 pub mod fixtures;
-mod channels;
+pub mod channels;
 
 use std::error::Error;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool,  PoolError};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 

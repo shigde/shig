@@ -20,11 +20,12 @@ publish = false
 
 [dependencies]
 actix-web = { version = "4", features = ["openssl"] }
+actix-service = { version = "2.0.2" }
+jsonwebtoken = "9.3.0"
 tokio = { version = "1.41.1", features = ["full"] }
 clap = { version = "4.5.21", features = ["derive"] }
 toml = "0.5.2"
-serde = "1.0.136"
-serde_derive = "1.0.136"
+serde = { version = "1.0.136", features = ["derive"] }
 diesel = { version = "2.2.6", features = ["sqlite", "r2d2", "returning_clauses_for_sqlite_3_35", "chrono", "uuid"] }
 diesel_migrations = "2.2.0"
 dotenv = "0.15.0"
@@ -36,5 +37,5 @@ openssl = { version = "0.10", features = ["vendored"] }
 bcrypt = "0.16.0"
 rsa = "0.9.7"
 rand = "0.8.5"
-url = "2.5.4"
+futures = "0.3.31"
 

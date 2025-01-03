@@ -1,9 +1,12 @@
 pub mod create;
 pub mod read;
 
-use diesel::prelude::*;
-use chrono::{NaiveDateTime};
 use crate::db::actors::Actor;
+use bcrypt::verify;
+use chrono::NaiveDateTime;
+use diesel::prelude::*;
+use crate::db::error::DbResult;
+use crate::db::users::read::find_user_by_uuid;
 
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(Actor))]
@@ -21,9 +24,12 @@ pub struct User {
     pub updated_at: Option<NaiveDateTime>,
 }
 
-// impl User {
-//     pub fn verify(&self, password: String) -> bool {
-//         verify(password, &self.password).unwrap()
-//     }
-// }
+impl User {
+    pub fn verify(&self, password: String) -> bool {
+        verify(password.as_str(), &self.password).unwrap_or_else(|_| false)
+    }
 
+    pub fn from_uuid(conn: &mut SqliteConnection, uuid: String) -> DbResult<User> {
+        find_user_by_uuid(conn, uuid)
+    }
+}

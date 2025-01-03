@@ -6,9 +6,10 @@ use crate::server::error::ServerResult;
 
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use crate::db::fixtures::insert_fixtures;
 use crate::federation::{FederationConfig};
+use crate::models::auth::jwt::JWTConfig;
 use crate::server;
 
 #[get("/")]
@@ -22,6 +23,7 @@ pub struct ConfigFile {
     server: ServerConfig,
     federation: FederationConfig,
     database: DbConfig,
+    jwt: JWTConfig,
 }
 
 // Config struct holds to data from the `[config]` section.
@@ -48,11 +50,13 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
     insert_fixtures(&mut conn, cfg.federation.clone())?;
 
     let federation = Arc::new(Mutex::new(cfg.federation.clone()));
+    let jwt_config = Arc::new(Mutex::new(cfg.jwt.clone()));
 
     let svs = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(Arc::clone(&federation)))
+            .app_data(web::Data::new(Arc::clone(&jwt_config)))
             .service(index)
     });
 

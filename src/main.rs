@@ -5,6 +5,8 @@ mod db;
 mod server;
 mod util;
 mod federation;
+mod middleware;
+mod models;
 
 use clap::ArgAction;
 use clap::Parser;

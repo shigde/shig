@@ -16,3 +16,7 @@ tls = true
 
 [database]
 name = "database.db"
+
+[jwt]
+key = "session-auth-token-key"
+live_time = 120
