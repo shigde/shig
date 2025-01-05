@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ResponseBody<T> {
+pub struct Body<T> {
     pub message: String,
     pub data: T,
 }
 
-impl<T> ResponseBody<T> {
-    pub fn new(message: &str, data: T) -> ResponseBody<T> {
-        ResponseBody {
+impl<T> Body<T> {
+    pub fn new(message: &str, data: T) -> Body<T> {
+        Body {
             message: message.to_string(),
             data,
         }

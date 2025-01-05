@@ -27,3 +27,4 @@ config/prod.toml
 .deploy.sh
 .env
 database.db
+/.rest

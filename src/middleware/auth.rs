@@ -16,7 +16,7 @@ use crate::api::IGNORE_ROUTES;
 use crate::db::DbPool;
 use crate::models::auth::jwt::{decode_token, verify_token, JWTConfig};
 use crate::models::http::{EMPTY, MESSAGE_INVALID_TOKEN};
-use crate::models::http::response::ResponseBody;
+use crate::models::http::response::Body;
 
 pub struct Authentication;
 
@@ -102,7 +102,7 @@ where
         if !authenticate_pass {
             let (request, _pl) = req.into_parts();
             let response = HttpResponse::Unauthorized()
-                .json(ResponseBody::new(MESSAGE_INVALID_TOKEN, EMPTY))
+                .json(Body::new(MESSAGE_INVALID_TOKEN, EMPTY))
                 .map_into_right_body();
 
             return Box::pin(async { Ok(ServiceResponse::new(request, response)) });

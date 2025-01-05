@@ -1,16 +1,15 @@
 mod error;
 
-use std::sync::{Arc, Mutex};
 use crate::db::{build_pool, run_migrations, DbConfig};
 use crate::server::error::ServerResult;
 
+use crate::db::fixtures::insert_fixtures;
+use crate::federation::FederationConfig;
+use crate::models::auth::jwt::JWTConfig;
+use crate::{api, server};
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
-use crate::db::fixtures::insert_fixtures;
-use crate::federation::{FederationConfig};
-use crate::models::auth::jwt::JWTConfig;
-use crate::server;
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> impl Responder {
@@ -49,15 +48,13 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
 
     insert_fixtures(&mut conn, cfg.federation.clone())?;
 
-    let federation = Arc::new(Mutex::new(cfg.federation.clone()));
-    let jwt_config = Arc::new(Mutex::new(cfg.jwt.clone()));
-
     let svs = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
-            .app_data(web::Data::new(Arc::clone(&federation)))
-            .app_data(web::Data::new(Arc::clone(&jwt_config)))
-            .service(index)
+            .app_data(web::Data::new(cfg.federation.clone()))
+            .app_data(web::Data::new(cfg.jwt.clone()))
+            .wrap(crate::middleware::auth::Authentication)
+            .configure(api::config_services)
     });
 
     if cfg.server.tls.enabled {
