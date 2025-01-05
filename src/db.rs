@@ -6,6 +6,7 @@ pub mod user_roles;
 pub mod error;
 pub mod fixtures;
 pub mod channels;
+mod verification_tokens;
 
 use std::error::Error;
 use diesel::prelude::*;

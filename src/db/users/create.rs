@@ -8,6 +8,8 @@ use crate::db::users::User;
 
 use crate::db::channels::create::insert_new_channel;
 use crate::db::instances::Instance;
+use crate::db::verification_tokens::create::insert_new_verification_token;
+use crate::db::verification_tokens::SIGN_UP_VERIFICATION_TOKEN;
 use crate::util::domain::{build_default_channel_name, build_domain_name};
 use crate::util::iri::build_actor_iri;
 use bcrypt::{hash, DEFAULT_COST};
@@ -34,10 +36,16 @@ pub fn create_new_user(
     user_email: &str,
     user_pass: &str,
     user_role: Role,
-    domain: &str,
-    tls: bool,
+    is_active: bool,
 ) -> DbResult<User> {
     conn.transaction(move |conn| {
+        // Read home instance to get the domain.
+        let inst: Instance =
+            find_home_instance(conn).map_err(|e| -> String { format!("read instance: {}", e) })?;
+
+        let domain: &str = inst.domain.as_str();
+        let tls: bool = inst.tls;
+
         let iri = build_actor_iri(user_name, domain, tls);
 
         // Check actor already exists
@@ -50,10 +58,6 @@ pub fn create_new_user(
 
             return Ok(current_user);
         }
-
-        // Read home instance
-        let inst: Instance =
-            find_home_instance(conn).map_err(|e| -> String { format!("read instance: {}", e) })?;
 
         // Create a user actor
         let new_user_actor = insert_new_person_actor(conn, user_name, domain, tls, inst.id)
@@ -68,13 +72,15 @@ pub fn create_new_user(
             user_pass,
             user_role,
             new_user_actor.id,
+            is_active,
         )
         .map_err(|e| -> String { format!("insert new user: {}", e) })?;
 
         // Create a group actor
         let channel_name = build_default_channel_name(user_name);
-        let new_group_actor = insert_new_group_actor(conn, channel_name.as_str(), domain, tls, inst.id)
-            .map_err(|e| -> String { format!("insert new group actor: {}", e) })?;
+        let new_group_actor =
+            insert_new_group_actor(conn, channel_name.as_str(), domain, tls, inst.id)
+                .map_err(|e| -> String { format!("insert new group actor: {}", e) })?;
 
         // Create a default channel for new users
         let channel_domain_name = build_domain_name(channel_name.as_str(), domain);
@@ -85,6 +91,11 @@ pub fn create_new_user(
             new_group_actor.id,
         )
         .map_err(|e| -> String { format!("insert new group: {}", e) })?;
+
+        // In case of not default active user send a verification email
+        if !is_active {
+            let _ = insert_new_verification_token(conn, user.id, SIGN_UP_VERIFICATION_TOKEN)?;
+        }
 
         Ok(user)
     })
@@ -97,6 +108,7 @@ pub fn insert_new_user(
     user_pass: &str,
     user_role: Role,
     actor_id: i32,
+    is_active: bool,
 ) -> DbResult<User> {
     let hashed_pass: String = hash(user_pass, DEFAULT_COST).unwrap();
     let uid = Uuid::new_v4().to_string();
@@ -107,7 +119,7 @@ pub fn insert_new_user(
         email: user_email,
         password: hashed_pass.as_str(),
         user_role_id: user_role.val(),
-        active: true,
+        active: is_active,
         actor_id,
         created_at: Utc::now().naive_utc(),
     };

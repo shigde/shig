@@ -1,5 +1,6 @@
 pub mod create;
 pub mod read;
+pub mod update;
 
 use crate::db::actors::Actor;
 use bcrypt::verify;

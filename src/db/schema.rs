@@ -69,11 +69,24 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    verification_tokens (id) {
+        id -> Integer,
+        user_id -> Integer,
+        kind -> Text,
+        token -> Text,
+        verified -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Nullable<Timestamp>,
+    }
+}
+
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(users -> actors (actor_id));
 diesel::joinable!(users -> user_roles (user_role_id));
+diesel::joinable!(verification_tokens -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     actors,
@@ -81,4 +94,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     instances,
     user_roles,
     users,
+    verification_tokens,
 );

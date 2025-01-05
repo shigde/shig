@@ -31,7 +31,6 @@ pub fn create_home_instance(conn: &mut SqliteConnection, cfg: FederationConfig) 
 
 pub fn create_standard_users(conn: &mut SqliteConnection, cfg: FederationConfig) -> DbResult<()> {
     let domain = cfg.domain.as_str();
-    let tls = cfg.tls;
     let user_email = format!("user@{domain}");
     let admin_email = format!("admin@{domain}");
 
@@ -45,8 +44,7 @@ pub fn create_standard_users(conn: &mut SqliteConnection, cfg: FederationConfig)
             user_email.clone().as_str(),
             "user",
             Role::User,
-            domain,
-            tls,
+            true,
         )?;
     }
     if admin_exists == false {
@@ -56,8 +54,7 @@ pub fn create_standard_users(conn: &mut SqliteConnection, cfg: FederationConfig)
             admin_email.clone().as_str(),
             "admin",
             Role::Admin,
-            domain,
-            tls,
+            true,
         )?;
     }
     Ok(())
