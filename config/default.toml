@@ -3,13 +3,13 @@ port = 8080
 host = '127.0.0.1'
 
 [server.tls]
-enabled = false
+enabled = true
 cert = "config/certs/cert.pem"
 key = "config/certs/key.pem"
 
 [federation]
 enable = true
-domain = "localhost"
+domain = "localhost:8080"
 instance = "shig"
 token = "this-token-must-be-changed-in-public"
 tls = true
@@ -20,3 +20,10 @@ name = "database.db"
 [jwt]
 key = "session-auth-token-key"
 live_time = 120
+
+[mail]
+enable = false
+smtp_user = "from@gmail.com"
+smtp_pass = ""
+smtp_host = "smtp.gmail.com"
+smtp_port = "587"
