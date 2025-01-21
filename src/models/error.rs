@@ -7,6 +7,7 @@ use actix_web::{
 };
 use derive_more::{Display, Error};
 use log::error;
+use serde::de::StdError;
 use crate::models::http::MESSAGE_INTERNAL_SERVER_ERROR;
 
 #[derive(Debug, Display, Error)]
@@ -53,6 +54,20 @@ impl From<DbError> for ApiError {
 
 impl From<diesel::r2d2::PoolError> for ApiError {
     fn from(e: diesel::r2d2::PoolError) -> Self {
+        error!("{}", e );
+        ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() }
+    }
+}
+
+impl From<Box<dyn StdError + Send + Sync>> for ApiError {
+    fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
+        error!("{}", e );
+        ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() }
+    }
+}
+
+impl From<Box<dyn StdError>> for ApiError {
+    fn from(e: Box<dyn StdError>) -> Self {
         error!("{}", e );
         ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() }
     }

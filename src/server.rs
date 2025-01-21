@@ -6,6 +6,7 @@ use crate::server::error::ServerResult;
 use crate::db::fixtures::insert_fixtures;
 use crate::federation::FederationConfig;
 use crate::models::auth::jwt::JWTConfig;
+use crate::models::mail::config::MailConfig;
 use crate::{api, server};
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
@@ -23,6 +24,7 @@ pub struct ConfigFile {
     federation: FederationConfig,
     database: DbConfig,
     jwt: JWTConfig,
+    mail: MailConfig,
 }
 
 // Config struct holds to data from the `[config]` section.
@@ -53,6 +55,7 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(cfg.federation.clone()))
             .app_data(web::Data::new(cfg.jwt.clone()))
+            .app_data(web::Data::new(cfg.mail.clone()))
             .wrap(crate::middleware::auth::Authentication)
             .configure(api::config_services)
     });

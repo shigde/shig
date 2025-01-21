@@ -6,10 +6,10 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use crate::models::mail::activate_account::ActivateAccount;
 
-mod activate_account;
-mod config;
-mod forgotten_password;
-mod template;
+pub mod activate_account;
+pub mod config;
+pub mod forgotten_password;
+pub mod template;
 
 #[allow(dead_code)]
 pub struct Email {
@@ -79,7 +79,7 @@ impl Email {
     }
 
     #[allow(dead_code)]
-    async fn send_email(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send_email(&self) -> Result<(), Box<dyn std::error::Error>> {
         let html_template = self.template.render()?;
 
         let email = Message::builder()

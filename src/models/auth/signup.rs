@@ -1,10 +1,14 @@
-use actix_web::web;
-use serde::{Deserialize, Serialize};
-use crate::db::DbPool;
+use crate::db::instances::read::find_home_instance;
+use crate::db::instances::Instance;
 use crate::db::user_roles::Role;
 use crate::db::users::create::create_new_user;
 use crate::db::users::User;
+use crate::db::DbPool;
 use crate::models::error::ApiError;
+use crate::models::mail::config::MailConfig;
+use crate::models::mail::Email;
+use actix_web::web;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct SingUp {
@@ -15,9 +19,10 @@ pub struct SingUp {
 
 impl SingUp {
     #[allow(dead_code)]
-    pub fn user(
+    pub async fn user(
         pool: &web::Data<DbPool>,
         sing_up: &web::Json<SingUp>,
+        cgf: &web::Data<MailConfig>,
     ) -> Result<User, ApiError> {
         let mut conn = pool.get()?;
 
@@ -27,10 +32,22 @@ impl SingUp {
             sing_up.email.clone().as_str(),
             sing_up.pass.clone().as_str(),
             Role::User,
-            false
+            false,
         )?;
 
+        let link = String::from("/admin/users/signup/");
+        let inst: Instance = find_home_instance(&mut conn)?;
 
+        let config = cgf.get_ref().clone();
+        let mail = Email::new_activate_account(
+            user.name.clone(),
+            user.email.clone(),
+            link,
+            inst.domain,
+            config,
+        );
+
+        mail.send_email().await?;
         Ok(user)
     }
 }

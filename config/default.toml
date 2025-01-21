@@ -26,4 +26,4 @@ enable = false
 smtp_user = "from@gmail.com"
 smtp_pass = ""
 smtp_host = "smtp.gmail.com"
-smtp_port = "587"
+smtp_port = 587
