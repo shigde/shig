@@ -1,7 +1,7 @@
 CREATE TABLE verification_tokens
 (
     id         INTEGER        NOT NULL PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER UNIQUE NOT NULL,
+    user_id    INTEGER        NOT NULL,
     kind       VARCHAR        NOT NULL,
     token      VARCHAR UNIQUE NOT NULL,
     verified   BOOLEAN        NOT NULL DEFAULT 0,

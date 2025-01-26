@@ -1,7 +1,7 @@
-use crate::db::verification_tokens::update::verify_verification_token;
 use crate::db::DbPool;
 use crate::models::error::ApiError;
 
+use crate::db::users::update::activate_user_by_verification_token;
 use actix_web::web;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ impl Verify {
         let token = path.into_inner();
         let mut conn = pool.get()?;
 
-        let _ = verify_verification_token(&mut conn, token.as_str())?;
+        let _ = activate_user_by_verification_token(&mut conn, token.as_str())?;
         Ok(())
     }
 }

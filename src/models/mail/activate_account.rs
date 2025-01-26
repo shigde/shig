@@ -1,3 +1,4 @@
+use crate::models::mail::template::activate_account::ACTIVATE_ACCOUNT;
 use crate::models::mail::template::Template;
 use handlebars::Handlebars;
 
@@ -6,7 +7,7 @@ pub struct ActivateAccount {
     link: String,
     instance: String,
     template_name: String,
-    subject: String
+    subject: String,
 }
 
 impl ActivateAccount {
@@ -25,10 +26,7 @@ impl Template for ActivateAccount {
     fn render(&self) -> Result<String, handlebars::RenderError> {
         let template_name = self.template_name.as_str();
         let mut handlebars = Handlebars::new();
-        handlebars.register_template_file(
-            template_name,
-            &format!("./templates/{}.hbs", self.template_name),
-        )?;
+        handlebars.register_template_string(template_name, ACTIVATE_ACCOUNT)?;
 
         let data = serde_json::json!({
             "user": &self.user,

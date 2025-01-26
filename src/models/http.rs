@@ -27,6 +27,7 @@ pub const MESSAGE_LOGOUT_SUCCESS: &str = "Logout successfully";
 pub const MESSAGE_PROCESS_TOKEN_ERROR: &str = "Error while processing token";
 pub const MESSAGE_INVALID_TOKEN: &str = "Invalid token, please login again";
 pub const MESSAGE_INTERNAL_SERVER_ERROR: &str = "Internal Server Error";
+pub const MESSAGE_NOT_FOUND: &str = "Not found";
 
 
 // Bad request messages

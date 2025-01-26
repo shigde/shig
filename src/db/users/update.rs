@@ -1,16 +1,21 @@
-use diesel::{EqAll, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
 use crate::db::error::DbResult;
 use crate::db::users::User;
+use crate::db::verification_tokens::update::verify_verification_token;
+use diesel::{Connection, EqAll, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
 
-#[allow(dead_code)]
-pub fn activate_user(conn: &mut SqliteConnection, user_id: i32) -> DbResult<User> {
+pub fn activate_user_by_verification_token(
+    conn: &mut SqliteConnection,
+    token: &str,
+) -> DbResult<User> {
+    conn.transaction(move |conn| {
+        let verification_token = verify_verification_token(conn, token)?;
 
-    use crate::db::schema::users::dsl::users;
-    use crate::db::schema::users::active;
-    let updated_user = diesel::update(users.find(user_id))
-        .set(active.eq_all(true))
-        .returning(User::as_returning())
-        .get_result(conn)?;
-
-    Ok(updated_user)
+        use crate::db::schema::users::active;
+        use crate::db::schema::users::dsl::users;
+        let updated_user = diesel::update(users.find(verification_token.user_id))
+            .set(active.eq_all(true))
+            .returning(User::as_returning())
+            .get_result(conn)?;
+        Ok(updated_user)
+    })
 }

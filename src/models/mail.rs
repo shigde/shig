@@ -83,11 +83,7 @@ impl Email {
         let html_template = self.template.render()?;
 
         let email = Message::builder()
-            .to(
-                format!("{} <{}>", self.to_user.as_str(), self.to_email.as_str())
-                    .parse()
-                    .unwrap(),
-            )
+            .to(format!("{} <{}>", self.to_user.as_str(), self.to_email.as_str()).parse()?)
             .reply_to(self.from.as_str().parse().unwrap())
             .from(self.from.as_str().parse().unwrap())
             .subject(self.template.get_subject())

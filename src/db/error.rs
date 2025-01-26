@@ -59,12 +59,18 @@ impl From<diesel::result::Error> for DbError {
 
 impl From<Box<dyn StdError + Send + Sync>> for DbError {
     fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
+        if e.to_string().contains("Record not found") {
+            return DbError::new(e.to_string(), DbErrorKind::NotFound)
+        }
         DbError::new(e.to_string(), DbErrorKind::Internal)
     }
 }
 
 impl From<String> for DbError {
     fn from(e: String) -> Self {
+        if e.to_string().contains("Record not found") {
+            return DbError::new(e.to_string(), DbErrorKind::NotFound)
+        }
         DbError::new(e.clone(), DbErrorKind::Internal)
     }
 }

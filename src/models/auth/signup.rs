@@ -10,6 +10,7 @@ use crate::models::mail::config::MailConfig;
 use crate::models::mail::Email;
 use actix_web::web;
 use serde::{Deserialize, Serialize};
+use crate::util::domain::split_domain_name;
 
 #[derive(Serialize, Deserialize)]
 pub struct SingUp {
@@ -35,13 +36,20 @@ impl SingUp {
             false,
         )?;
 
+        if user.active {
+            // do nothing if active user already exists
+            return Ok(user);
+        }
+
         let token = find_sing_up_verification_token(&mut conn, user.id)?;
         let inst: Instance = find_home_instance(&mut conn)?;
         let link = format!("{}/api/auth/verify/{}", inst.get_base_url(), token.token);
 
+        let (user_name, _) = split_domain_name(user.name.as_str());
+
         let config = cgf.get_ref().clone();
         let mail = Email::new_activate_account(
-            user.name.clone(),
+            user_name,
             user.email.clone(),
             link,
             inst.domain,

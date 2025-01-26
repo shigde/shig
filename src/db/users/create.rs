@@ -52,49 +52,53 @@ pub fn create_new_user(
         let actor_exists = exists_actor(conn, iri.as_str())
             .map_err(|e| -> String { format!("checking user actor: {}", e) })?;
 
+        let user: User;
+
         if actor_exists {
-            let current_user = find_user_by_actor_iri(conn, iri.as_str())
+            user = find_user_by_actor_iri(conn, iri.as_str())
                 .map_err(|e| -> String { format!("reading existing user: {}", e) })?;
+            if user.active {
+                return Ok(user);
+            }
+        } else {
+            // Create a user actor
+            let new_user_actor = insert_new_person_actor(conn, user_name, domain, tls, inst.id)
+                .map_err(|e| -> String { format!("insert new user actor: {}", e) })?;
 
-            return Ok(current_user);
+            // Create a user
+            let user_domain_name = build_domain_name(user_name, domain);
+            user = insert_new_user(
+                conn,
+                user_domain_name.as_str(),
+                user_email,
+                user_pass,
+                user_role,
+                new_user_actor.id,
+                is_active,
+            )
+            .map_err(|e| -> String { format!("insert new user: {}", e) })?;
+
+            // Create a group actor
+            let channel_name = build_default_channel_name(user_name);
+            let new_group_actor =
+                insert_new_group_actor(conn, channel_name.as_str(), domain, tls, inst.id)
+                    .map_err(|e| -> String { format!("insert new group actor: {}", e) })?;
+
+            // Create a default channel for new users
+            let channel_domain_name = build_domain_name(channel_name.as_str(), domain);
+            let _ = insert_new_channel(
+                conn,
+                channel_domain_name.as_str(),
+                user.id,
+                new_group_actor.id,
+            )
+            .map_err(|e| -> String { format!("insert new group: {}", e) })?;
         }
-
-        // Create a user actor
-        let new_user_actor = insert_new_person_actor(conn, user_name, domain, tls, inst.id)
-            .map_err(|e| -> String { format!("insert new user actor: {}", e) })?;
-
-        // Create a user
-        let user_domain_name = build_domain_name(user_name, domain);
-        let user = insert_new_user(
-            conn,
-            user_domain_name.as_str(),
-            user_email,
-            user_pass,
-            user_role,
-            new_user_actor.id,
-            is_active,
-        )
-        .map_err(|e| -> String { format!("insert new user: {}", e) })?;
-
-        // Create a group actor
-        let channel_name = build_default_channel_name(user_name);
-        let new_group_actor =
-            insert_new_group_actor(conn, channel_name.as_str(), domain, tls, inst.id)
-                .map_err(|e| -> String { format!("insert new group actor: {}", e) })?;
-
-        // Create a default channel for new users
-        let channel_domain_name = build_domain_name(channel_name.as_str(), domain);
-        let _ = insert_new_channel(
-            conn,
-            channel_domain_name.as_str(),
-            user.id,
-            new_group_actor.id,
-        )
-        .map_err(|e| -> String { format!("insert new group: {}", e) })?;
 
         // In case of not default active user send a verification email
         if !is_active {
-            let _ = insert_new_verification_token(conn, user.id, SIGN_UP_VERIFICATION_TOKEN)?;
+            let _ = insert_new_verification_token(conn, user.id, SIGN_UP_VERIFICATION_TOKEN)
+                .map_err(|e| -> String { format!("insert new verification token: {}", e) })?;
         }
 
         Ok(user)

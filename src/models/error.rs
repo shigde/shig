@@ -8,7 +8,7 @@ use actix_web::{
 use derive_more::{Display, Error};
 use log::error;
 use serde::de::StdError;
-use crate::models::http::MESSAGE_INTERNAL_SERVER_ERROR;
+use crate::models::http::{MESSAGE_INTERNAL_SERVER_ERROR, MESSAGE_NOT_FOUND};
 
 #[derive(Debug, Display, Error)]
 pub enum ApiError {
@@ -46,7 +46,7 @@ impl From<DbError> for ApiError {
     fn from(e: DbError) -> Self {
         error!("{}", e );
         match e.kind() {
-            DbErrorKind::NotFound => ApiError::NotFound { error_message: "".to_string() },
+            DbErrorKind::NotFound => ApiError::NotFound { error_message: MESSAGE_NOT_FOUND.to_string() },
             _ => ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() },
         }
     }
@@ -62,6 +62,9 @@ impl From<diesel::r2d2::PoolError> for ApiError {
 impl From<Box<dyn StdError + Send + Sync>> for ApiError {
     fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
         error!("{}", e );
+        if e.to_string().contains("Record not found") {
+            return ApiError::NotFound { error_message: MESSAGE_NOT_FOUND.to_string() }
+        }
         ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() }
     }
 }
@@ -69,6 +72,9 @@ impl From<Box<dyn StdError + Send + Sync>> for ApiError {
 impl From<Box<dyn StdError>> for ApiError {
     fn from(e: Box<dyn StdError>) -> Self {
         error!("{}", e );
+        if e.to_string().contains("Record not found") {
+            return ApiError::NotFound { error_message: MESSAGE_NOT_FOUND.to_string() }
+        }
         ApiError::InternalServerError { error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string() }
     }
 }

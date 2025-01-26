@@ -1,3 +1,4 @@
+use crate::models::mail::template::forgotten_password::FORGOTTEN_PASSWORD;
 use crate::models::mail::template::Template;
 use handlebars::Handlebars;
 
@@ -6,7 +7,7 @@ pub struct ForgottenPassword {
     link: String,
     instance: String,
     template_name: String,
-    subject: String
+    subject: String,
 }
 
 impl ForgottenPassword {
@@ -16,7 +17,7 @@ impl ForgottenPassword {
             link,
             instance,
             template_name: String::from("forgotten_password"),
-            subject: String::from("Your password reset token (valid for only 10 minutes)")
+            subject: String::from("Your password reset token (valid for only 10 minutes)"),
         }
     }
 }
@@ -25,10 +26,7 @@ impl Template for ForgottenPassword {
     fn render(&self) -> Result<String, handlebars::RenderError> {
         let template_name = self.template_name.as_str();
         let mut handlebars = Handlebars::new();
-        handlebars.register_template_file(
-            template_name,
-            &format!("./templates/{}.hbs", self.template_name),
-        )?;
+        handlebars.register_template_string(template_name, FORGOTTEN_PASSWORD)?;
 
         let data = serde_json::json!({
             "user": &self.user,

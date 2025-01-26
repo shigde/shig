@@ -6,7 +6,6 @@ pub fn build_default_channel_name(name: &str) -> String {
     format!("channel_{}", name)
 }
 
-#[allow(dead_code)]
 pub fn split_domain_name(domain_name: &str) -> (String, String) {
     #[allow(unused_variables)]
     if let [name, domain, other @ ..] = &domain_name
