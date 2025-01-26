@@ -23,6 +23,7 @@ shig.iml
 
 ##
 # Project specific
+config/dev.toml
 config/prod.toml
 .deploy.sh
 .env

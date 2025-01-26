@@ -3,6 +3,7 @@ use crate::db::instances::Instance;
 use crate::db::user_roles::Role;
 use crate::db::users::create::create_new_user;
 use crate::db::users::User;
+use crate::db::verification_tokens::read::find_sing_up_verification_token;
 use crate::db::DbPool;
 use crate::models::error::ApiError;
 use crate::models::mail::config::MailConfig;
@@ -18,7 +19,6 @@ pub struct SingUp {
 }
 
 impl SingUp {
-    #[allow(dead_code)]
     pub async fn user(
         pool: &web::Data<DbPool>,
         sing_up: &web::Json<SingUp>,
@@ -35,8 +35,9 @@ impl SingUp {
             false,
         )?;
 
-        let link = String::from("/admin/users/signup/");
+        let token = find_sing_up_verification_token(&mut conn, user.id)?;
         let inst: Instance = find_home_instance(&mut conn)?;
+        let link = format!("{}/api/auth/verify/{}", inst.get_base_url(), token.token);
 
         let config = cgf.get_ref().clone();
         let mail = Email::new_activate_account(

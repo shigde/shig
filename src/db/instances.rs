@@ -3,7 +3,7 @@ pub mod read;
 
 use crate::db::actors::Actor;
 use crate::db::schema::instances;
-use chrono::{NaiveDateTime};
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
 
 #[derive(Queryable, Identifiable, Selectable, Associations, Debug, PartialEq)]
@@ -20,3 +20,9 @@ pub struct Instance {
     pub updated_at: Option<NaiveDateTime>,
 }
 
+impl Instance {
+    pub fn get_base_url(&self) -> String {
+        let http = if self.tls { "https" } else { "http" };
+        format!("{}://{}", http, self.domain)
+    }
+}
