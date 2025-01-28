@@ -1,13 +1,16 @@
 use crate::db::actors::create::{insert_new_group_actor, insert_new_person_actor};
 use crate::db::actors::read::exists_actor;
-use crate::db::error::DbResult;
+use crate::db::error::{DbError, DbErrorKind, DbResult};
 use crate::db::instances::read::find_home_instance;
 use crate::db::user_roles::Role;
-use crate::db::users::read::find_user_by_actor_iri;
-use crate::db::users::User;
+use crate::db::users::read::{
+    exists_user_by_email, find_user_by_actor_iri, is_active_user_by_email,
+};
+use crate::db::users::{User, USER_EMAIL_ALREADY_EXIST, USER_NAME_ALREADY_EXIST};
 
 use crate::db::channels::create::insert_new_channel;
 use crate::db::instances::Instance;
+use crate::db::users::delete::delete_user_by_email;
 use crate::db::verification_tokens::create::insert_new_verification_token;
 use crate::db::verification_tokens::SIGN_UP_VERIFICATION_TOKEN;
 use crate::util::domain::{build_default_channel_name, build_domain_name};
@@ -39,6 +42,26 @@ pub fn create_new_user(
     is_active: bool,
 ) -> DbResult<User> {
     conn.transaction(move |conn| {
+        // First check if email already in use
+        let user_email_exists = exists_user_by_email(conn, user_email)
+            .map_err(|e| -> String { format!("read user by email: {}", e) })?;
+
+        if user_email_exists {
+            let is_active_email = is_active_user_by_email(conn, user_email)
+                .map_err(|e| -> String { format!("read active user by email: {}", e) })?;
+
+            if is_active_email {
+                return Err(DbError::new(
+                    String::from(USER_EMAIL_ALREADY_EXIST),
+                    DbErrorKind::AlreadyExists,
+                ));
+            } else {
+                // clean up inactive user!!!
+                delete_user_by_email(conn, user_email)
+                    .map_err(|e| -> String { format!("delete in active user by email: {}", e) })?;
+            }
+        }
+
         // Read home instance to get the domain.
         let inst: Instance =
             find_home_instance(conn).map_err(|e| -> String { format!("read instance: {}", e) })?;
@@ -57,8 +80,16 @@ pub fn create_new_user(
         if actor_exists {
             user = find_user_by_actor_iri(conn, iri.as_str())
                 .map_err(|e| -> String { format!("reading existing user: {}", e) })?;
-            if user.active {
-                return Ok(user);
+
+            // Same username:
+            // On active user or
+            // user has different email even if note active
+            // we're stopping the process here.
+            if user.active || user.email != user_email {
+                return Err(DbError::new(
+                    String::from(USER_NAME_ALREADY_EXIST),
+                    DbErrorKind::AlreadyExists,
+                ));
             }
         } else {
             // Create a user actor

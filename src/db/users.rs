@@ -1,6 +1,7 @@
 pub mod create;
 pub mod read;
 pub mod update;
+mod delete;
 
 use crate::db::actors::Actor;
 use bcrypt::verify;
@@ -8,6 +9,9 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use crate::db::error::DbResult;
 use crate::db::users::read::find_user_by_uuid;
+
+pub const USER_EMAIL_ALREADY_EXIST: &str = "user email already exists";
+pub const USER_NAME_ALREADY_EXIST: &str = "username already exists";
 
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(Actor))]

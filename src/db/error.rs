@@ -13,6 +13,7 @@ pub struct DbError {
 pub enum DbErrorKind {
     NotFound,
     Internal,
+    AlreadyExists,
 }
 
 impl DbError {

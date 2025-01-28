@@ -1,5 +1,6 @@
 pub mod create;
 pub mod read;
+pub mod delete;
 
 use chrono::NaiveDateTime;
 use diesel::{Associations, Identifiable, Insertable, Queryable, Selectable};

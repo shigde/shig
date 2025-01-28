@@ -5,6 +5,7 @@ use crate::db::users::User;
 pub mod create;
 pub mod read;
 pub mod update;
+pub mod delete;
 
 #[allow(dead_code)]
 pub const FORGOTTEN_PASSWORD_VERIFICATION_TOKEN: &str = "forgotten_password";
