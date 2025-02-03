@@ -15,6 +15,7 @@ pub enum Role {
     Guest,
     Application,
     Service,
+    Organisation,
 }
 
 #[allow(dead_code)]
@@ -26,6 +27,7 @@ impl Role {
             Self::Guest => 3,
             Self::Application => 4,
             Self::Service => 5,
+            Self::Organisation => 6,
         }
     }
 }

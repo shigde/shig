@@ -14,4 +14,5 @@ INSERT INTO "user_roles" ("id", "name")
 VALUES (4, 'application');
 INSERT INTO "user_roles" ("id", "name")
 VALUES (5, 'service');
-
+INSERT INTO "user_roles" ("id", "name")
+VALUES (6, 'organisation');

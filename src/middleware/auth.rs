@@ -7,7 +7,7 @@ use actix_web::http::{
     Method,
 };
 use actix_web::web::Data;
-use actix_web::Error;
+use actix_web::{Error, HttpMessage};
 use actix_web::http::header::AUTHORIZATION;
 use actix_web::HttpResponse;
 use futures::future::{ok, LocalBoxFuture, Ready};
@@ -85,8 +85,10 @@ where
                                 let token = authen_str[6..authen_str.len()].trim();
                                 if let Ok(token_data) = decode_token(token.to_string(), jwt_config) {
                                     info!("Decoding token...");
-                                    if verify_token(&token_data, pool).is_ok() {
+                                    let session = verify_token(&token_data, pool);
+                                    if session.is_ok() {
                                         info!("Valid token");
+                                        req.extensions_mut().insert(session.unwrap());
                                         authenticate_pass = true;
                                     } else {
                                         error!("Invalid token");

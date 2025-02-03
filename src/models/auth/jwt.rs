@@ -1,12 +1,13 @@
 use crate::db::users::User;
 use crate::db::DbPool;
+use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
+use crate::models::http::MESSAGE_INTERNAL_SERVER_ERROR;
 use actix_web::http::header::HeaderValue;
 use actix_web::web;
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
-use crate::models::http::MESSAGE_INTERNAL_SERVER_ERROR;
 
 #[derive(Deserialize, Clone)]
 pub struct JWTConfig {
@@ -68,12 +69,11 @@ pub fn decode_token(
 pub fn verify_token(
     token_data: &TokenData<JWT>,
     pool: &web::Data<DbPool>,
-) -> Result<String, String> {
-    if User::from_uuid(&mut pool.get().unwrap(), token_data.claims.uuid.clone()).is_ok() {
-        Ok(token_data.claims.uuid.to_string())
-    } else {
-        Err("Invalid token".to_string())
-    }
+) -> Result<Session, String> {
+    let mut conn = pool.get().map_err(|_| "Failed to get db connection")?;
+    let user =
+        User::from_uuid(&mut conn, token_data.claims.uuid.clone()).map_err(|_| "Invalid token")?;
+    Ok(Session::create(user))
 }
 
 #[allow(dead_code)]
@@ -81,5 +81,5 @@ pub fn is_auth_header_valid(authen_header: &HeaderValue) -> bool {
     if let Ok(authen_str) = authen_header.to_str() {
         return authen_str.starts_with("bearer") || authen_str.starts_with("Bearer");
     }
-    return false;
+    false
 }
