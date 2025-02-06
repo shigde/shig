@@ -1,8 +1,9 @@
+use crate::db::instances::read::find_home_instance;
 use crate::db::users::read::find_user_by_email;
 use crate::db::DbPool;
-use crate::models::auth::jwt::{JWTConfig, JWTResponse, JWT};
+use crate::models::auth::jwt::{JWTConfig, JWTResponse, RefreshJWT, JWT};
 use crate::models::error::ApiError;
-use crate::models::http::{MESSAGE_LOGIN_FAILED};
+use crate::models::http::MESSAGE_LOGIN_FAILED;
 use actix_web::web;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,9 @@ impl Login {
             });
         }
 
+        let instance = find_home_instance(&mut conn)?;
         let jwt = JWT::generate_token(&user, cgf)?;
-        Ok(JWTResponse { jwt })
+        let refresh = RefreshJWT::generate_token(&user, instance.domain.clone(), cgf)?;
+        Ok(JWTResponse { jwt, refresh })
     }
 }

@@ -4,6 +4,7 @@ pub mod payload;
 // Messages
 #[allow(dead_code)]
 pub const MESSAGE_OK: &str = "ok";
+pub const MESSAGE_CREATED: &str = "created";
 #[allow(dead_code)]
 pub const MESSAGE_CAN_NOT_FETCH_DATA: &str = "Can not fetch data";
 #[allow(dead_code)]
@@ -28,6 +29,7 @@ pub const MESSAGE_PROCESS_TOKEN_ERROR: &str = "Error while processing token";
 pub const MESSAGE_INVALID_TOKEN: &str = "Invalid token, please login again";
 pub const MESSAGE_INTERNAL_SERVER_ERROR: &str = "Internal Server Error";
 pub const MESSAGE_NOT_FOUND: &str = "Not found";
+pub const MESSAGE_NOT_ACCEPTABLE: &str = "Not acceptable";
 
 
 // Bad request messages

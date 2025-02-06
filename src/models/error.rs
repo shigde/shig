@@ -31,6 +31,9 @@ pub enum ApiError {
 
     #[display(fmt = "{error_message}")]
     NotFound { error_message: String },
+
+    #[display(fmt = "{error_message}")]
+    NotAcceptable { error_message: String },
 }
 
 impl ApiError {
@@ -52,6 +55,7 @@ impl error::ResponseError for ApiError {
             ApiError::NotFound { .. } => StatusCode::NOT_FOUND,
             ApiError::Forbidden { .. } => StatusCode::FORBIDDEN,
             ApiError::Conflict { .. } => StatusCode::CONFLICT,
+            ApiError::NotAcceptable { .. } => StatusCode::NOT_ACCEPTABLE,
         }
     }
     fn error_response(&self) -> HttpResponse {

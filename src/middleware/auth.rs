@@ -14,7 +14,7 @@ use futures::future::{ok, LocalBoxFuture, Ready};
 use log::{error, info};
 use crate::api::IGNORE_ROUTES;
 use crate::db::DbPool;
-use crate::models::auth::jwt::{decode_token, verify_token, JWTConfig};
+use crate::models::auth::jwt::{decode_auth_token, verify_auth_token, JWTConfig};
 use crate::models::http::{EMPTY, MESSAGE_INVALID_TOKEN};
 use crate::models::http::response::Body;
 
@@ -83,9 +83,9 @@ where
                             if authen_str.starts_with("bearer") || authen_str.starts_with("Bearer") {
                                 info!("Parsing token...");
                                 let token = authen_str[6..authen_str.len()].trim();
-                                if let Ok(token_data) = decode_token(token.to_string(), jwt_config) {
+                                if let Ok(token_data) = decode_auth_token(token.to_string(), jwt_config) {
                                     info!("Decoding token...");
-                                    let session = verify_token(&token_data, pool);
+                                    let session = verify_auth_token(&token_data, pool);
                                     if session.is_ok() {
                                         info!("Valid token");
                                         req.extensions_mut().insert(session.unwrap());

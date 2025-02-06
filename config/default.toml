@@ -18,8 +18,9 @@ tls = true
 name = "database.db"
 
 [jwt]
-key = "session-auth-token-key"
-live_time = 120
+auth_token_key = "session-auth-token-key"
+refresh_token_key = "refresh-token-key-long-long"
+session_live_time = 86400 # 1day
 
 [mail]
 enable = false
