@@ -4,9 +4,7 @@ use crate::db::users::User;
 use diesel::dsl::exists;
 use diesel::prelude::*;
 
-use diesel::{
-    select, BelongingToDsl, QueryDsl, RunQueryDsl, SelectableHelper, PgConnection,
-};
+use diesel::{select, BelongingToDsl, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 
 pub fn find_user_by_actor_iri(conn: &mut PgConnection, iri: &str) -> DbResult<User> {
     let actor = find_actor_by_actor_iri(conn, iri)?;
@@ -33,6 +31,17 @@ pub fn find_user_by_email(conn: &mut PgConnection, needle_email: String) -> DbRe
     use crate::db::schema::users::email;
     let user = users
         .filter(email.eq(needle_email))
+        .select(User::as_select())
+        .first(conn)?;
+
+    Ok(user)
+}
+
+pub fn find_user_by_id(conn: &mut PgConnection, needle_id: i32) -> DbResult<User> {
+    use crate::db::schema::users::dsl::users;
+    use crate::db::schema::users::id;
+    let user = users
+        .filter(id.eq(needle_id))
         .select(User::as_select())
         .first(conn)?;
 

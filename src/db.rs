@@ -19,6 +19,7 @@ pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 #[derive(Deserialize, Clone)]
 pub struct DbConfig {
     pub connection: String,
+    #[allow(dead_code)]
     pub pool_size: i32,
 }
 
