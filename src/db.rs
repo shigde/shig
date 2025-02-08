@@ -14,21 +14,22 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use serde::Deserialize;
 use std::error::Error;
 
-pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
+pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct DbConfig {
-    pub name: String,
+    pub connection: String,
+    pub pool_size: i32,
 }
 
-pub fn build_pool(db_name: String) -> Result<DbPool, PoolError> {
-    let manager = ConnectionManager::<SqliteConnection>::new(db_name);
+pub fn build_pool(cfg: DbConfig) -> Result<DbPool, PoolError> {
+    let manager = ConnectionManager::<PgConnection>::new(cfg.connection);
     let pool = Pool::builder().build(manager)?;
     Ok(pool)
 }
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
-type DB = diesel::sqlite::Sqlite;
+type DB = diesel::pg::Pg;
 
 pub fn run_migrations(
     connection: &mut impl MigrationHarness<DB>,

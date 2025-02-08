@@ -2,82 +2,101 @@
 
 diesel::table! {
     actors (id) {
-        id -> Integer,
-        preferred_username -> Text,
-        actor_type -> Text,
-        actor_iri -> Text,
-        public_key -> Nullable<Text>,
-        private_key -> Nullable<Text>,
-        following_iri -> Nullable<Text>,
-        followers_iri -> Nullable<Text>,
-        inbox_iri -> Nullable<Text>,
-        outbox_iri -> Nullable<Text>,
-        shared_inbox_iri -> Nullable<Text>,
-        instance_id -> Nullable<Integer>,
+        id -> Int4,
+        #[max_length = 255]
+        preferred_username -> Varchar,
+        #[max_length = 40]
+        actor_type -> Varchar,
+        #[max_length = 2000]
+        actor_iri -> Varchar,
+        #[max_length = 5000]
+        public_key -> Nullable<Varchar>,
+        #[max_length = 5000]
+        private_key -> Nullable<Varchar>,
+        #[max_length = 2000]
+        following_iri -> Nullable<Varchar>,
+        #[max_length = 2000]
+        followers_iri -> Nullable<Varchar>,
+        #[max_length = 2000]
+        inbox_iri -> Nullable<Varchar>,
+        #[max_length = 2000]
+        outbox_iri -> Nullable<Varchar>,
+        #[max_length = 2000]
+        shared_inbox_iri -> Nullable<Varchar>,
+        instance_id -> Nullable<Int4>,
         remote_created_at -> Nullable<Timestamp>,
         created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
+        updated_at -> Timestamp,
     }
 }
 
 diesel::table! {
     channels (id) {
-        id -> Integer,
-        user_id -> Integer,
-        actor_id -> Integer,
-        name -> Text,
+        id -> Int4,
+        user_id -> Int4,
+        actor_id -> Int4,
+        name -> Varchar,
         description -> Nullable<Text>,
         support -> Nullable<Text>,
         public -> Bool,
         created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
+        updated_at -> Timestamp,
     }
 }
 
 diesel::table! {
     instances (id) {
-        id -> Integer,
-        actor_id -> Integer,
+        id -> Int4,
+        actor_id -> Int4,
         is_home -> Bool,
-        domain -> Text,
+        #[max_length = 255]
+        domain -> Varchar,
         tls -> Bool,
-        token -> Nullable<Text>,
+        #[max_length = 500]
+        token -> Nullable<Varchar>,
         created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
+        updated_at -> Timestamp,
     }
 }
 
 diesel::table! {
     user_roles (id) {
-        id -> Integer,
-        name -> Text,
+        id -> Int4,
+        #[max_length = 40]
+        name -> Varchar,
     }
 }
 
 diesel::table! {
     users (id) {
-        id -> Integer,
-        name -> Text,
-        email -> Text,
-        user_uuid -> Text,
-        user_role_id -> Integer,
-        password -> Text,
+        id -> Int4,
+        #[max_length = 255]
+        name -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        user_uuid -> Varchar,
+        user_role_id -> Int4,
+        #[max_length = 255]
+        password -> Varchar,
         active -> Bool,
-        actor_id -> Integer,
+        actor_id -> Int4,
         created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
+        updated_at -> Timestamp,
     }
 }
 
 diesel::table! {
     verification_tokens (id) {
-        id -> Integer,
-        user_id -> Integer,
-        kind -> Text,
-        token -> Text,
+        id -> Int4,
+        user_id -> Int4,
+        #[max_length = 255]
+        kind -> Varchar,
+        #[max_length = 255]
+        token -> Varchar,
         verified -> Bool,
         created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
+        updated_at -> Timestamp,
     }
 }
 

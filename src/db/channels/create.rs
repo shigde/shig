@@ -1,7 +1,7 @@
 use crate::db::channels::Channel;
 use crate::db::error::DbResult;
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{Insertable, RunQueryDsl, SelectableHelper, PgConnection};
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::channels)]
@@ -16,7 +16,7 @@ pub struct NewChannel<'a> {
 }
 
 pub fn insert_new_channel(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     name: &str,
     user_id: i32,
     actor_id: i32,

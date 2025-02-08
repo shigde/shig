@@ -4,11 +4,11 @@ use crate::db::verification_tokens::{
 };
 use diesel::dsl::exists;
 use diesel::prelude::*;
-use diesel::{select, ExpressionMethods, RunQueryDsl, SqliteConnection};
+use diesel::{select, ExpressionMethods, RunQueryDsl, PgConnection};
 
 #[allow(dead_code)]
 pub fn exists_sing_up_verification_tokens(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     verify_token: &str,
 ) -> DbResult<bool> {
     use crate::db::schema::verification_tokens;
@@ -25,7 +25,7 @@ pub fn exists_sing_up_verification_tokens(
 
 #[allow(dead_code)]
 pub fn exists_forgotten_pass_verification_tokens(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     verify_token: &str,
 ) -> DbResult<bool> {
     use crate::db::schema::verification_tokens;
@@ -41,7 +41,7 @@ pub fn exists_forgotten_pass_verification_tokens(
 }
 
 pub fn find_sing_up_verification_token(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     user_id: i32,
 ) -> DbResult<VerificationToken> {
     use crate::db::schema::verification_tokens;

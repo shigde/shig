@@ -4,9 +4,10 @@ pub mod delete;
 
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use diesel::QueryId;
 
-#[derive(Queryable, Identifiable, Selectable, Debug, PartialEq)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Queryable, QueryableByName, QueryId, Identifiable, Selectable, Debug, PartialEq)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::actors)]
 pub struct Actor {
     pub id: i32,
@@ -23,7 +24,7 @@ pub struct Actor {
     pub instance_id: Option<i32>,
     pub remote_created_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: NaiveDateTime,
 }
 
 #[allow(dead_code)]

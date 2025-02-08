@@ -4,15 +4,15 @@ use crate::db::user_roles::Role;
 use crate::db::users::create::create_new_user;
 use crate::db::users::read::exists_user_by_email;
 use crate::federation::FederationConfig;
-use diesel::SqliteConnection;
+use diesel::PgConnection;
 
-pub fn insert_fixtures(conn: &mut SqliteConnection, cfg: FederationConfig) -> DbResult<()> {
+pub fn insert_fixtures(conn: &mut PgConnection, cfg: FederationConfig) -> DbResult<()> {
     create_home_instance(conn, cfg.clone())?;
     create_standard_users(conn, cfg.clone())?;
     Ok(())
 }
 
-pub fn create_home_instance(conn: &mut SqliteConnection, cfg: FederationConfig) -> DbResult<()> {
+pub fn create_home_instance(conn: &mut PgConnection, cfg: FederationConfig) -> DbResult<()> {
     if cfg.enable {
         upsert_new_instance(
             conn,
@@ -29,7 +29,7 @@ pub fn create_home_instance(conn: &mut SqliteConnection, cfg: FederationConfig) 
     }
 }
 
-pub fn create_standard_users(conn: &mut SqliteConnection, cfg: FederationConfig) -> DbResult<()> {
+pub fn create_standard_users(conn: &mut PgConnection, cfg: FederationConfig) -> DbResult<()> {
     let domain = cfg.domain.as_str();
     let user_email = format!("user@{domain}");
     let admin_email = format!("admin@{domain}");

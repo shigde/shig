@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use crate::db::verification_tokens::VerificationToken;
 use diesel::prelude::*;
-use diesel::{RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{RunQueryDsl, SelectableHelper, PgConnection};
 
 #[allow(dead_code)]
 pub fn verify_verification_token(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     verify_token: &str,
 ) -> DbResult<VerificationToken> {
     use crate::db::schema::verification_tokens::dsl::verification_tokens;

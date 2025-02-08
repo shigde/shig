@@ -6,7 +6,7 @@ use crate::db::instances::read::{exists_home_instance, find_home_instance, find_
 use crate::db::instances::Instance;
 use crate::util::iri::build_actor_iri;
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, PgConnection};
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::instances)]
@@ -20,7 +20,7 @@ pub struct NewInstance {
 }
 
 pub fn upsert_new_instance(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     name: &str,
     home: bool,
     domain: &str,

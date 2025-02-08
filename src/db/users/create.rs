@@ -17,7 +17,7 @@ use crate::util::domain::{build_default_channel_name, build_domain_name};
 use crate::util::iri::build_actor_iri;
 use bcrypt::{hash, DEFAULT_COST};
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, PgConnection};
 use uuid::Uuid;
 
 #[derive(Insertable, Debug)]
@@ -34,7 +34,7 @@ pub struct NewUser<'a> {
 }
 
 pub fn create_new_user(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     user_name: &str,
     user_email: &str,
     user_pass: &str,
@@ -137,7 +137,7 @@ pub fn create_new_user(
 }
 
 pub fn insert_new_user(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     user_name: &str,
     user_email: &str,
     user_pass: &str,

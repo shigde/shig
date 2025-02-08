@@ -1,5 +1,5 @@
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{Insertable, RunQueryDsl, SelectableHelper, PgConnection};
 use uuid::Uuid;
 use crate::db::error::DbResult;
 use crate::db::verification_tokens::VerificationToken;
@@ -15,7 +15,7 @@ pub struct NewVerificationToken<'a> {
 }
 
 pub fn insert_new_verification_token(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     user_id: i32,
     kind: &str,
 ) -> DbResult<VerificationToken> {

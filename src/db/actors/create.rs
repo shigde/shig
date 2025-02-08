@@ -1,11 +1,12 @@
 use crate::db::actors::{Actor, ActorType};
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, RunQueryDsl, Selectable, SelectableHelper, SqliteConnection};
+use diesel::{Insertable, RunQueryDsl, Selectable, SelectableHelper, PgConnection};
 use crate::db::error::DbResult;
 use crate::util::iri::IriSet;
 use crate::util::rsa::{KeyPair};
+use diesel::prelude::*;
 
-#[derive(Insertable, Selectable, Debug)]
+#[derive(Insertable, Queryable, Selectable, Debug)]
 #[diesel(table_name = crate::db::schema::actors)]
 pub struct NewActor<'a> {
     pub preferred_username:  &'a str,
@@ -23,7 +24,7 @@ pub struct NewActor<'a> {
 }
 
 pub fn insert_new_instance_actor(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     inst_name: &str,
     domain: &str,
     tls: bool,
@@ -33,7 +34,7 @@ pub fn insert_new_instance_actor(
 }
 
 pub fn insert_new_person_actor(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     inst_name: &str,
     domain: &str,
     tls: bool,
@@ -45,7 +46,7 @@ pub fn insert_new_person_actor(
 
 #[allow(dead_code)]
 pub fn insert_new_group_actor(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     inst_name: &str,
     domain: &str,
     tls: bool,
@@ -56,7 +57,7 @@ pub fn insert_new_group_actor(
 }
 
 pub fn insert_new_actor(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     user_name:  &str,
     domain:  &str,
     type_of_actor: ActorType,
@@ -81,10 +82,11 @@ pub fn insert_new_actor(
         created_at: Utc::now().naive_utc(),
     };
 
-    use crate::db::schema::actors::dsl::*;
-    let actor = diesel::insert_into(actors)
+    use crate::db::schema::actors;
+    let actor = diesel::insert_into(actors::table)
         .values(&new_actor)
         .returning(Actor::as_returning())
         .get_result::<Actor>(conn)?;
+
     Ok(actor)
 }

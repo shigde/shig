@@ -1,8 +1,8 @@
-use diesel::{RunQueryDsl, SqliteConnection};
+use diesel::{RunQueryDsl, PgConnection};
 use crate::db::error::DbResult;
 use diesel::prelude::*;
 
-pub fn delete_verification_token_by_user_id(conn: &mut SqliteConnection, find_user_id: i32) -> DbResult<()> {
+pub fn delete_verification_token_by_user_id(conn: &mut PgConnection, find_user_id: i32) -> DbResult<()> {
     use crate::db::schema::verification_tokens::dsl::verification_tokens;
     use crate::db::schema::verification_tokens::user_id;
 

@@ -44,7 +44,7 @@ pub struct TlsConfig {
 
 pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
     // Set up the connection pool
-    let pool = build_pool(cfg.database.name.clone())?;
+    let pool = build_pool(cfg.database.clone())?;
     let mut conn = pool.get().unwrap();
     run_migrations(&mut conn).map_err(server::error::ServerError::from)?;
 

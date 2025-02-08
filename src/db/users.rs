@@ -16,6 +16,7 @@ pub const USER_NAME_ALREADY_EXIST: &str = "username already exists";
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(Actor))]
 #[diesel(table_name = crate::db::schema::users)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct User {
     pub id: i32,
     pub name: String,
@@ -26,7 +27,7 @@ pub struct User {
     pub active: bool,
     pub actor_id: i32,
     pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: NaiveDateTime,
 }
 
 impl User {
@@ -34,7 +35,7 @@ impl User {
         verify(password.as_str(), &self.password).unwrap_or_else(|_| false)
     }
 
-    pub fn from_uuid(conn: &mut SqliteConnection, uuid: String) -> DbResult<User> {
+    pub fn from_uuid(conn: &mut PgConnection, uuid: String) -> DbResult<User> {
         find_user_by_uuid(conn, uuid)
     }
 }

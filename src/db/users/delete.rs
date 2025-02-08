@@ -4,10 +4,10 @@ use crate::db::channels::read::find_channel_by_user_id;
 use crate::db::error::DbResult;
 use crate::db::users::read::find_user_by_email;
 use diesel::prelude::*;
-use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
+use diesel::{QueryDsl, RunQueryDsl, PgConnection};
 use crate::db::verification_tokens::delete::delete_verification_token_by_user_id;
 
-pub fn delete_user_by_email(conn: &mut SqliteConnection, needl_email: &str) -> DbResult<()> {
+pub fn delete_user_by_email(conn: &mut PgConnection, needl_email: &str) -> DbResult<()> {
     use crate::db::schema::users::active;
     use crate::db::schema::users::dsl::users;
     use crate::db::schema::users::id;

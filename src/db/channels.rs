@@ -10,6 +10,7 @@ use crate::db::users::User;
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(User))]
 #[diesel(belongs_to(Actor))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::channels)]
 pub struct Channel {
     pub id: i32,
@@ -20,5 +21,5 @@ pub struct Channel {
     pub support: Option<String>,
     pub public: bool,
     pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: NaiveDateTime,
 }

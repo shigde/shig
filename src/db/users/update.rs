@@ -1,10 +1,10 @@
 use crate::db::error::DbResult;
 use crate::db::users::User;
 use crate::db::verification_tokens::update::verify_verification_token;
-use diesel::{Connection, EqAll, QueryDsl, RunQueryDsl, SelectableHelper, SqliteConnection};
+use diesel::{Connection, EqAll, PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 
 pub fn activate_user_by_verification_token(
-    conn: &mut SqliteConnection,
+    conn: &mut PgConnection,
     token: &str,
 ) -> DbResult<User> {
     conn.transaction(move |conn| {

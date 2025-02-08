@@ -14,6 +14,7 @@ pub const SIGN_UP_VERIFICATION_TOKEN: &str = "sign_up";
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
 #[diesel(belongs_to(User))]
 #[diesel(table_name = crate::db::schema::verification_tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct VerificationToken {
     pub id: i32,
     pub user_id: i32,
@@ -21,5 +22,5 @@ pub struct VerificationToken {
     pub token: String,
     pub verified: bool,
     pub created_at: NaiveDateTime,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: NaiveDateTime,
 }

@@ -15,7 +15,8 @@ token = "this-token-must-be-changed-in-public"
 tls = true
 
 [database]
-name = "database.db"
+connection = "postgres://postgres@localhost:5432/shig"
+pool_size = 30
 
 [jwt]
 auth_token_key = "session-auth-token-key"
