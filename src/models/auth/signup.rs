@@ -43,7 +43,7 @@ impl SingUp {
 
         let token = find_sing_up_verification_token(&mut conn, user.id)?;
         let inst: Instance = find_home_instance(&mut conn)?;
-        let link = format!("{}/api/auth/verify/{}", inst.get_base_url(), token.token);
+        let link = format!("{}/activateAccount/{}", inst.get_base_url(), token.token);
 
         let (user_name, _) = split_domain_name(user.name.as_str());
 

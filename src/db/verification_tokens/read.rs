@@ -56,3 +56,21 @@ pub fn find_sing_up_verification_token(
 
     Ok(token)
 }
+
+#[allow(dead_code)]
+pub fn find_forgotten_pass_verification_token(
+    conn: &mut PgConnection,
+    needle_token: String,
+) -> DbResult<VerificationToken> {
+    use crate::db::schema::verification_tokens;
+
+    let token = verification_tokens::table
+        .filter(verification_tokens::kind.eq(FORGOTTEN_PASSWORD_VERIFICATION_TOKEN))
+        .filter(verification_tokens::verified.eq(false))
+        .filter(verification_tokens::token.eq(needle_token))
+        .order_by(verification_tokens::created_at.desc())
+        .select(VerificationToken::as_select())
+        .first(conn)?;
+
+    Ok(token)
+}

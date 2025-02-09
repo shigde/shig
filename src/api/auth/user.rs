@@ -11,6 +11,7 @@ pub async fn get_current_user(session: web::ReqData<Session>) -> Result<HttpResp
     Ok(HttpResponse::Ok().json(Body::new("ok", current_user)))
 }
 
+// DELETE api/auth/user
 pub async fn delete_current_user(
     pool: web::Data<DbPool>,
     session: web::ReqData<Session>,
