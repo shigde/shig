@@ -9,11 +9,13 @@ use crate::api::auth::verify::verify;
 use actix_web::web;
 
 // ignore routes
-pub const IGNORE_ROUTES: [&str; 4] = [
+pub const IGNORE_ROUTES: [&str; 6] = [
     "/api/auth/register",
     "/api/auth/verify",
     "/api/auth/login",
     "/api/auth/refresh",
+    "/api/auth/pass/email",
+    "/api/auth/pass/reset",
 ];
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
