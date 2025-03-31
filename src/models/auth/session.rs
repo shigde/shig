@@ -1,4 +1,3 @@
-use crate::db::users::User;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -8,7 +7,8 @@ pub struct Principal {
     pub email: String,
     pub user_uuid: String,
     pub user_role_id: i32,
-    pub actor_id: i32,
+    pub user_actor: String,
+    pub channel_actor: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -17,7 +17,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn create(user: User) -> Self {
+    pub fn create(user: crate::db::sessions::Principal) -> Self {
         Session {
             principal: Principal {
                 id: user.id,
@@ -25,7 +25,8 @@ impl Session {
                 email: user.email,
                 user_uuid: user.user_uuid,
                 user_role_id: user.user_role_id,
-                actor_id: user.actor_id,
+                user_actor: user.user_actor,
+                channel_actor: user.channel_actor,
             },
         }
     }

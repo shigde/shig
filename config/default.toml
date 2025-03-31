@@ -7,6 +7,9 @@ enabled = true
 cert = "config/certs/cert.pem"
 key = "config/certs/key.pem"
 
+[files]
+htdocs = 'htdocs'
+
 [federation]
 enable = true
 domain = "localhost:8080"

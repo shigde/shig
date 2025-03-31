@@ -1,4 +1,5 @@
 use crate::db::error::{DbError, DbErrorKind};
+use crate::files::error::{FileError, FileErrorKind};
 use crate::models::http::response::Body;
 use crate::models::http::{MESSAGE_INTERNAL_SERVER_ERROR, MESSAGE_NOT_FOUND};
 use actix_web::{
@@ -115,6 +116,19 @@ impl From<Box<dyn StdError>> for ApiError {
         }
         ApiError::InternalServerError {
             error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
+        }
+    }
+}
+
+impl From<FileError> for ApiError {
+    fn from(e: FileError) -> Self {
+        match e.kind {
+            FileErrorKind::BadArgument => ApiError::BadRequest {
+                error_message: e.details.to_string(),
+            },
+            _ => ApiError::InternalServerError {
+                error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
+            },
         }
     }
 }

@@ -7,6 +7,7 @@ mod util;
 mod federation;
 mod middleware;
 mod models;
+mod files;
 
 use clap::ArgAction;
 use clap::Parser;

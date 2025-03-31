@@ -9,6 +9,7 @@ use actix_web::web;
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{Deserialize, Serialize};
+use crate::db::sessions::read::find_principal_by_uuid;
 
 const AUTH_SESSION_TIMEOUT: i64 = 600; // 10min;
 
@@ -118,8 +119,7 @@ pub fn verify_auth_token(
     pool: &web::Data<DbPool>,
 ) -> Result<Session, String> {
     let mut conn = pool.get().map_err(|_| "Failed to get db connection")?;
-    let user =
-        User::from_uuid(&mut conn, token_data.claims.uuid.clone()).map_err(|_| "Invalid token")?;
+    let user = find_principal_by_uuid(&mut conn, token_data.claims.uuid.clone()).map_err(|_| "Invalid token")?;
     Ok(Session::create(user))
 }
 

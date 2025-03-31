@@ -1,10 +1,10 @@
 use crate::db::actors::Actor;
 use crate::db::error::DbResult;
 use diesel::dsl::{exists, select};
-use diesel::{QueryDsl, QueryResult, RunQueryDsl, SelectableHelper, PgConnection};
+use diesel::{QueryDsl, RunQueryDsl, SelectableHelper, PgConnection};
 use diesel::prelude::*;
 
-pub fn find_actor_by_actor_iri(conn: &mut PgConnection, iri: &str) -> QueryResult<Actor> {
+pub fn find_actor_by_actor_iri(conn: &mut PgConnection, iri: &str) -> DbResult<Actor> {
     use crate::db::schema::actors;
     let actor = actors::table
         .filter(actors::actor_iri.eq(iri))

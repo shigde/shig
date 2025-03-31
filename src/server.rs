@@ -2,9 +2,12 @@ mod error;
 
 use crate::db::{build_pool, run_migrations, DbConfig};
 use crate::server::error::ServerResult;
+use std::fs;
+use std::path::Path;
 
 use crate::db::fixtures::insert_fixtures;
 use crate::federation::FederationConfig;
+use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
 use crate::models::mail::config::MailConfig;
 use crate::{api, server};
@@ -21,6 +24,7 @@ async fn index(_req: HttpRequest) -> impl Responder {
 #[derive(Deserialize)]
 pub struct ConfigFile {
     server: ServerConfig,
+    files: FilesConfig,
     federation: FederationConfig,
     database: DbConfig,
     jwt: JWTConfig,
@@ -43,6 +47,18 @@ pub struct TlsConfig {
 }
 
 pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
+    // create static file dir if not exists
+    let htdocs = cfg.files.htdocs.as_str();
+    if !Path::new(htdocs).exists() {
+        let avatar = format!("{htdocs}/avatar");
+        let banner = format!("{htdocs}/banner");
+        let thumbnail = format!("{htdocs}/thumbnail");
+        fs::create_dir(htdocs).await?;
+        fs::create_dir(avatar).await?;
+        fs::create_dir(banner).await?;
+        fs::create_dir(thumbnail).await?;
+    }
+
     // Set up the connection pool
     let pool = build_pool(cfg.database.clone())?;
     let mut conn = pool.get().unwrap();
@@ -56,6 +72,7 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
             .app_data(web::Data::new(cfg.federation.clone()))
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))
+            .app_data(web::Data::new(cfg.files.clone()))
             .wrap(crate::middleware::auth::Authentication)
             .configure(api::config_services)
     });

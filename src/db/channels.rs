@@ -1,10 +1,13 @@
 pub mod create;
 pub mod read;
 pub mod delete;
+pub mod update;
 
 use chrono::NaiveDateTime;
-use diesel::{Associations, Identifiable, Insertable, Queryable, Selectable};
+use diesel::{Associations, Identifiable, Insertable, PgConnection, Queryable, Selectable};
 use crate::db::actors::Actor;
+use crate::db::error::DbResult;
+use crate::db::users::read::find_user_by_uuid;
 use crate::db::users::User;
 
 #[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
@@ -22,4 +25,10 @@ pub struct Channel {
     pub public: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+}
+
+impl Channel {
+    pub fn from_model(conn: &mut PgConnection, uuid: String) -> DbResult<User> {
+        find_user_by_uuid(conn, uuid)
+    }
 }
