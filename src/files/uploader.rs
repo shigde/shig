@@ -2,7 +2,7 @@ use crate::files::error::{FileError, FileErrorKind, FileResult};
 use crate::files::FilesConfig;
 use crate::models::auth::session::Principal;
 use actix_multipart::form::tempfile::TempFile;
-use mime::{Mime, IMAGE_GIF, IMAGE_JPEG, IMAGE_PNG};
+use mime::Mime;
 use std::path::PathBuf;
 
 pub struct ImageUpload {
@@ -14,15 +14,13 @@ pub struct ImageUpload {
 
 pub struct Uploader {
     cfg: FilesConfig,
-    legal_filetypes: [Mime; 3],
-    max_file_size: u64,
+    max_file_size: usize,
 }
 
 impl Uploader {
     pub fn new(cfg: FilesConfig) -> Uploader {
         Uploader {
             cfg,
-            legal_filetypes: [IMAGE_PNG, IMAGE_JPEG, IMAGE_GIF],
             max_file_size: 1024 * 1024 * 10, // 10MB
         }
     }
@@ -33,7 +31,7 @@ impl Uploader {
         destination: String,
     ) -> FileResult<ImageUpload> {
         // Reject empty files
-        let filetype: Option<Mime> = *file.content_type;
+        let filetype: Option<Mime> = file.content_type.clone();
         if filetype.is_none() {
             return Err(FileError::new(
                 "no content type".to_string(),
@@ -42,14 +40,17 @@ impl Uploader {
         }
 
         // Reject unsupported file types
-        if !self.legal_filetypes.contains(&filetype.unwrap()) {
-            return Err(FileError::new(
-                "no legal content type".to_string(),
-                FileErrorKind::BadArgument,
-            ));
-        }
-
-        let file_extension: String = get_image_extension(filetype.clone().unwrap_or(IMAGE_JPEG));
+        let file_extension = match file.content_type.clone().unwrap().subtype() {
+            mime::PNG => "png",
+            mime::JPEG => "jpeg",
+            mime::GIF => "gif",
+            _ => {
+                return Err(FileError::new(
+                    "no legal content type".to_string(),
+                    FileErrorKind::BadArgument,
+                ))
+            }
+        };
 
         // Reject malformed requests
         match file.size {
@@ -59,7 +60,7 @@ impl Uploader {
                     FileErrorKind::BadArgument,
                 ))
             }
-            length if length > self.max_file_size.try_into().unwrap() => {
+            length if length > self.max_file_size => {
                 return Err(FileError::new(
                     format!(
                         "The uploaded file is too large. Maximum size is {} bytes.",
@@ -99,14 +100,5 @@ impl Uploader {
                 FileErrorKind::Internal,
             )),
         }
-    }
-}
-
-fn get_image_extension(mime: Mime) -> String {
-    match mime {
-        IMAGE_JPEG => "jpg".to_string(),
-        IMAGE_PNG => "gif".to_string(),
-        IMAGE_PNG => "png".to_string(),
-        _ => "jpg".to_string(),
     }
 }

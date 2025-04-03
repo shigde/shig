@@ -1,10 +1,9 @@
 use crate::db::actor_images::{ActorImage, ActorImageType};
 use crate::db::error::DbResult;
 use chrono::{NaiveDateTime, Utc};
-use diesel::prelude::*;
-use diesel::{Insertable, PgConnection, RunQueryDsl, Selectable, SelectableHelper};
+use diesel::{Insertable, PgConnection, RunQueryDsl, SelectableHelper};
 
-#[derive(Insertable, Queryable, Selectable, Debug)]
+#[derive(Insertable, Debug)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::actor_images)]
 pub struct NewActorImage<'a> {

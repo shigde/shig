@@ -20,6 +20,7 @@ pub fn find_actor_image_by_actor_id(
     Ok(image)
 }
 
+#[allow(dead_code)]
 pub fn exists_actor_image(
     conn: &mut PgConnection,
     actor: i32,

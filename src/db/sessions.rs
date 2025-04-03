@@ -1,4 +1,4 @@
-use diesel::{Identifiable, Insertable, Queryable, Selectable};
+use diesel::{Identifiable, Queryable, Selectable};
 
 pub mod read;
 

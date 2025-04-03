@@ -53,10 +53,10 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
         let avatar = format!("{htdocs}/avatar");
         let banner = format!("{htdocs}/banner");
         let thumbnail = format!("{htdocs}/thumbnail");
-        fs::create_dir(htdocs).await?;
-        fs::create_dir(avatar).await?;
-        fs::create_dir(banner).await?;
-        fs::create_dir(thumbnail).await?;
+        fs::create_dir(htdocs)?;
+        fs::create_dir(avatar)?;
+        fs::create_dir(banner)?;
+        fs::create_dir(thumbnail)?;
     }
 
     // Set up the connection pool

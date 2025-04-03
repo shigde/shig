@@ -1,14 +1,8 @@
-use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, PgConnection, Queryable, RunQueryDsl, Selectable};
-use crate::db::actor_images::{ActorImage, ActorImageType};
-use crate::db::actor_images::create::NewActorImage;
+use diesel::{Insertable, PgConnection, RunQueryDsl};
 use crate::db::error::DbResult;
 use diesel::prelude::*;
-use crate::db::channels::update::ChannelUpdate;
-use crate::db::schema::channels::dsl::channels;
-use crate::db::schema::channels::id;
 
-#[derive(Insertable, Queryable, Selectable, AsChangeset ,Debug)]
+#[derive(Insertable, AsChangeset ,Debug)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::actor_images)]
 pub struct ActorImageUpdate<'a> {

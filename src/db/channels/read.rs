@@ -14,6 +14,7 @@ pub fn find_channel_by_user_id(conn: &mut PgConnection, find_user_id: i32) -> Db
     Ok(chan)
 }
 
+#[allow(dead_code)]
 pub fn find_channel_by_id(conn: &mut PgConnection, find_channel_id: i32) -> DbResult<Channel> {
     use crate::db::schema::channels::dsl::channels;
     use crate::db::schema::channels::id;
@@ -25,6 +26,7 @@ pub fn find_channel_by_id(conn: &mut PgConnection, find_channel_id: i32) -> DbRe
     Ok(chan)
 }
 
+#[allow(dead_code)]
 pub fn find_channel_by_actor(conn: &mut PgConnection, find_actor_id: i32) -> DbResult<Channel> {
     use crate::db::schema::channels::dsl::channels;
     use crate::db::schema::channels::actor_id;

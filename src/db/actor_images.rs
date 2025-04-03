@@ -5,9 +5,9 @@ pub mod update;
 
 use crate::db::actors::Actor;
 use chrono::NaiveDateTime;
-use diesel::prelude::*;
+
 use diesel::{
-    Associations, Identifiable, Insertable, QueryId, Queryable, QueryableByName, Selectable,
+    Associations, Identifiable, QueryId, Queryable, QueryableByName, Selectable,
 };
 
 #[derive(
@@ -42,7 +42,6 @@ impl ActorImageType {
             ActorImageType::ACTOR => "actor",
             ActorImageType::BANNER => "banner",
             ActorImageType::THUMBNAIL => "thumbnail",
-            _ => "thumbnail",
         }
     }
 }

@@ -10,8 +10,8 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{web, HttpResponse};
 use crate::files::FilesConfig;
 
-// POST api/user/channel/:id
-pub async fn update(
+// PUT api/user/channel/:id
+pub async fn update_channel(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<ChannelForm>,
     session: web::ReqData<Session>,
@@ -24,7 +24,7 @@ pub async fn update(
 }
 
 // Get api/user/channel/:id
-pub async fn fetch(
+pub async fn get_channel(
     pool: web::Data<DbPool>,
     email_dto: web::Json<ForgottenPassword>,
     cfg: web::Data<MailConfig>,

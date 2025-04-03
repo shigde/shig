@@ -10,7 +10,6 @@ pub struct FileError {
 pub enum FileErrorKind {
     BadArgument,
     Internal,
-    AlreadyExists,
 }
 
 impl FileError {
@@ -18,6 +17,7 @@ impl FileError {
         FileError { details: msg, kind }
     }
 
+    #[allow(dead_code)]
     pub fn kind(&self) -> &FileErrorKind {
         &self.kind
     }

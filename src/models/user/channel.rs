@@ -33,6 +33,7 @@ pub struct Channel {
 }
 
 impl Channel {
+    #[allow(dead_code)]
     pub fn fetch(pool: &web::Data<DbPool>, actor: String) -> Result<Channel, ApiError> {
         let mut conn = pool.get()?;
         let actor: Actor = find_actor_by_actor_iri(&mut conn, actor.as_str())?;
@@ -45,7 +46,7 @@ impl Channel {
         };
 
         Ok(Channel {
-            actor: actor.to_string(),
+            actor: actor.actor_iri.to_string(),
             user: user.name,
             name: channel.name,
             description: channel.description.unwrap_or("".to_string()),
@@ -85,7 +86,7 @@ impl ChannelForm {
             });
         }
 
-        let mut image_upload: ImageUpload;
+        let image_upload: ImageUpload;
         let mut conn = pool.get()?;
         // Read current channel
         let current_channel: ChannelDb = find_channel_by_user_id(&mut conn, principal.id)?;
