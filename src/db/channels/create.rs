@@ -2,10 +2,12 @@ use crate::db::channels::Channel;
 use crate::db::error::DbResult;
 use chrono::{NaiveDateTime, Utc};
 use diesel::{Insertable, RunQueryDsl, SelectableHelper, PgConnection};
+use uuid::Uuid;
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::channels)]
 pub struct NewChannel<'a> {
+    pub uuid: &'a str,
     pub user_id: i32,
     pub actor_id: i32,
     pub name: &'a str,
@@ -21,7 +23,9 @@ pub fn insert_new_channel(
     user_id: i32,
     actor_id: i32,
 ) -> DbResult<Channel> {
+    let uuid = Uuid::new_v4().to_string();
     let new_user = NewChannel {
+        uuid: &uuid,
         user_id,
         actor_id,
         name,

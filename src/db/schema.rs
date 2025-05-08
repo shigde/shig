@@ -51,6 +51,8 @@ diesel::table! {
 diesel::table! {
     channels (id) {
         id -> Int4,
+        #[max_length = 255]
+        uuid -> Varchar,
         user_id -> Int4,
         actor_id -> Int4,
         name -> Varchar,
@@ -72,6 +74,76 @@ diesel::table! {
         tls -> Bool,
         #[max_length = 500]
         token -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    stream_meta_data (id) {
+        id -> Int4,
+        stream_id -> Int4,
+        is_shig -> Bool,
+        #[max_length = 255]
+        stream_key -> Varchar,
+        #[max_length = 255]
+        url -> Varchar,
+        #[max_length = 25]
+        protocol -> Varchar,
+        permanent_live -> Bool,
+        save_replay -> Bool,
+        latency_mode -> Int4,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    stream_thumbnails (id) {
+        id -> Int4,
+        #[max_length = 255]
+        filename -> Varchar,
+        height -> Nullable<Int4>,
+        width -> Nullable<Int4>,
+        #[max_length = 255]
+        file_url -> Nullable<Varchar>,
+        on_disk -> Bool,
+        #[max_length = 40]
+        image_type -> Varchar,
+        stream_id -> Int4,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    streams (id) {
+        id -> Int4,
+        #[max_length = 255]
+        uuid -> Varchar,
+        user_id -> Int4,
+        channel_id -> Int4,
+        title -> Varchar,
+        description -> Nullable<Text>,
+        support -> Nullable<Text>,
+        date -> Timestamp,
+        start_time -> Nullable<Timestamp>,
+        end_time -> Nullable<Timestamp>,
+        licence -> Int4,
+        is_repeating -> Bool,
+        repeat -> Nullable<Int4>,
+        is_public -> Bool,
+        is_live -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    streams_participants (id) {
+        id -> Int4,
+        stream_id -> Int4,
+        user_id -> Int4,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -122,6 +194,12 @@ diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
 diesel::joinable!(instances -> actors (actor_id));
+diesel::joinable!(stream_meta_data -> streams (stream_id));
+diesel::joinable!(stream_thumbnails -> streams (stream_id));
+diesel::joinable!(streams -> channels (channel_id));
+diesel::joinable!(streams -> users (user_id));
+diesel::joinable!(streams_participants -> streams (stream_id));
+diesel::joinable!(streams_participants -> users (user_id));
 diesel::joinable!(users -> actors (actor_id));
 diesel::joinable!(users -> user_roles (user_role_id));
 diesel::joinable!(verification_tokens -> users (user_id));
@@ -131,6 +209,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     actors,
     channels,
     instances,
+    stream_meta_data,
+    stream_thumbnails,
+    streams,
+    streams_participants,
     user_roles,
     users,
     verification_tokens,

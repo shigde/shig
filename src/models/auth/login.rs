@@ -22,7 +22,7 @@ impl Login {
         let mut conn = pool.get()?;
         let user = find_user_by_email(&mut conn, login.email.clone())?;
         if !user.verify(login.pass.clone()) {
-            return Err(ApiError::Unauthorized {
+            return Err(ApiError::Forbidden {
                 error_message: MESSAGE_LOGIN_FAILED.to_string(),
             });
         }

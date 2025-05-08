@@ -2,9 +2,7 @@ use crate::db::actor_images::create::insert_new_actor_image;
 use crate::db::actor_images::read::{find_actor_image_by_actor_id};
 use crate::db::actor_images::update::update_actor_image;
 use crate::db::actor_images::ActorImageType;
-use crate::db::actors::read::find_actor_by_actor_iri;
-use crate::db::actors::Actor;
-use crate::db::channels::read::{find_channel_by_actor, find_channel_by_user_id};
+use crate::db::channels::read::{find_channel_by_user_id, find_channel_by_uuid};
 use crate::db::channels::update::update;
 use crate::db::channels::update::ChannelUpdate;
 use crate::db::channels::Channel as ChannelDb;
@@ -21,8 +19,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Channel {
-    // iri of channel actor
-    pub actor: String,
+    pub uuid: String,
     // user name@domain
     pub user: String,
     pub name: String,
@@ -33,20 +30,19 @@ pub struct Channel {
 }
 
 impl Channel {
-    #[allow(dead_code)]
-    pub fn fetch(pool: &web::Data<DbPool>, actor: String) -> Result<Channel, ApiError> {
+
+    pub fn fetch(pool: &web::Data<DbPool>, channel_uuid: String) -> Result<Channel, ApiError> {
         let mut conn = pool.get()?;
-        let actor: Actor = find_actor_by_actor_iri(&mut conn, actor.as_str())?;
-        let channel: ChannelDb = find_channel_by_actor(&mut conn, actor.id)?;
+        let channel: ChannelDb = find_channel_by_uuid(&mut conn, channel_uuid)?;
         let user: User = find_user_by_id(&mut conn, channel.user_id)?;
-        let banner = match find_actor_image_by_actor_id(&mut conn, actor.id, ActorImageType::BANNER)
+        let banner = match find_actor_image_by_actor_id(&mut conn, channel.actor_id, ActorImageType::BANNER)
         {
             Ok(image) => image.file_url.unwrap_or("".to_string()),
             Err(_) => "".to_string(),
         };
 
         Ok(Channel {
-            actor: actor.actor_iri.to_string(),
+            uuid: channel.uuid,
             user: user.name,
             name: channel.name,
             description: channel.description.unwrap_or("".to_string()),
@@ -68,9 +64,9 @@ impl Channel {
 
 #[derive(Debug, MultipartForm)]
 pub struct ChannelForm {
+    pub channel: MpJson<Channel>,
     #[multipart(limit = "10MB")]
     pub file: TempFile,
-    pub channel: MpJson<Channel>,
 }
 
 impl ChannelForm {
@@ -80,7 +76,7 @@ impl ChannelForm {
         principal: Principal,
         cgf: &web::Data<FilesConfig>,
     ) -> Result<Channel, ApiError> {
-        if principal.channel_actor != self.channel.actor {
+        if principal.channel_uuid != self.channel.uuid {
             return Err(ApiError::Unauthorized {
                 error_message: "unauthorized".to_string(),
             });

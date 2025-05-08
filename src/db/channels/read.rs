@@ -37,3 +37,15 @@ pub fn find_channel_by_actor(conn: &mut PgConnection, find_actor_id: i32) -> DbR
 
     Ok(chan)
 }
+
+#[allow(dead_code)]
+pub fn find_channel_by_uuid(conn: &mut PgConnection, find_channel_uuid: String) -> DbResult<Channel> {
+    use crate::db::schema::channels::dsl::channels;
+    use crate::db::schema::channels::uuid;
+    let chan = channels
+        .filter(uuid.eq(find_channel_uuid))
+        .select(Channel::as_select())
+        .first(conn)?;
+
+    Ok(chan)
+}

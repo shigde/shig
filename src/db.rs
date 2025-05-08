@@ -1,15 +1,15 @@
-pub mod actors;
+pub mod active_users;
 pub mod actor_images;
+pub mod actors;
 pub mod channels;
 pub mod error;
 pub mod fixtures;
 pub mod instances;
 pub mod schema;
+pub mod schema_views;
 pub mod user_roles;
 pub mod users;
 pub mod verification_tokens;
-pub mod sessions;
-pub mod schema_views;
 
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};

@@ -1,14 +1,12 @@
 use crate::db::DbPool;
-use crate::models::auth::pass::ForgottenPassword;
+use crate::files::FilesConfig;
 use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
 use crate::models::http::response::Body;
 use crate::models::http::MESSAGE_OK;
-use crate::models::mail::config::MailConfig;
-use crate::models::user::channel::ChannelForm;
+use crate::models::user::channel::{Channel, ChannelForm};
 use actix_multipart::form::MultipartForm;
 use actix_web::{web, HttpResponse};
-use crate::files::FilesConfig;
 
 // PUT api/user/channel/:id
 pub async fn update_channel(
@@ -23,13 +21,11 @@ pub async fn update_channel(
     }
 }
 
-// Get api/user/channel/:id
+// Get api/pub/channel/:uuid
 pub async fn get_channel(
     pool: web::Data<DbPool>,
-    email_dto: web::Json<ForgottenPassword>,
-    cfg: web::Data<MailConfig>,
+    path: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
-    match email_dto.send_forgotten_password_email(&pool, &cfg).await {
-        _ => Ok(HttpResponse::Ok().json({})),
-    }
+    let chan =  Channel::fetch(&pool, path.into_inner())?;
+    Ok(HttpResponse::Ok().json(Body::new("ok", chan)))
 }

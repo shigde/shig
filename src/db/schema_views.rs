@@ -1,5 +1,5 @@
 diesel::table! {
-    session_principals_view (id) {
+    active_users (id) {
         id -> Int4,
         #[max_length = 255]
         name -> Varchar,
@@ -8,9 +8,12 @@ diesel::table! {
         #[max_length = 255]
         user_uuid -> Varchar,
         user_role_id -> Int4,
-        #[max_length = 2000]
-        user_actor -> Varchar,
-        #[max_length = 2000]
-        channel_actor -> Varchar,
+        user_actor_id -> Int4,
+        channel_id -> Int4,
+        #[max_length = 255]
+        channel_uuid -> Varchar,
+        channel_actor_id -> Int4,
+        #[max_length = 255]
+        avatar -> Nullable<Varchar>,
     }
 }

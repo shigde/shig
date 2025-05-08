@@ -1,17 +1,20 @@
 pub mod auth;
+pub mod federation;
 pub mod user;
+
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
 use crate::api::auth::refresh::refresh;
 use crate::api::auth::signup::signup;
 use crate::api::auth::user::{delete_current_user, get_current_user};
 use crate::api::auth::verify::verify;
+use crate::api::federation::settings::get_settings;
 use crate::api::user::channel::{get_channel, update_channel};
 use actix_files as fs;
 use actix_web::web;
 
 // ignore routes
-pub const IGNORE_ROUTES: [&str; 7] = [
+pub const IGNORE_ROUTES: [&str; 8] = [
     "/api/auth/register",
     "/api/auth/verify",
     "/api/auth/login",
@@ -19,6 +22,7 @@ pub const IGNORE_ROUTES: [&str; 7] = [
     "/api/auth/pass/email",
     "/api/auth/pass/reset",
     "/static",
+    "/api/pub/",
 ];
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
@@ -30,10 +34,13 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     .service(
         web::scope("/api")
             .service(
-                web::resource("/channel")
-                    .route(web::get().to(get_channel))
-                    .route(web::put().to(update_channel)),
+                web::scope("/pub")
+                    .service(web::resource("/channel/{uuid}").route(web::get().to(get_channel)))
+                    .service(
+                        web::resource("/federation/settings").route(web::get().to(get_settings)),
+                    ),
             )
+            .service(web::resource("/channel").route(web::put().to(update_channel)))
             .service(
                 web::scope("/auth")
                     .service(web::resource("/login").route(web::post().to(login)))
