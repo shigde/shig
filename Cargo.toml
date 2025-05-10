@@ -21,10 +21,10 @@ publish = false
 [dependencies]
 actix-multipart = "^0.7.2"
 actix-web = { version = "^4", features = ["openssl"] }
-actix-files = {version = "^0.6.6"}
+actix-files = { version = "^0.6.6" }
 actix-service = { version = "^2.0.2" }
 jsonwebtoken = "^9.3.0"
-lettre = { version = "0.11.11", features = ["tokio1", "tokio1-native-tls"]  }
+lettre = { version = "0.11.11", features = ["tokio1", "tokio1-native-tls"] }
 handlebars = "^6.3.0"
 tokio = { version = "^1.4", features = ["full"] }
 clap = { version = "^4.5.23", features = ["derive"] }
@@ -35,7 +35,7 @@ diesel_migrations = "^2.2.0"
 dotenv = "0.15.0"
 log = "^0.4.22"
 env_logger = "^0.11.6"
-chrono = "^0.4.39"
+chrono = { version = "^0.4.39", features = ["serde"] }
 uuid = { version = "^1.11.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 openssl = { version = "^0.10", features = ["vendored"] }
 bcrypt = "^0.16.0"

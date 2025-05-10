@@ -17,3 +17,25 @@ diesel::table! {
         avatar -> Nullable<Varchar>,
     }
 }
+
+diesel::table! {
+    stream_previews (id) {
+        id -> Int4,
+        title -> Varchar,
+        thumbnail -> Nullable<Varchar>,
+        #[max_length = 255]
+        uuid -> Varchar,
+        description -> Nullable<Text>,
+        support -> Nullable<Text>,
+        date -> Timestamp,
+        start_time -> Nullable<Timestamp>,
+        end_time -> Nullable<Timestamp>,
+        is_live -> Bool,
+        is_public -> Bool,
+        owner_name -> Varchar,
+        owner_uuid -> Varchar,
+        owner_avatar -> Nullable<Varchar>,
+        channel_name -> Varchar,
+        channel_uuid -> Varchar,
+    }
+}

@@ -38,7 +38,7 @@ CREATE TABLE stream_meta_data
     is_shig        BOOLEAN             NOT NULL DEFAULT TRUE,
     stream_key     VARCHAR(255) UNIQUE NOT NULL,
     url            VARCHAR(255) UNIQUE NOT NULL,
-    protocol       VARCHAR(25) UNIQUE  NOT NULL,
+    protocol       INTEGER             NOT NULL,
     permanent_live BOOLEAN             NOT NULL DEFAULT FALSE,
     save_replay    BOOLEAN             NOT NULL DEFAULT FALSE,
     latency_mode   INTEGER             NOT NULL,
@@ -48,7 +48,7 @@ CREATE TABLE stream_meta_data
 
 CREATE UNIQUE INDEX index_stream_meta_data ON stream_meta_data (stream_id);
 
-CREATE TABLE streams_participants
+CREATE TABLE stream_participants
 (
     id         INTEGER   NOT NULL PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     stream_id  INTEGER   NOT NULL
@@ -61,4 +61,4 @@ CREATE TABLE streams_participants
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX index_streams_participants_stream ON streams_participants (stream_id);
+CREATE UNIQUE INDEX index_stream_participants_stream ON stream_participants (stream_id);

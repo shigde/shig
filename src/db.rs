@@ -10,6 +10,11 @@ pub mod schema_views;
 pub mod user_roles;
 pub mod users;
 pub mod verification_tokens;
+mod streams;
+mod stream_thumbnails;
+mod stream_participants;
+mod stream_meta_data;
+mod stream_previews;
 
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};

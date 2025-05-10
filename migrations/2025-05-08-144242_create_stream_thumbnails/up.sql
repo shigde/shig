@@ -7,7 +7,6 @@ create table stream_thumbnails
     width      INTEGER,
     file_url   VARCHAR(255),
     on_disk    BOOLEAN        NOT NULL,
-    image_type VARCHAR(40)    NOT NULL,
     stream_id  INTEGER UNIQUE NOT NULL
         REFERENCES streams (id)
             ON UPDATE CASCADE ON DELETE CASCADE,
