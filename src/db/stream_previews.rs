@@ -1,3 +1,5 @@
+pub mod read;
+
 use chrono::NaiveDateTime;
 use diesel::{Identifiable, Insertable, Queryable, Selectable};
 

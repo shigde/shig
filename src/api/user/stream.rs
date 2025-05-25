@@ -9,6 +9,7 @@ use crate::models::http::response::Body;
 use crate::models::user::stream::Stream;
 use crate::models::user::stream_form::StreamForm;
 
+// GET api/user/stream/:id
 pub async fn get_stream(
     pool: web::Data<DbPool>,
     path: web::Path<String>,
@@ -30,7 +31,7 @@ pub async fn delete_stream(
     }
 }
 
-// Get api/user/stream/:id
+// POST api/user/stream
 pub async fn create_stream(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<StreamForm>,
@@ -43,7 +44,7 @@ pub async fn create_stream(
     }
 }
 
-// PUT api/user/stream/:id
+// PUT api/user/stream
 pub async fn update_stream(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<StreamForm>,
