@@ -2,7 +2,7 @@ use crate::db::error::DbResult;
 use diesel::prelude::*;
 use diesel::{Insertable, PgConnection, RunQueryDsl};
 
-#[derive(Insertable, AsChangeset, Debug)]
+#[derive(Insertable, AsChangeset, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::stream_thumbnails)]
 pub struct StreamThumbnailUpdate<'a> {

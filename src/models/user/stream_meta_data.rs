@@ -1,5 +1,6 @@
 use crate::db::stream_meta_data::create::NewStreamMetaData;
 use crate::db::stream_meta_data::update::StreamMetaDataUpdate;
+use crate::db::stream_meta_data::StreamMetaData as StreamMetaDataDAO;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,25 @@ use serde::{Deserialize, Serialize};
 pub struct StreamMetaData {
     pub is_shig: bool,
     pub stream_key: String,
-    url: String,
+    pub url: String,
     pub protocol: StreamProtocol,
-    permanent_live: bool,
-    save_replay: bool,
-    latency_mode: StreamLatency,
+    pub permanent_live: bool,
+    pub save_replay: bool,
+    pub latency_mode: StreamLatency,
+}
+
+impl StreamMetaData {
+    pub(crate) fn from_dao(dao: StreamMetaDataDAO) -> StreamMetaData {
+        StreamMetaData {
+            is_shig: dao.is_shig,
+            stream_key: dao.stream_key,
+            url: dao.url,
+            protocol: StreamProtocol::from_integer(dao.protocol),
+            permanent_live: dao.permanent_live,
+            save_replay: dao.save_replay,
+            latency_mode: StreamLatency::from_integer(dao.latency_mode),       
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -67,6 +82,14 @@ impl StreamProtocol {
             StreamProtocol::MOQ => 3,
         }
     }
+    pub fn from_integer(value: i32) -> StreamProtocol {
+        match value {
+            1 => StreamProtocol::RTMP,
+            2 => StreamProtocol::WHIP,
+            3 => StreamProtocol::MOQ,
+            _ => StreamProtocol::RTMP,
+        }
+    }
 }
 
 impl StreamLatency {
@@ -77,4 +100,12 @@ impl StreamLatency {
             StreamLatency::HIGH => 3,
         }
     }
+    pub fn from_integer(value: i32) -> StreamLatency {
+        match value {
+            1 => StreamLatency::LOW,
+            2 => StreamLatency::STANDARD,
+            3 => StreamLatency::HIGH,
+            _ => StreamLatency::STANDARD,
+        }
+    }   
 }

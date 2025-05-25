@@ -6,7 +6,7 @@ use chrono::NaiveDateTime;
 use diesel::{Associations, Identifiable, Insertable, Queryable, Selectable};
 use serde::Serialize;
 
-#[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq, Serialize)]
+#[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq, Serialize, Clone)]
 #[diesel(belongs_to(Stream))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = crate::db::schema::stream_meta_data)]

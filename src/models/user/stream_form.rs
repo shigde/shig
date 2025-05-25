@@ -1,6 +1,7 @@
 use crate::db::stream_meta_data::create::insert_new_stream_meta_data;
 use crate::db::stream_meta_data::update::update_stream_meta_data;
 use crate::db::stream_thumbnails::create::insert_new_stream_thumbnail;
+use crate::db::stream_thumbnails::update::update_stream_thumbnail;
 use crate::db::streams::create::insert_new_stream;
 use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::streams::update::update_stream;
@@ -28,6 +29,7 @@ impl StreamForm {
         principal: Principal,
         cgf: &web::Data<FilesConfig>,
     ) -> Result<Stream, ApiError> {
+        // Check if user is the owner of the stream
         if principal.user_uuid != self.stream.owner_uuid {
             return Err(ApiError::Unauthorized {
                 error_message: "unauthorized".to_string(),
@@ -38,6 +40,7 @@ impl StreamForm {
         let mut conn = pool.get()?;
         let stream_uuid = uuid::Uuid::new_v4().to_string();
 
+        // Upload the Thumbnail if was one uploaded in the form
         if self.file.size != 0 {
             // Upload file
             let image_uploader = Uploader::new(cgf.get_ref().clone());
@@ -63,12 +66,16 @@ impl StreamForm {
             Some(self.stream.repeat),
             self.stream.is_public,
         )?;
+        
+        // Insert stream Meta Data
         let new_meta_data = self.stream.meta_data.build_insert_dao(stream_dao.id);
         insert_new_stream_meta_data(&mut conn, new_meta_data)?;
 
+        // Build Stream Response Object
         let mut stream_response = self.stream.clone();
         stream_response.uuid = stream_dao.uuid.clone();
 
+        // Insert Thumbnail if was one uploaded
         match thumbnail_img {
             None => {}
             Some(thumbnail_img) => {
@@ -76,6 +83,8 @@ impl StreamForm {
                     StreamThumbnail::build_insert_dao(stream_dao.id, &thumbnail_img);
                 insert_new_stream_thumbnail(&mut conn, thumbnail_dao.clone())?;
                 let url = thumbnail_dao.file_url.clone();
+                
+                // Update the stream response object with the new thumbnail url
                 stream_response.thumbnail = url.to_string();
             }
         }
@@ -92,9 +101,10 @@ impl StreamForm {
         let mut conn = pool.get()?;
         let stream_uuid = self.stream.uuid.clone();
         let current_stream_dao = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
-        let stream_id = current_stream_dao.id;
+        let stream_id = current_stream_dao.stream.id;
 
-        if principal.id != current_stream_dao.user_id {
+        // Check if user is the owner of the stream
+        if principal.id != current_stream_dao.stream.user_id {
             return Err(ApiError::Unauthorized {
                 error_message: "unauthorized".to_string(),
             });
@@ -102,6 +112,7 @@ impl StreamForm {
 
         let mut thumbnail_img: Option<ImageUpload> = None;
 
+        // Upload the Thumbnail if was one uploaded in the form
         if self.file.size != 0 {
             // Upload file
             let image_uploader = Uploader::new(cgf.get_ref().clone());
@@ -129,22 +140,43 @@ impl StreamForm {
             self.stream.is_live,
         )?;
 
+        // Update stream Meta Data
         let meta_data_dao = self.stream.meta_data.build_update_dao(stream_id);
-        update_stream_meta_data(&mut conn, 1, meta_data_dao)?;
+        update_stream_meta_data(&mut conn, current_stream_dao.meta_data.id, meta_data_dao)?;
 
+        // Build Stream Response Object
         let mut stream_response = self.stream.clone();
-
         stream_response.uuid = self.stream.uuid.clone();
 
+        // Update Thumbnail if was one uploaded
         match thumbnail_img {
             None => {}
             Some(thumbnail_img) => {
-                let thumbnail_dao = StreamThumbnail::build_insert_dao(stream_id, &thumbnail_img);
-                insert_new_stream_thumbnail(&mut conn, thumbnail_dao.clone())?;
-                let url = thumbnail_dao.file_url;
+                let mut url: &str;
+                match current_stream_dao.thumbnail {
+                    // If first time of uploaded then insert new thumbnail
+                    None => {
+                        let thumbnail_dao =
+                            StreamThumbnail::build_insert_dao(stream_id, &thumbnail_img);
+                        insert_new_stream_thumbnail(&mut conn, thumbnail_dao.clone())?;
+                        url = thumbnail_dao.file_url;
+                    }
+                    // If already exist, then update
+                    Some(current_image) => {
+                        let thumbnail_dao = StreamThumbnail::build_update_dao(&thumbnail_img);
+                        update_stream_thumbnail(
+                            &mut conn,
+                            current_image.id,
+                            thumbnail_dao.clone(),
+                        )?;
+                        url = thumbnail_dao.file_url;
+                    }
+                };
+
+                // Update the stream response object with the new thumbnail url
                 stream_response.thumbnail = url.to_string();
             }
-        }
+        };
 
         Ok(stream_response)
     }

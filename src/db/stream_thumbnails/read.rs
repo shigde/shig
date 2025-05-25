@@ -3,7 +3,6 @@ use crate::db::stream_thumbnails::StreamThumbnail;
 use diesel::{PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
 use diesel::prelude::*;
 
-#[allow(dead_code)]
 pub fn find_thumbnail_by_stream_id(
     conn: &mut PgConnection,
     stream: i32,

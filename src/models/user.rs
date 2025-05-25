@@ -2,8 +2,8 @@ pub mod channel;
 pub mod stream;
 pub mod stream_preview;
 pub mod stream_meta_data;
-mod stream_thumbnail;
-mod stream_form;
+pub mod stream_thumbnail;
+pub mod stream_form;
 
 use crate::db::users::delete::delete_user_by_id;
 use crate::db::DbPool;

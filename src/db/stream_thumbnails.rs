@@ -1,6 +1,7 @@
 use crate::db::streams::Stream;
 use chrono::NaiveDateTime;
 use diesel::{Associations, Identifiable, QueryId, Queryable, QueryableByName, Selectable};
+use serde::Serialize;
 
 pub mod create;
 pub mod delete;
@@ -8,7 +9,16 @@ pub mod read;
 pub mod update;
 
 #[derive(
-    Queryable, QueryableByName, QueryId, Identifiable, Selectable, Associations, Debug, PartialEq,
+    Queryable,
+    QueryableByName,
+    QueryId,
+    Identifiable,
+    Selectable,
+    Associations,
+    Debug,
+    PartialEq,
+    Serialize,
+    Clone,
 )]
 #[diesel(belongs_to(Stream))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
