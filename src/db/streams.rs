@@ -6,9 +6,10 @@ pub mod update;
 use crate::db::channels::Channel;
 use crate::db::users::User;
 use chrono::NaiveDateTime;
-use diesel::{Associations, Identifiable, Insertable, Queryable, Selectable};
+use diesel::{Associations, Identifiable, Insertable, QueryId, Queryable, Selectable};
+use serde::Serialize;
 
-#[derive(Queryable, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq)]
+#[derive(Queryable, QueryId, Insertable, Identifiable, Selectable, Associations, Debug, PartialEq, Serialize)]
 #[diesel(belongs_to(User))]
 #[diesel(belongs_to(Channel))]
 #[diesel(check_for_backend(diesel::pg::Pg))]

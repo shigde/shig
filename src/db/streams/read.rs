@@ -1,51 +1,24 @@
-use crate::db::channels::Channel;
 use crate::db::error::DbResult;
-use diesel::{QueryDsl, RunQueryDsl, SelectableHelper, PgConnection};
+use crate::db::streams::Stream;
 use diesel::prelude::*;
+use diesel::{PgConnection, QueryDsl, RunQueryDsl, SelectableHelper};
+use serde::Serialize;
+use crate::db::stream_meta_data::StreamMetaData;
 
-pub fn find_channel_by_user_id(conn: &mut PgConnection, find_user_id: i32) -> DbResult<Channel> {
-    use crate::db::schema::channels::dsl::channels;
-    use crate::db::schema::channels::user_id;
-    let chan = channels
-        .filter(user_id.eq(find_user_id))
-        .select(Channel::as_select())
-        .first(conn)?;
-
-    Ok(chan)
+#[derive(Serialize)]
+#[allow(dead_code)] struct FullyLoadedStream {
+    #[serde(flatten)]
+    stream: Stream,
+    meta_data: Vec<StreamMetaData>,
 }
 
-#[allow(dead_code)]
-pub fn find_channel_by_id(conn: &mut PgConnection, find_channel_id: i32) -> DbResult<Channel> {
-    use crate::db::schema::channels::dsl::channels;
-    use crate::db::schema::channels::id;
-    let chan = channels
-        .filter(id.eq(find_channel_id))
-        .select(Channel::as_select())
+pub fn find_stream_by_uuid(conn: &mut PgConnection, stream_uuid: String) -> DbResult<Stream> {
+    use crate::db::schema::streams::dsl::streams;
+    use crate::db::schema::streams::uuid;
+    let stream_dao = streams
+        .filter(uuid.eq(stream_uuid))
+        .select(Stream::as_select())
         .first(conn)?;
 
-    Ok(chan)
-}
-
-#[allow(dead_code)]
-pub fn find_channel_by_actor(conn: &mut PgConnection, find_actor_id: i32) -> DbResult<Channel> {
-    use crate::db::schema::channels::dsl::channels;
-    use crate::db::schema::channels::actor_id;
-    let chan = channels
-        .filter(actor_id.eq(find_actor_id))
-        .select(Channel::as_select())
-        .first(conn)?;
-
-    Ok(chan)
-}
-
-#[allow(dead_code)]
-pub fn find_channel_by_uuid(conn: &mut PgConnection, find_channel_uuid: String) -> DbResult<Channel> {
-    use crate::db::schema::channels::dsl::channels;
-    use crate::db::schema::channels::uuid;
-    let chan = channels
-        .filter(uuid.eq(find_channel_uuid))
-        .select(Channel::as_select())
-        .first(conn)?;
-
-    Ok(chan)
+    Ok(stream_dao)
 }

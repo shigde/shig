@@ -16,24 +16,12 @@ pub struct StreamThumbnailUpdate<'a> {
 pub fn update_stream_thumbnail(
     conn: &mut PgConnection,
     thumbnail_id: i32,
-    filename: &str,
-    height: i32,
-    width: i32,
-    file_url: &str,
-    on_disk: bool,
+    thumbnail: StreamThumbnailUpdate,
 ) -> DbResult<()> {
-    let update_image = StreamThumbnailUpdate {
-        filename,
-        height,
-        width,
-        file_url,
-        on_disk,
-    };
-
     use crate::db::schema::stream_thumbnails::dsl::id;
     use crate::db::schema::stream_thumbnails::dsl::stream_thumbnails;
     diesel::update(stream_thumbnails.filter(id.eq(thumbnail_id)))
-        .set::<StreamThumbnailUpdate>(update_image)
+        .set::<StreamThumbnailUpdate>(thumbnail)
         .execute(conn)?;
     Ok(())
 }

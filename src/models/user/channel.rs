@@ -106,8 +106,8 @@ impl ChannelForm {
             // Upload file
             let image_uploader = Uploader::new(cgf.get_ref().clone());
             image_upload = image_uploader.upload(
-                principal,
                 &self.file,
+                principal.user_uuid,
                 ActorImageType::BANNER.value_as_str().to_string(),
             )?;
 

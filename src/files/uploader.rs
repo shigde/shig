@@ -1,6 +1,5 @@
 use crate::files::error::{FileError, FileErrorKind, FileResult};
 use crate::files::FilesConfig;
-use crate::models::auth::session::Principal;
 use actix_multipart::form::tempfile::TempFile;
 use mime::Mime;
 use std::path::PathBuf;
@@ -26,8 +25,8 @@ impl Uploader {
     }
     pub fn upload(
         &self,
-        principal: Principal,
         file: &TempFile,
+        file_upload_name: String,
         destination: String,
     ) -> FileResult<ImageUpload> {
         // Reject empty files
@@ -76,7 +75,7 @@ impl Uploader {
         let temp_file_path = file.file.path();
 
         // Build the new file path
-        let file_name: String = format!("{}.{}", principal.user_uuid, file_extension);
+        let file_name: String = format!("{}.{}", file_upload_name, file_extension);
         let file_sub_path = format!("{}/{}", self.cfg.htdocs, destination);
         let mut file_path = PathBuf::from(file_sub_path);
         file_path.push(&sanitize_filename::sanitize(&file_name));

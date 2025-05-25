@@ -1,10 +1,11 @@
 use crate::db::error::DbResult;
 use diesel::prelude::*;
 
-pub fn delete_channel_by_id(conn: &mut PgConnection, channel_id: i32) -> DbResult<()> {
-    use crate::db::schema::channels::dsl::channels;
-    use crate::db::schema::channels::id;
+#[allow(dead_code)]
+pub fn delete_stream_by_id(conn: &mut PgConnection, stream_id: i32) -> DbResult<()> {
+    use crate::db::schema::streams::dsl::streams;
+    use crate::db::schema::streams::id;
 
-    diesel::delete(channels.filter(id.eq(channel_id))).execute(conn)?;
+    diesel::delete(streams.filter(id.eq(stream_id))).execute(conn)?;
     Ok(())
 }
