@@ -1,4 +1,3 @@
-use crate::db::active_users::ActiveUser;
 use crate::db::error::DbResult;
 use crate::db::stream_previews::StreamPreview;
 use diesel::prelude::*;
@@ -25,7 +24,7 @@ pub fn find_all_stream_previews(conn: &mut PgConnection) -> DbResult<Vec<StreamP
 
     let stream_list = stream_previews
         .select(StreamPreview::as_select())
-        .order_by((date))
+        .order_by(date)
         .load(conn)?;
 
     Ok(stream_list)

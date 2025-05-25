@@ -17,7 +17,6 @@ pub struct StreamMetaDataUpdate<'a> {
     pub latency_mode: i32,
 }
 
-#[allow(dead_code)]
 pub fn update_stream_meta_data(
     conn: &mut PgConnection,
     stream_meta_data_id: i32,

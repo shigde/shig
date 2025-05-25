@@ -19,7 +19,6 @@ pub struct NewStreamMetaData<'a> {
     pub created_at: NaiveDateTime,
 }
 
-#[allow(dead_code)]
 pub fn insert_new_stream_meta_data(
     conn: &mut PgConnection,
     new_stream_meta_data: NewStreamMetaData,

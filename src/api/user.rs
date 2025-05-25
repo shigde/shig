@@ -1,3 +1,3 @@
 pub mod channel;
-mod stream;
-mod stream_preview;
+pub mod stream;
+pub mod stream_preview;

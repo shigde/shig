@@ -82,7 +82,7 @@ impl StreamForm {
                 let thumbnail_dao =
                     StreamThumbnail::build_insert_dao(stream_dao.id, &thumbnail_img);
                 insert_new_stream_thumbnail(&mut conn, thumbnail_dao.clone())?;
-                let url = thumbnail_dao.file_url.clone();
+                let url = thumbnail_dao.file_url;
                 
                 // Update the stream response object with the new thumbnail url
                 stream_response.thumbnail = url.to_string();
@@ -152,7 +152,7 @@ impl StreamForm {
         match thumbnail_img {
             None => {}
             Some(thumbnail_img) => {
-                let mut url: &str;
+                let url: &str;
                 match current_stream_dao.thumbnail {
                     // If first time of uploaded then insert new thumbnail
                     None => {

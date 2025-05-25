@@ -10,8 +10,10 @@ use crate::api::auth::user::{delete_current_user, get_current_user};
 use crate::api::auth::verify::verify;
 use crate::api::federation::settings::get_settings;
 use crate::api::user::channel::{get_channel, update_channel};
+use crate::api::user::stream_preview::{get_stream_preview, get_stream_preview_list};
 use actix_files as fs;
 use actix_web::web;
+use crate::api::user::stream::{create_stream, delete_stream, get_stream, update_stream};
 
 // ignore routes
 pub const IGNORE_ROUTES: [&str; 8] = [
@@ -37,6 +39,15 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 web::scope("/pub")
                     .service(web::resource("/channel/{uuid}").route(web::get().to(get_channel)))
                     .service(
+                        web::scope("/stream_preview")
+                            .service(
+                                web::resource("/").route(web::get().to(get_stream_preview_list)),
+                            )
+                            .service(
+                                web::resource("/{uuid}").route(web::get().to(get_stream_preview)),
+                            ),
+                    )
+                    .service(
                         web::resource("/federation/settings").route(web::get().to(get_settings)),
                     ),
             )
@@ -49,6 +60,16 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                         web::resource("/user")
                             .route(web::get().to(get_current_user))
                             .route(web::delete().to(delete_current_user)),
+                    )
+                    .service(
+                        web::resource("/stream")
+                            .route(web::put().to(update_stream))
+                            .route(web::post().to(create_stream)),
+                    )
+                    .service(
+                        web::resource("/stream/{uuid}")
+                            .route(web::get().to(get_stream))
+                            .route(web::delete().to(delete_stream)),
                     )
                     .service(web::resource("/verify/{token}").route(web::get().to(verify)))
                     .service(web::resource("/refresh").route(web::post().to(refresh)))
