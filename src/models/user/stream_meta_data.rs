@@ -3,7 +3,7 @@ use crate::db::stream_meta_data::update::StreamMetaDataUpdate;
 use crate::db::stream_meta_data::StreamMetaData as StreamMetaDataDAO;
 
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -26,26 +26,9 @@ impl StreamMetaData {
             protocol: StreamProtocol::from_integer(dao.protocol),
             permanent_live: dao.permanent_live,
             save_replay: dao.save_replay,
-            latency_mode: StreamLatency::from_integer(dao.latency_mode),       
+            latency_mode: StreamLatency::from_integer(dao.latency_mode),
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum StreamProtocol {
-    RTMP = 1,
-    WHIP = 2,
-    MOQ = 3,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum StreamLatency {
-    LOW = 1,
-    STANDARD = 2,
-    HIGH = 3,
-}
-
-impl StreamMetaData {
     pub fn build_insert_dao(&self, stream_id: i32) -> NewStreamMetaData {
         NewStreamMetaData {
             stream_id,
@@ -74,6 +57,42 @@ impl StreamMetaData {
     }
 }
 
+#[derive(Debug, Clone)]
+#[repr(u8)]
+pub enum StreamProtocol {
+    RTMP = 1,
+    WHIP = 2,
+    MOQ = 3,
+}
+
+impl Serialize for StreamProtocol {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(match self {
+            StreamProtocol::RTMP => 1,
+            StreamProtocol::WHIP => 2,
+            StreamProtocol::MOQ => 3,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: u8 = Deserialize::deserialize(deserializer)?;
+        Ok(match value {
+            1 => StreamProtocol::RTMP,
+            2 => StreamProtocol::WHIP,
+            3 => StreamProtocol::MOQ,
+            _ => StreamProtocol::WHIP,
+        })
+    }
+}
+
 impl StreamProtocol {
     pub fn value_as_integer(&self) -> i32 {
         match &self {
@@ -92,6 +111,42 @@ impl StreamProtocol {
     }
 }
 
+#[derive(Debug, Clone)]
+#[repr(u8)]
+pub enum StreamLatency {
+    LOW = 1,
+    STANDARD = 2,
+    HIGH = 3,
+}
+
+impl Serialize for StreamLatency {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(match self {
+            StreamLatency::LOW => 1,
+            StreamLatency::STANDARD => 2,
+            StreamLatency::HIGH => 3,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamLatency {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: u8 = Deserialize::deserialize(deserializer)?;
+        Ok(match value {
+            1 => StreamLatency::LOW,
+            2 => StreamLatency::STANDARD,
+            3 => StreamLatency::HIGH,
+            _ => StreamLatency::STANDARD,
+        })
+    }
+}
+
 impl StreamLatency {
     pub fn value_as_integer(&self) -> i32 {
         match &self {
@@ -107,5 +162,5 @@ impl StreamLatency {
             3 => StreamLatency::HIGH,
             _ => StreamLatency::STANDARD,
         }
-    }   
+    }
 }

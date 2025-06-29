@@ -8,6 +8,7 @@ mod federation;
 mod middleware;
 mod models;
 mod files;
+mod sfu;
 
 use clap::ArgAction;
 use clap::Parser;

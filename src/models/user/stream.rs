@@ -6,6 +6,7 @@ use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
 use crate::models::user::stream_meta_data::StreamMetaData;
+use crate::util::time::{from_iso8601_naive, from_option_iso8601_to_naive};
 use actix_web::web::Data;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,11 @@ pub struct Stream {
     pub thumbnail: String,
     pub description: String,
     pub support: String,
+    #[serde(deserialize_with = "from_iso8601_naive")]
     pub date: NaiveDateTime,
+    #[serde(default, deserialize_with = "from_option_iso8601_to_naive")]
     pub start_time: Option<NaiveDateTime>,
+    #[serde(default, deserialize_with = "from_option_iso8601_to_naive")]
     pub end_time: Option<NaiveDateTime>,
     pub viewer: i64,
     pub likes: i64,

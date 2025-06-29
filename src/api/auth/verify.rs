@@ -1,4 +1,4 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{get, web, HttpResponse};
 
 use crate::db::DbPool;
 
@@ -6,6 +6,7 @@ use crate::models::auth::verify::Verify;
 use crate::models::error::ApiError;
 
 // GET api/auth/verify/{token}
+#[get("/verify/{token}")]
 pub async fn verify(
     pool: web::Data<DbPool>,
     path: web::Path<String>,

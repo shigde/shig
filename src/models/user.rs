@@ -1,10 +1,11 @@
 pub mod channel;
 pub mod stream;
-pub mod stream_preview;
-pub mod stream_meta_data;
-pub mod stream_thumbnail;
 pub mod stream_form;
+pub mod stream_meta_data;
+pub mod stream_preview;
+pub mod stream_thumbnail;
 
+use crate::db::active_users::read::find_active_user_by_uuid;
 use crate::db::users::delete::delete_user_by_id;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
@@ -34,6 +35,25 @@ impl User {
             avatar: principal.avatar.unwrap_or("".to_string()),
             role: principal.user_role_id,
         }
+    }
+
+    pub(crate) fn find_as_active(
+        pool: &web::Data<DbPool>,
+        user_uuid: &str,
+    ) -> Result<Self, ApiError> {
+        let mut conn = pool.get()?;
+        let active_user = find_active_user_by_uuid(&mut conn, user_uuid)?;
+
+        let (name, domain) = split_domain_name(active_user.name.as_str());
+
+        Ok(Self {
+            uuid: active_user.user_uuid,
+            name,
+            domain,
+            channel_uuid: active_user.channel_uuid,
+            avatar: active_user.avatar.unwrap_or("".to_string()),
+            role: active_user.user_role_id,
+        })
     }
 }
 

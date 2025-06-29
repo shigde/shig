@@ -1,5 +1,5 @@
 use actix_multipart::form::MultipartForm;
-use actix_web::{web, HttpResponse};
+use actix_web::{delete, get, post, put, web, HttpResponse};
 use crate::db::DbPool;
 use crate::files::FilesConfig;
 use crate::models::auth::session::Session;
@@ -10,6 +10,7 @@ use crate::models::user::stream::Stream;
 use crate::models::user::stream_form::StreamForm;
 
 // GET api/user/stream/:id
+#[get("/{uuid}")]
 pub async fn get_stream(
     pool: web::Data<DbPool>,
     path: web::Path<String>,
@@ -19,7 +20,7 @@ pub async fn get_stream(
     Ok(HttpResponse::Ok().json(Body::new("ok", stream)))
 }
 
-// DELETE api/user/stream/:id
+#[delete("/{uuid}")]
 pub async fn delete_stream(
     pool: web::Data<DbPool>,
     path: web::Path<String>,
@@ -32,6 +33,7 @@ pub async fn delete_stream(
 }
 
 // POST api/user/stream
+#[post("")]
 pub async fn create_stream(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<StreamForm>,
@@ -39,12 +41,13 @@ pub async fn create_stream(
     cfg: web::Data<FilesConfig>,
 ) -> Result<HttpResponse, ApiError> {
     match form.save(&pool, session.principal.clone(), &cfg) {
-        Ok(channel) => Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, channel))),
+        Ok(stream) => Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, stream))),
         Err(err) => Err(err),
     }
 }
 
 // PUT api/user/stream
+#[put("")]
 pub async fn update_stream(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<StreamForm>,
@@ -52,7 +55,7 @@ pub async fn update_stream(
     cfg: web::Data<FilesConfig>,
 ) -> Result<HttpResponse, ApiError> {
     match form.update(&pool, session.principal.clone(), &cfg) {
-        Ok(channel) => Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, channel))),
+        Ok(stream) => Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, stream))),
         Err(err) => Err(err),
     }
 }

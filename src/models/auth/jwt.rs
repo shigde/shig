@@ -119,7 +119,7 @@ pub fn verify_auth_token(
     pool: &web::Data<DbPool>,
 ) -> Result<Session, String> {
     let mut conn = pool.get().map_err(|_| "Failed to get db connection")?;
-    let user = find_active_user_by_uuid(&mut conn, token_data.claims.uuid.clone()).map_err(|_| "Invalid token")?;
+    let user = find_active_user_by_uuid(&mut conn, token_data.claims.uuid.as_str()).map_err(|_| "Invalid token")?;
     Ok(Session::create(user))
 }
 

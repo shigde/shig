@@ -5,9 +5,9 @@ use crate::models::error::ApiError;
 use crate::models::http::response::Body;
 use crate::models::http::{MESSAGE_LOGIN_FAILED, MESSAGE_LOGIN_SUCCESS};
 use actix_web::http::StatusCode;
-use actix_web::{web, HttpResponse};
+use actix_web::{post, web, HttpResponse};
 
-// POST api/auth/login
+#[post("/login")]
 pub async fn login(
     pool: web::Data<DbPool>,
     login_dto: web::Json<Login>,

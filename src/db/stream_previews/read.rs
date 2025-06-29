@@ -29,3 +29,20 @@ pub fn find_all_stream_previews(conn: &mut PgConnection) -> DbResult<Vec<StreamP
 
     Ok(stream_list)
 }
+
+pub fn find_all_stream_previews_by_channel(
+    conn: &mut PgConnection,
+    needle_uuid: String,
+) -> DbResult<Vec<StreamPreview>> {
+    use crate::db::schema_views::stream_previews::channel_uuid;
+    use crate::db::schema_views::stream_previews::date;
+    use crate::db::schema_views::stream_previews::dsl::stream_previews;
+
+    let stream_list = stream_previews
+        .filter(channel_uuid.eq(needle_uuid))
+        .select(StreamPreview::as_select())
+        .order_by(date)
+        .load(conn)?;
+
+    Ok(stream_list)
+}

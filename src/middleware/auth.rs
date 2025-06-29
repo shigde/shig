@@ -1,22 +1,21 @@
-
+use crate::api::IGNORE_ROUTES;
+use crate::db::DbPool;
+use crate::models::auth::jwt::{decode_auth_token, verify_auth_token, JWTConfig};
+use crate::models::http::response::Body;
+use crate::models::http::{EMPTY, MESSAGE_INVALID_TOKEN};
 use actix_service::forward_ready;
 use actix_web::body::EitherBody;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
+use actix_web::http::header::AUTHORIZATION;
 use actix_web::http::{
     header::{HeaderName, HeaderValue},
     Method,
 };
 use actix_web::web::Data;
-use actix_web::{Error, HttpMessage};
-use actix_web::http::header::AUTHORIZATION;
 use actix_web::HttpResponse;
+use actix_web::{Error, HttpMessage};
 use futures::future::{ok, LocalBoxFuture, Ready};
 use log::{error, info};
-use crate::api::IGNORE_ROUTES;
-use crate::db::DbPool;
-use crate::models::auth::jwt::{decode_auth_token, verify_auth_token, JWTConfig};
-use crate::models::http::{EMPTY, MESSAGE_INVALID_TOKEN};
-use crate::models::http::response::Body;
 
 pub struct Authentication;
 
@@ -80,10 +79,13 @@ where
                     if let Some(authen_header) = req.headers().get(AUTHORIZATION) {
                         info!("Parsing authorization header...");
                         if let Ok(authen_str) = authen_header.to_str() {
-                            if authen_str.starts_with("bearer") || authen_str.starts_with("Bearer") {
+                            if authen_str.starts_with("bearer") || authen_str.starts_with("Bearer")
+                            {
                                 info!("Parsing token...");
                                 let token = authen_str[6..authen_str.len()].trim();
-                                if let Ok(token_data) = decode_auth_token(token.to_string(), jwt_config) {
+                                if let Ok(token_data) =
+                                    decode_auth_token(token.to_string(), jwt_config)
+                                {
                                     info!("Decoding token...");
                                     let session = verify_auth_token(&token_data, pool);
                                     if session.is_ok() {
@@ -103,7 +105,13 @@ where
 
         if !authenticate_pass {
             let (request, _pl) = req.into_parts();
-            let response = HttpResponse::Unauthorized()
+
+            let mut response_code = HttpResponse::Unauthorized();
+            // if request.path().starts_with("/api/auth/user") {
+            //     response_code = HttpResponse::Forbidden();
+            // }
+
+            let response = response_code
                 .json(Body::new(MESSAGE_INVALID_TOKEN, EMPTY))
                 .map_into_right_body();
 

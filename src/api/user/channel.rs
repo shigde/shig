@@ -6,9 +6,10 @@ use crate::models::http::response::Body;
 use crate::models::http::MESSAGE_OK;
 use crate::models::user::channel::{Channel, ChannelForm};
 use actix_multipart::form::MultipartForm;
-use actix_web::{web, HttpResponse};
+use actix_web::{get, put, web, HttpResponse};
 
-// PUT api/user/channel/:id
+// PUT api/channel
+#[put("")]
 pub async fn update_channel(
     pool: web::Data<DbPool>,
     MultipartForm(form): MultipartForm<ChannelForm>,
@@ -22,6 +23,7 @@ pub async fn update_channel(
 }
 
 // Get api/pub/channel/:uuid
+#[get("/{uuid}")]
 pub async fn get_channel(
     pool: web::Data<DbPool>,
     path: web::Path<String>,

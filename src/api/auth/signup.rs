@@ -4,9 +4,9 @@ use crate::models::auth::signup::SingUp;
 use crate::models::error::ApiError;
 use crate::models::mail::config::MailConfig;
 use actix_web::http::StatusCode;
-use actix_web::{web, HttpResponse};
+use actix_web::{post, web, HttpResponse};
 
-// POST api/auth/register
+#[post("/register")]
 pub async fn signup(
     pool: web::Data<DbPool>,
     sing_up_dto: web::Json<SingUp>,

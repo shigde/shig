@@ -5,9 +5,9 @@ use crate::models::error::ApiError;
 use crate::models::http::response::Body;
 use crate::models::http::MESSAGE_OK;
 use crate::models::mail::config::MailConfig;
-use actix_web::{web, HttpResponse};
+use actix_web::{post, put, web, HttpResponse};
 
-// POST api/auth/pass/email
+#[post("/pass/email")]
 pub async fn send_forgotten_pass_email(
     pool: web::Data<DbPool>,
     email_dto: web::Json<ForgottenPassword>,
@@ -18,7 +18,7 @@ pub async fn send_forgotten_pass_email(
     }
 }
 
-// PUT api/auth/pass/reset
+#[put("/pass/reset")]
 pub async fn reset_password(
     pool: web::Data<DbPool>,
     reset_dto: web::Json<ResetPassword>,
@@ -31,7 +31,7 @@ pub async fn reset_password(
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }
 
-// PUT api/auth/pass/update
+#[put("/pass/update")]
 pub async fn update_password(
     pool: web::Data<DbPool>,
     update_dto: web::Json<UpdatePassword>,

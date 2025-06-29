@@ -23,10 +23,10 @@ CREATE TABLE streams
     updated_at   TIMESTAMP           NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX index_streams_user_id ON streams (user_id);
-CREATE UNIQUE INDEX index_streams_channel_id ON streams (channel_id);
+CREATE INDEX index_streams_user_id ON streams (user_id);
+CREATE INDEX index_streams_channel_id ON streams (channel_id);
 CREATE UNIQUE INDEX index_streams_uuid ON streams (uuid);
-CREATE UNIQUE INDEX index_streams_title ON streams (title);-- Your SQL goes here
+CREATE INDEX index_streams_title ON streams (title);-- Your SQL goes here
 
 CREATE TABLE stream_meta_data
 (

@@ -17,8 +17,8 @@ create table actor_images
 
 
 
-create unique index actor_image_filename on actor_images (filename);
+create index actor_image_filename on actor_images (filename);
 
-create unique index actor_image_actor_id_type_width on actor_images (actor_id, image_type, width);
+create index actor_image_actor_id_type_width on actor_images (actor_id, image_type, width);
 
 

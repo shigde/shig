@@ -5,7 +5,7 @@ use diesel::{PgConnection, QueryDsl};
 
 pub fn find_active_user_by_uuid(
     conn: &mut PgConnection,
-    needle_uuid: String,
+    needle_uuid: &str,
 ) -> DbResult<ActiveUser> {
     use crate::db::schema_views::active_users::dsl::active_users;
     use crate::db::schema_views::active_users::user_uuid;
