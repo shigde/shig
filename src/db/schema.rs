@@ -80,6 +80,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    lobbies (id) {
+        id -> Int4,
+        #[max_length = 255]
+        uuid -> Varchar,
+        user_id -> Int4,
+        channel_id -> Int4,
+        stream_id -> Nullable<Int4>,
+        #[max_length = 45]
+        secret -> Varchar,
+        is_open -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     stream_meta_data (id) {
         id -> Int4,
         stream_id -> Int4,
@@ -191,6 +207,9 @@ diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
 diesel::joinable!(instances -> actors (actor_id));
+diesel::joinable!(lobbies -> channels (channel_id));
+diesel::joinable!(lobbies -> streams (stream_id));
+diesel::joinable!(lobbies -> users (user_id));
 diesel::joinable!(stream_meta_data -> streams (stream_id));
 diesel::joinable!(stream_participants -> streams (stream_id));
 diesel::joinable!(stream_participants -> users (user_id));
@@ -206,6 +225,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     actors,
     channels,
     instances,
+    lobbies,
     stream_meta_data,
     stream_participants,
     stream_thumbnails,

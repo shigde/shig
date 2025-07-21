@@ -5,6 +5,7 @@ pub mod channels;
 pub mod error;
 pub mod fixtures;
 pub mod instances;
+pub mod lobbies;
 pub mod schema;
 pub mod schema_views;
 pub mod stream_meta_data;

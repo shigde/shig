@@ -19,6 +19,7 @@ use bcrypt::{hash, DEFAULT_COST};
 use chrono::{NaiveDateTime, Utc};
 use diesel::{Connection, Insertable, RunQueryDsl, SelectableHelper, PgConnection};
 use uuid::Uuid;
+use crate::db::lobbies::create::insert_new_lobby;
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::users)]
@@ -117,13 +118,17 @@ pub fn create_new_user(
 
             // Create a default channel for new users
             let channel_domain_name = build_domain_name(channel_name.as_str(), domain);
-            let _ = insert_new_channel(
+            let new_cannel = insert_new_channel(
                 conn,
                 channel_domain_name.as_str(),
                 user.id,
                 new_group_actor.id,
             )
-            .map_err(|e| -> String { format!("insert new group: {}", e) })?;
+            .map_err(|e| -> String { format!("insert new channel: {}", e) })?;
+
+            // Each user has a lobby for live stream we create this one now
+            let _ = insert_new_lobby(conn, user.id,  new_cannel.id, None, false)
+                .map_err(|e| -> String { format!("insert new lobby: {}", e) })?;
         }
 
         // In case of not default active user send a verification email

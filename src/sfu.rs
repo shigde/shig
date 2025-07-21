@@ -8,6 +8,7 @@ pub mod router;
 pub mod error;
 pub mod lobby;
 
+#[allow(dead_code)]
 struct Sfu {
     config: SfuConfig,
     // No need for Arc amd Mutex here, because the Conferences List is not shared
@@ -15,6 +16,7 @@ struct Sfu {
 }
 
 impl Sfu {
+    #[allow(dead_code)]
     pub fn new(config: SfuConfig) -> Sfu {
         let lobbies = Box::new(HashMap::new());
         Sfu {
@@ -24,7 +26,7 @@ impl Sfu {
     }
 }
 
-
+#[allow(dead_code)]
 pub fn run () {
     //let socket = Arc::new(UdpSocket::bind("0.0.0.0:5000").await.unwrap());
     // let mut sfu = Router::new();

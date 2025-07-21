@@ -4,6 +4,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io::Error as IoError;
 
+#[allow(dead_code)]
 pub type SfuResult<T> = Result<T, SfuError>;
 
 #[derive(Debug)]

@@ -1,6 +1,7 @@
 use crate::sfu::peer::Peer;
 use crate::sfu::router::Router;
 
+#[allow(dead_code)]
 pub struct Lobby {
     id: String,
     peers: Vec<Peer>,
@@ -8,6 +9,7 @@ pub struct Lobby {
 }
 
 impl Lobby {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             id: String::new(),
