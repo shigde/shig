@@ -1,11 +1,23 @@
-use std::{net::SocketAddr};
-use tokio::{net::UdpSocket};
+use actix::{Actor, Context};
 
-#[allow(dead_code)]
 pub struct Peer {
-    pub id: u64,
-    pub addr: SocketAddr,
-    udp_socket: Option<UdpSocket>,
-    socket_addr: Option<SocketAddr>,
+    pub id: String,
 }
 
+impl Peer {
+    fn new(id: String) -> Self {
+        Self { id }
+    }
+}
+
+impl Actor for Peer {
+    type Context = actix::Context<Self>;
+
+    fn started(&mut self, ctx: &mut Context<Self>) {
+        log::info!("started: peer actor {} is alive", self.id);
+    }
+
+    fn stopped(&mut self, ctx: &mut Context<Self>) {
+        log::info!("stopped: peer actor {} is stopped", self.id);
+    }
+}

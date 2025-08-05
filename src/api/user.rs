@@ -7,6 +7,7 @@ use crate::models::user::User;
 pub mod channel;
 pub mod stream;
 pub mod stream_preview;
+pub mod lobby;
 
 // GET api/pup/user/:user_uuid
 #[get("/{user_uuid}")]

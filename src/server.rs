@@ -1,19 +1,22 @@
 mod error;
 
-use crate::db::{build_pool, run_migrations, DbConfig};
-use crate::server::error::ServerResult;
-use std::fs;
-use std::path::Path;
-
 use crate::db::fixtures::insert_fixtures;
+use crate::db::{build_pool, run_migrations, DbConfig};
 use crate::federation::FederationConfig;
 use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
 use crate::models::mail::config::MailConfig;
+use crate::server::error::ServerResult;
+use crate::sfu::config::SfuConfig;
+use crate::sfu::Sfu;
 use crate::{api, server};
+use actix::Addr;
+use actix_web::dev::Server;
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
+use std::fs;
+use std::path::Path;
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> impl Responder {
@@ -21,32 +24,33 @@ async fn index(_req: HttpRequest) -> impl Responder {
 }
 
 // Top level struct to hold the TOML data.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ConfigFile {
-    server: ServerConfig,
-    files: FilesConfig,
-    federation: FederationConfig,
-    database: DbConfig,
-    jwt: JWTConfig,
-    mail: MailConfig,
+    pub server: ServerConfig,
+    pub sfu: SfuConfig,
+    pub files: FilesConfig,
+    pub federation: FederationConfig,
+    pub database: DbConfig,
+    pub jwt: JWTConfig,
+    pub mail: MailConfig,
 }
 
 // Config struct holds to data from the `[config]` section.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ServerConfig {
     host: String,
     port: u16,
     tls: TlsConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct TlsConfig {
     enabled: bool,
     cert: String,
     key: String,
 }
 
-pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
+pub async fn start(cfg: ConfigFile, sfu_addr: Addr<Sfu>) -> ServerResult<Server> {
     // create static file dir if not exists
     let htdocs = cfg.files.htdocs.as_str();
     if !Path::new(htdocs).exists() {
@@ -69,6 +73,7 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
     let svs = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(sfu_addr.clone()))
             .app_data(web::Data::new(cfg.federation.clone()))
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))
@@ -77,7 +82,7 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
             .configure(api::config_services)
     });
 
-    if cfg.server.tls.enabled {
+    let server = if cfg.server.tls.enabled {
         log::info!(
             "web server start listening on: https://{}:{}/",
             cfg.server.host,
@@ -88,17 +93,14 @@ pub async fn start(cfg: ConfigFile) -> ServerResult<()> {
         builder.set_certificate_chain_file(cfg.server.tls.cert)?;
         svs.bind_openssl((cfg.server.host, cfg.server.port), builder)?
             .run()
-            .await
-            .map_err(server::error::ServerError::from)
     } else {
         log::info!(
             "web server start listening on: http://{}:{}/",
             cfg.server.host,
             cfg.server.port
         );
-        svs.bind((cfg.server.host.clone(), cfg.server.port))?
-            .run()
-            .await
-            .map_err(server::error::ServerError::from)
-    }
+        svs.bind((cfg.server.host.clone(), cfg.server.port))?.run()
+    };
+
+    Ok(server)
 }

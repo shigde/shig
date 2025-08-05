@@ -15,6 +15,9 @@ use clap::Parser;
 use server::ConfigFile;
 use std::fs;
 use std::process::exit;
+use actix::Actor;
+use tokio::signal;
+use crate::sfu::{Sfu, StopNow};
 
 #[derive(Parser)]
 #[command(name = "Shig Server")]
@@ -50,16 +53,33 @@ async fn main() {
         }
     };
 
+    // Start the SFU server
+    let sfu = Sfu::new(server_cfg.sfu.clone());
+    let sfu_addr = sfu.start();
+
+    // Shutdown-Signal vorbereiten
+    let sfu_addr_cp = sfu_addr.clone();
+    let shutdown = async {
+        signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+        log::info!("Shutdown signal received!");
+        
+        sfu_addr_cp.do_send(StopNow{});
+
+        // Currently running requests are allowed to complete
+        // Then stops the entire Actix system
+        actix::System::current().stop();
+    };
+
     // Start web server
     log::info!("starting web server");
-    match server::start(server_cfg).await {
-        Ok(_) => {
-            log::info!("Shig server stopped");
-            return
+    let server = server::start(server_cfg, sfu_addr);
+    
+    tokio::select! {
+        _ = server => {
+            log::info!("Server was closed");
         },
-        Err(e) => {
-            log::error!("{}", e);
-            exit(1);
+        _ = shutdown => {
+            log::info!("Shutdown done!");       
         }
-    };
+    }
 }

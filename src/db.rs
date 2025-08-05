@@ -25,7 +25,7 @@ use std::error::Error;
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct DbConfig {
     pub connection: String,
     #[allow(dead_code)]

@@ -13,7 +13,7 @@ use crate::db::active_users::read::find_active_user_by_uuid;
 
 const AUTH_SESSION_TIMEOUT: i64 = 600; // 10min;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct JWTConfig {
     pub auth_token_key: String,
     pub refresh_token_key: String,

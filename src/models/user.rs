@@ -4,6 +4,7 @@ pub mod stream_form;
 pub mod stream_meta_data;
 pub mod stream_preview;
 pub mod stream_thumbnail;
+pub mod lobby;
 
 use crate::db::active_users::read::find_active_user_by_uuid;
 use crate::db::users::delete::delete_user_by_id;
