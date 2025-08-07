@@ -8,7 +8,6 @@ use actix_web::{
     HttpResponse, ResponseError,
 };
 use derive_more::{Display, Error};
-use log::error;
 use serde::de::StdError;
 
 #[derive(Debug, Display, Error)]
@@ -68,24 +67,32 @@ impl error::ResponseError for ApiError {
 
 impl From<DbError> for ApiError {
     fn from(e: DbError) -> Self {
-        error!("{}", e);
         match e.kind() {
-            DbErrorKind::NotFound => ApiError::NotFound {
-                error_message: MESSAGE_NOT_FOUND.to_string(),
-            },
-            DbErrorKind::AlreadyExists => ApiError::Conflict {
-                error_message: e.to_string(),
-            },
-            _ => ApiError::InternalServerError {
-                error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
-            },
+            DbErrorKind::NotFound => {
+                log::warn!("From api: {}", e);
+                ApiError::NotFound {
+                    error_message: MESSAGE_NOT_FOUND.to_string(),
+                }
+            }
+            DbErrorKind::AlreadyExists => {
+                log::warn!("From api: {}", e);
+                ApiError::Conflict {
+                    error_message: e.to_string(),
+                }
+            }
+            _ => {
+                log::error!("From api: {}", e);
+                ApiError::InternalServerError {
+                    error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
+                }
+            }
         }
     }
 }
 
 impl From<diesel::r2d2::PoolError> for ApiError {
     fn from(e: diesel::r2d2::PoolError) -> Self {
-        error!("{}", e);
+        log::error!("From api: {}", e);
         ApiError::InternalServerError {
             error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
         }
@@ -94,12 +101,13 @@ impl From<diesel::r2d2::PoolError> for ApiError {
 
 impl From<Box<dyn StdError + Send + Sync>> for ApiError {
     fn from(e: Box<dyn StdError + Send + Sync>) -> Self {
-        error!("{}", e);
         if e.to_string().contains("Record not found") {
+            log::info!("From api: {}", e);
             return ApiError::NotFound {
                 error_message: MESSAGE_NOT_FOUND.to_string(),
             };
         }
+        log::error!("From api: {}", e);
         ApiError::InternalServerError {
             error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
         }
@@ -108,12 +116,13 @@ impl From<Box<dyn StdError + Send + Sync>> for ApiError {
 
 impl From<Box<dyn StdError>> for ApiError {
     fn from(e: Box<dyn StdError>) -> Self {
-        error!("{}", e);
+        log::info!("From api: {}", e);
         if e.to_string().contains("Record not found") {
             return ApiError::NotFound {
                 error_message: MESSAGE_NOT_FOUND.to_string(),
             };
         }
+        log::error!("From api: {}", e);
         ApiError::InternalServerError {
             error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
         }
@@ -123,12 +132,28 @@ impl From<Box<dyn StdError>> for ApiError {
 impl From<FileError> for ApiError {
     fn from(e: FileError) -> Self {
         match e.kind {
-            FileErrorKind::BadArgument => ApiError::BadRequest {
-                error_message: e.details.to_string(),
-            },
-            _ => ApiError::InternalServerError {
-                error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
-            },
+            FileErrorKind::BadArgument => {
+                log::warn!("From api: {}", e.details);
+                ApiError::BadRequest {
+                    error_message: e.details.to_string(),
+                }
+            }
+            _ => {
+                log::error!("From api: {}", e.details);
+                ApiError::InternalServerError {
+                    error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
+                }
+            }
+        }
+    }
+}
+
+// This Error occurs when a modle do a transaction
+impl From<diesel::result::Error> for ApiError {
+    fn from(e: diesel::result::Error) -> Self {
+        log::error!("From api: {e}");
+        ApiError::InternalServerError {
+            error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_string(),
         }
     }
 }

@@ -1,5 +1,7 @@
+use crate::models::user::lobby::Lobby as LobbyModel;
 use crate::sfu::config::SfuConfig;
-use crate::sfu::lobby::Lobby;
+use crate::sfu::error::{LobbyError, LobbyResult, SfuError, SfuResult};
+use crate::sfu::lobby::{JoinPeer, Lobby, LobbyShutdown};
 use actix::prelude::*;
 use std::collections::HashMap;
 
@@ -11,13 +13,18 @@ pub mod router;
 
 pub struct Sfu {
     config: SfuConfig,
-    lobbies: Box<HashMap<String, Lobby>>,
+    lobbies: Box<HashMap<String, Addr<Lobby>>>,
+    shutting_down: bool,
 }
 
 impl Sfu {
     pub fn new(config: SfuConfig) -> Sfu {
         let lobbies = Box::new(HashMap::new());
-        Sfu { config, lobbies }
+        Sfu {
+            config,
+            lobbies,
+            shutting_down: false,
+        }
     }
 }
 
@@ -40,32 +47,80 @@ impl Actor for Sfu {
 }
 
 #[derive(Message)]
-#[rtype(result = "()")]
+#[rtype(result = " SfuResult<String>")]
 pub struct SartLobby {
-    lobby_id: String,
-    owner_id: String,
-    stream_id: String,
+    pub lobby: LobbyModel,
+    pub user_uuid: String,
 }
 
 impl Handler<SartLobby> for Sfu {
-    type Result = ();
+    type Result = ResponseActFuture<Self, SfuResult<String>>;
 
-    fn handle(&mut self, _msg: SartLobby, _: &mut Self::Context) -> Self::Result {
-        //let addr = ChildActor::new(msg.id.clone()).start();
-        //self.children.insert(msg.id, addr);
+    fn handle(&mut self, msg: SartLobby, ctx: &mut Self::Context) -> Self::Result {
+        let lobby_uuid = msg.lobby.uuid.clone();
+        if self.lobbies.contains_key(&lobby_uuid) {
+            return Box::pin(fut::err(SfuError::LobbyAlreadyStarted()));
+        }
+        let lobby_addr = Lobby::new(msg.lobby, ctx.address()).start();
+        self.lobbies.insert(lobby_uuid, lobby_addr.clone());
+
+        let fut = async move {
+            let result = lobby_addr
+                .send(JoinPeer {
+                    user_uuid: "".to_string(),
+                    offer: "".to_string(),
+                    role: peer::PeerRole::Owner,
+                })
+                .await;
+
+            match result {
+                Ok(val) => match val {
+                    Ok(_) => Ok("".to_string()),
+                    Err(e) => Err(SfuError::LobbyError(e)),
+                },
+                Err(e) => Err(SfuError::LobbyMailboxError(e)),
+            }
+        }
+        .into_actor(self);
+
+        Box::pin(fut)
     }
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct StopNow {
-}
+pub struct Shutdown {}
 
-impl Handler<StopNow> for Sfu {
+impl Handler<Shutdown> for Sfu {
     type Result = ();
 
-    fn handle(&mut self, _msg: StopNow, _: &mut Self::Context) -> Self::Result {
-        //let addr = ChildActor::new(msg.id.clone()).start();
-        //self.children.insert(msg.id, addr);
+    fn handle(&mut self, _msg: Shutdown, ctx: &mut Self::Context) -> Self::Result {
+        self.shutting_down = true;
+
+        for (_, addr) in self.lobbies.iter() {
+            addr.do_send(LobbyShutdown {});
+        }
+
+        if self.lobbies.is_empty() {
+            ctx.stop();
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct LobbyStopped {
+    id: String,
+}
+
+impl Handler<LobbyStopped> for Sfu {
+    type Result = ();
+
+    fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
+        self.lobbies.remove(&msg.id);
+
+        if self.shutting_down && self.lobbies.is_empty() {
+            ctx.stop();
+        }
     }
 }

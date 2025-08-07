@@ -17,7 +17,7 @@ use std::fs;
 use std::process::exit;
 use actix::Actor;
 use tokio::signal;
-use crate::sfu::{Sfu, StopNow};
+use crate::sfu::{Sfu, Shutdown};
 
 #[derive(Parser)]
 #[command(name = "Shig Server")]
@@ -63,7 +63,7 @@ async fn main() {
         signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
         log::info!("Shutdown signal received!");
         
-        sfu_addr_cp.do_send(StopNow{});
+        sfu_addr_cp.do_send(Shutdown {});
 
         // Currently running requests are allowed to complete
         // Then stops the entire Actix system

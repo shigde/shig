@@ -33,7 +33,6 @@ toml = "^0.5.2"
 serde = { version = "^1.0.219", features = ["derive"] }
 diesel = { version = "^2.2.7", features = ["postgres", "r2d2", "chrono", "uuid"] }
 diesel_migrations = "^2.2.0"
-dotenv = "0.15.0"
 log = "^0.4.22"
 env_logger = "^0.11.6"
 chrono = { version = "^0.4.39", features = ["serde"] }
