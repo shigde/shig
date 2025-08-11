@@ -11,5 +11,3 @@
 ## Documentation
 
 Please follow this link: [Doc](doc/index.md).
-
-
