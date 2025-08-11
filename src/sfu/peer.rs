@@ -2,7 +2,7 @@ use crate::sfu::lobby::{Lobby, LobbyShutdown, PeerStopped};
 use actix::{Actor, ActorContext, Addr, Context, Handler, Message};
 
 pub enum PeerRole {
-    Owner,
+    Host,
     Guest,
 }
 

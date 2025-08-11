@@ -2,7 +2,7 @@ use crate::db::DbPool;
 use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
 use crate::models::http::response::Body;
-use crate::models::user::lobby::Lobby;
+use crate::models::lobby::Lobby;
 use actix_web::{put, web, HttpResponse};
 
 // PUT api/user/stream/:stream_id/lobby

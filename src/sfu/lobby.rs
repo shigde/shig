@@ -1,10 +1,10 @@
-use crate::models::user::lobby::Lobby as Model;
+use crate::models::lobby::Lobby as Model;
 use crate::sfu::error::LobbyResult;
 use crate::sfu::peer::{Peer, PeerRole, PeerShutdown};
 use crate::sfu::router::Router;
+use crate::sfu::{LobbyStopped, Sfu};
 use actix::{Actor, ActorContext, Addr, Context, Handler, Message};
 use std::collections::HashMap;
-use crate::sfu::{LobbyStopped, Sfu};
 
 pub struct Lobby {
     id: String,
@@ -16,20 +16,20 @@ pub struct Lobby {
 }
 
 impl Lobby {
-    pub fn new(model: Model, parent_addr: Addr<Sfu>,) -> Self {
+    pub fn new(model: Model, parent_addr: Addr<Sfu>) -> Self {
         Self {
             id: model.uuid.clone(),
             model,
             peers: HashMap::new(),
             parent_addr,
             router: Router::new(),
-            shutting_down: false
+            shutting_down: false,
         }
     }
 
     fn stop(&mut self, ctx: &mut Context<Self>) {
-        self.parent_addr.do_send(LobbyStopped{
-            id: self.id.clone()
+        self.parent_addr.do_send(LobbyStopped {
+            id: self.id.clone(),
         });
         ctx.stop();
     }
@@ -46,7 +46,6 @@ impl Actor for Lobby {
         log::info!("stopped: lobby actor {} is stopped", self.id);
     }
 }
-
 
 #[derive(Message)]
 #[rtype(result = " LobbyResult<String>")]
@@ -106,7 +105,7 @@ impl Handler<LobbyShutdown> for Lobby {
         self.shutting_down = true;
 
         for (_, addr) in self.peers.iter() {
-            addr.do_send(PeerShutdown{});
+            addr.do_send(PeerShutdown {});
         }
 
         if self.peers.is_empty() {
@@ -128,7 +127,7 @@ impl Handler<PeerStopped> for Lobby {
         self.peers.remove(&msg.id);
 
         if self.peers.is_empty() {
-            self.stop(ctx);       
+            self.stop(ctx);
         }
     }
 }

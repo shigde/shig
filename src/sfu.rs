@@ -1,4 +1,4 @@
-use crate::models::user::lobby::Lobby as LobbyModel;
+use crate::models::lobby::Lobby as LobbyModel;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{LobbyError, LobbyResult, SfuError, SfuResult};
 use crate::sfu::lobby::{JoinPeer, Lobby, LobbyShutdown};
@@ -69,7 +69,7 @@ impl Handler<SartLobby> for Sfu {
                 .send(JoinPeer {
                     user_uuid: "".to_string(),
                     offer: "".to_string(),
-                    role: peer::PeerRole::Owner,
+                    role: peer::PeerRole::Host,
                 })
                 .await;
 
