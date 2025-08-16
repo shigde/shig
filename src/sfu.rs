@@ -1,6 +1,6 @@
 use crate::models::lobby::Lobby as LobbyModel;
 use crate::sfu::config::SfuConfig;
-use crate::sfu::error::{LobbyError, LobbyResult, SfuError, SfuResult};
+use crate::sfu::error::{LobbyResult, SfuError, SfuResult};
 use crate::sfu::lobby::{JoinPeer, Lobby, LobbyShutdown};
 use actix::prelude::*;
 use std::collections::HashMap;
@@ -8,8 +8,9 @@ use std::collections::HashMap;
 pub mod config;
 pub mod error;
 pub mod lobby;
+mod media;
+mod message;
 pub mod peer;
-pub mod router;
 
 pub struct Sfu {
     config: SfuConfig,
@@ -28,7 +29,7 @@ impl Sfu {
     }
 }
 
-// Provide Actor implementation for our actor
+// Provide Actor implementation for our SFU
 impl Actor for Sfu {
     type Context = Context<Self>;
 

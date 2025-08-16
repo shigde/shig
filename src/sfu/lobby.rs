@@ -1,7 +1,7 @@
 use crate::models::lobby::Lobby as Model;
 use crate::sfu::error::LobbyResult;
-use crate::sfu::peer::{Peer, PeerRole, PeerShutdown};
-use crate::sfu::router::Router;
+use crate::sfu::media::router::Router;
+use crate::sfu::peer::{Peer, PeerId, PeerRole, PeerShutdown};
 use crate::sfu::{LobbyStopped, Sfu};
 use actix::{Actor, ActorContext, Addr, Context, Handler, Message};
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub struct Lobby {
     id: String,
     model: Model,
-    peers: HashMap<String, Addr<Peer>>,
+    peers: HashMap<PeerId, Addr<Peer>>,
     parent_addr: Addr<Sfu>,
     router: Router,
     shutting_down: bool,
@@ -117,7 +117,7 @@ impl Handler<LobbyShutdown> for Lobby {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PeerStopped {
-    pub id: String,
+    pub id: PeerId,
 }
 
 impl Handler<PeerStopped> for Lobby {

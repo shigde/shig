@@ -1,6 +1,5 @@
 pub mod join;
 
-use crate::db::error::DbResult;
 use crate::db::lobbies::read::find_lobby_by_uuid;
 use crate::db::lobbies::update::update_lobby;
 use crate::db::streams::read::find_stream_by_uuid;
@@ -73,7 +72,7 @@ impl Lobby {
                 true,
             )?;
 
-            let mut lobby = Lobby::new();
+            let lobby = Lobby::new();
             let _ = sfu_addr.try_send(SartLobby {
                 lobby: lobby.clone(),
                 user_uuid: user.user_uuid.clone(),
