@@ -1,3 +1,4 @@
+use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::peer::Peer;
 use actix::{Addr, Message};
 use bytes::Bytes;
@@ -64,8 +65,8 @@ pub struct MuteMsgData {
 
 const MESSAGE_SIZE: usize = 1500;
 
-pub trait DataChannel {
-    fn initialize_data_channel(&self, peer_addr: Addr<Peer>) {
+pub trait DataChannel: Connector {
+    fn initialize_data_channel(&mut self, peer_addr: Addr<Peer>, kind: ConnectorType) {
         let peer_connection = self.get_pc();
         {
             // Set a data channel handler so that we can receive data
@@ -73,16 +74,20 @@ pub trait DataChannel {
                 let d_label = dc.label().to_owned();
                 let d_id = dc.id();
                 log::info!("New DataChannel {d_label} {d_id}");
-                let peer_addr = peer_addr.clone();
+                peer_addr.do_send(OnDataChannel {
+                    kind,
+                    dc: Arc::clone(&dc),
+                });
+                let peer_addr_clone = peer_addr.clone();
                 Box::pin(async move {
                     dc.on_open(Box::new(move || Box::pin(async move {})));
 
                     dc.on_message(Box::new(move |dcm| {
                         //msg.is_string
-                        let peer_addr = peer_addr.clone();
+                        let addr = peer_addr_clone.clone();
                         let msg = DataChannelMsg::from_data_channel_message(&dcm).unwrap();
                         Box::pin(async move {
-                            peer_addr.do_send(msg);
+                            addr.do_send(msg);
                         })
                     }));
                 })
@@ -91,20 +96,30 @@ pub trait DataChannel {
     }
 
     async fn send_dcm(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
-        let dc = self.get_dc();
+        let Some(dc) = self.get_dc() else {
+            return Ok(());
+        };
         let dcm = msg.to_json()?;
         let _ = dc.send_text(dcm).await.map_err(|e| Error::from(e))?;
         Ok(())
     }
 
     async fn send_dcm_bin(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
-        let dc = self.get_dc();
+        let Some(dc) = self.get_dc() else {
+            return Ok(());
+        };
         let dcm = msg.to_bin()?;
         let _ = dc.send(&dcm).await.map_err(|e| Error::from(e))?;
         Ok(())
     }
 
-    fn get_pc(&self) -> Arc<RTCPeerConnection>;
-    fn set_dc(&self, dc: Arc<RTCDataChannel>);
-    fn get_dc(&self) -> Arc<RTCDataChannel>;
+    fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
+    fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct OnDataChannel {
+    pub kind: ConnectorType,
+    pub dc: Arc<RTCDataChannel>,
 }

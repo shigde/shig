@@ -1,17 +1,28 @@
 use crate::sfu::lobby::{Lobby, PeerStopped};
-use crate::sfu::media::data_channel::DataChannelMsg;
+use crate::sfu::media::connector::ConnectorType;
+use crate::sfu::media::data_channel::{DataChannelMsg, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
-use actix::{Actor, ActorContext, Addr, Context, Handler, Message};
+use crate::sfu::media::receiver::Receiver;
+use crate::sfu::media::sender::Sender;
+use actix::ActorFutureExt;
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use derive_more::Display;
 
 pub struct Peer {
     pub id: PeerId,
     parent_addr: Addr<Lobby>,
+    receiver: Option<Receiver>,
+    sender: Option<Sender>,
 }
 
 impl Peer {
     pub fn new(id: PeerId, parent_addr: Addr<Lobby>) -> Self {
-        Self { id, parent_addr }
+        Self {
+            id,
+            parent_addr,
+            receiver: None,
+            sender: None,
+        }
     }
 
     fn stop(&self, ctx: &mut Context<Peer>) {
@@ -25,8 +36,40 @@ impl Peer {
 impl Actor for Peer {
     type Context = Context<Self>;
 
-    fn started(&mut self, _ctx: &mut Context<Self>) {
+    fn started(&mut self, ctx: &mut Context<Self>) {
         log::info!("started: peer actor peer_id={} is alive", self.id);
+        let id = self.id.clone();
+        let addr = ctx.address();
+
+        ctx.spawn(
+            async move { Receiver::new(id, addr).await }
+                .into_actor(self)
+                .map(|receiver, actor, _ctx| match receiver {
+                    Ok(r) => {
+                        actor.receiver = Some(r);
+                        log::info!("Receiver successfully created");
+                    }
+                    Err(e) => {
+                        log::error!("Receiver could not be created: {:?}", e);
+                    }
+                }),
+        );
+
+        let peer_id = self.id.clone();
+        let peer_addr = ctx.address();
+        ctx.spawn(
+            async move { Sender::new(peer_id, peer_addr).await }
+                .into_actor(self)
+                .map(|sender, actor, _ctx| match sender {
+                    Ok(s) => {
+                        actor.sender = Some(s);
+                        log::info!("Sender successfully created");
+                    }
+                    Err(e) => {
+                        log::error!("Sender could not be created: {:?}", e);
+                    }
+                }),
+        );
     }
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
@@ -62,6 +105,17 @@ impl Handler<MediaMessage> for Peer {
 }
 
 // https://blog.lminiero.it/live-performance/
+
+impl Handler<OnDataChannel> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, msg: OnDataChannel, _ctx: &mut Self::Context) -> Self::Result {
+        match msg.kind {
+            ConnectorType::Sender => {}
+            ConnectorType::Receiver => {}
+        }
+    }
+}
 
 impl Handler<DataChannelMsg> for Peer {
     type Result = ();

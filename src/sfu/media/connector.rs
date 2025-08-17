@@ -1,6 +1,6 @@
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::message::MediaMessage;
-use crate::sfu::peer::Peer;
+use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
 use webrtc::api::APIBuilder;
@@ -17,7 +17,7 @@ pub enum ConnectorType {
 
 pub trait Connector {
     async fn create_connection(
-        id: String,
+        id: PeerId,
         peer_addr: Addr<Peer>,
         conn_type: ConnectorType,
     ) -> MediaResult<Arc<RTCPeerConnection>> {

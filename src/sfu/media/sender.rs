@@ -1,14 +1,17 @@
 use crate::sfu::media::connector::{Connector, ConnectorType};
+use crate::sfu::media::data_channel::DataChannel;
 use crate::sfu::media::error::MediaResult;
-use crate::sfu::peer::Peer;
+use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
+use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::track::track_local::TrackLocal;
 
 pub struct Sender {
-    id: String,
+    id: PeerId,
     pc: Arc<RTCPeerConnection>,
+    dc: Option<Arc<RTCDataChannel>>,
     peer_addr: Addr<Peer>,
 }
 
@@ -18,14 +21,30 @@ impl Connector for Sender {
     }
 }
 
-impl Sender {
-    pub(crate) async fn new(id: String, peer_addr: Addr<Peer>) -> MediaResult<Self> {
-        let pc =
-            Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Sender).await?;
-        Ok(Self { id, pc, peer_addr })
+impl DataChannel for Sender {
+    fn set_dc(&mut self, dc: Arc<RTCDataChannel>) {
+        self.dc = Some(dc);
     }
 
-    pub(crate) async fn connect(&self, sdp_offer: &str) -> MediaResult<String> {
+    fn get_dc(&self) -> Option<Arc<RTCDataChannel>> {
+        self.dc.clone()
+    }
+}
+
+impl Sender {
+    pub(crate) async fn new(id: PeerId, peer_addr: Addr<Peer>) -> MediaResult<Self> {
+        let pc =
+            Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Sender).await?;
+        Ok(Self {
+            id,
+            pc,
+            dc: None,
+            peer_addr,
+        })
+    }
+
+    pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
+        self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
         let answer = self.create_answer(sdp_offer).await?;
         Ok(answer)
     }
