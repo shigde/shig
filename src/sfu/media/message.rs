@@ -1,5 +1,4 @@
 use crate::sfu::media::connector::ConnectorType;
-use crate::sfu::media::data_channel::DataChannelMsg;
 use crate::sfu::media::{Media, MediaId};
 use crate::sfu::peer::PeerId;
 use actix::Message;
@@ -10,6 +9,8 @@ use actix::Message;
 pub enum MediaMessage {
     Connected(ConnectorType),
     Disconnected(ConnectorType),
+    #[allow(dead_code)]
     AddMedia(Media),
+    #[allow(dead_code)]
     RemoveMedia(PeerId, MediaId),
 }

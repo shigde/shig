@@ -9,7 +9,6 @@ CREATE TABLE lobbies
         REFERENCES channels (id)
             ON DELETE CASCADE ON UPDATE CASCADE,
     stream_id  INTEGER REFERENCES streams (id),
-    secret     VARCHAR(45)         NOT NULL,
     is_open    BOOLEAN             NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP           NOT NULL,
     updated_at TIMESTAMP           NOT NULL DEFAULT now()

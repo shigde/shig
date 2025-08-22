@@ -1,4 +1,3 @@
-use crate::models::lobby::Lobby as Model;
 use crate::sfu::error::LobbyResult;
 use crate::sfu::media::router::Router;
 use crate::sfu::peer::{Peer, PeerId, PeerRole, PeerShutdown};
@@ -8,7 +7,7 @@ use std::collections::HashMap;
 
 pub struct Lobby {
     id: String,
-    model: Model,
+    host_uuid: String,
     peers: HashMap<PeerId, Addr<Peer>>,
     parent_addr: Addr<Sfu>,
     router: Router,
@@ -16,10 +15,10 @@ pub struct Lobby {
 }
 
 impl Lobby {
-    pub fn new(model: Model, parent_addr: Addr<Sfu>) -> Self {
+    pub fn new(uuid: String, host_uuid: String, parent_addr: Addr<Sfu>) -> Self {
         Self {
-            id: model.uuid.clone(),
-            model,
+            id: uuid,
+            host_uuid,
             peers: HashMap::new(),
             parent_addr,
             router: Router::new(),
@@ -59,6 +58,21 @@ impl Handler<JoinPeer> for Lobby {
     type Result = LobbyResult<String>;
 
     fn handle(&mut self, _msg: JoinPeer, _: &mut Self::Context) -> Self::Result {
+        Ok("".to_string())
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = " LobbyResult<String>")]
+pub struct SubscribeToPeers {
+    pub user_uuid: String,
+    pub offer: String,
+}
+
+impl Handler<SubscribeToPeers> for Lobby {
+    type Result = LobbyResult<String>;
+
+    fn handle(&mut self, _msg: SubscribeToPeers, _: &mut Self::Context) -> Self::Result {
         Ok("".to_string())
     }
 }

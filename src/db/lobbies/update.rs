@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, AsChangeset, Clone)]
 #[diesel(table_name = crate::db::schema::lobbies)]
-pub struct LobbyUpdate<'a>  {
+pub struct LobbyUpdate {
     pub stream_id: Option<i32>,
-    pub secret: &'a str,
     pub is_open: bool,
 }
 
@@ -16,10 +15,9 @@ pub fn update_lobby(
     conn: &mut PgConnection,
     uuid_id: &str,
     stream_id: Option<i32>,
-    secret:  &str,
     is_open: bool,
 ) -> DbResult<()> {
-    let lobby = LobbyUpdate { stream_id, is_open, secret };
+    let lobby = LobbyUpdate { stream_id, is_open };
     use crate::db::schema::lobbies::dsl::lobbies;
     use crate::db::schema::lobbies::dsl::uuid;
     diesel::update(lobbies.filter(uuid.eq(uuid_id)))

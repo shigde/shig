@@ -1,13 +1,16 @@
 pub mod active_users;
 pub mod actor_images;
 pub mod actors;
+pub mod channel_friends;
 pub mod channels;
 pub mod error;
 pub mod fixtures;
+pub mod friend_roles;
 pub mod instances;
 pub mod lobbies;
 pub mod schema;
 pub mod schema_views;
+pub mod stream_friends;
 pub mod stream_meta_data;
 pub mod stream_participants;
 pub mod stream_previews;

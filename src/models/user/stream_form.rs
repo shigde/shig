@@ -3,7 +3,7 @@ use crate::db::stream_meta_data::update::update_stream_meta_data;
 use crate::db::stream_thumbnails::create::insert_new_stream_thumbnail;
 use crate::db::stream_thumbnails::update::update_stream_thumbnail;
 use crate::db::streams::create::insert_new_stream;
-use crate::db::streams::read::find_stream_by_uuid;
+use crate::db::streams::read::find_full_stream_by_uuid;
 use crate::db::streams::update::update_stream;
 use crate::db::DbPool;
 use crate::files::uploader::{ImageUpload, Uploader};
@@ -66,7 +66,7 @@ impl StreamForm {
             Some(self.stream.repeat),
             self.stream.is_public,
         )?;
-        
+
         // Insert stream Meta Data
         let new_meta_data = self.stream.meta_data.build_insert_dao(stream_dao.id);
         insert_new_stream_meta_data(&mut conn, new_meta_data)?;
@@ -83,7 +83,7 @@ impl StreamForm {
                     StreamThumbnail::build_insert_dao(stream_dao.id, &thumbnail_img);
                 insert_new_stream_thumbnail(&mut conn, thumbnail_dao.clone())?;
                 let url = thumbnail_dao.file_url;
-                
+
                 // Update the stream response object with the new thumbnail url
                 stream_response.thumbnail = url.to_string();
             }
@@ -100,7 +100,7 @@ impl StreamForm {
     ) -> Result<Stream, ApiError> {
         let mut conn = pool.get()?;
         let stream_uuid = self.stream.uuid.clone();
-        let current_stream_dao = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
+        let current_stream_dao = find_full_stream_by_uuid(&mut conn, stream_uuid.clone())?;
         let stream_id = current_stream_dao.stream.id;
 
         // Check if user is the owner of the stream

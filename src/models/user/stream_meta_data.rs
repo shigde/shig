@@ -29,7 +29,7 @@ impl StreamMetaData {
             latency_mode: StreamLatency::from_integer(dao.latency_mode),
         }
     }
-    pub fn build_insert_dao(&self, stream_id: i32) -> NewStreamMetaData {
+    pub fn build_insert_dao(&self, stream_id: i32) -> NewStreamMetaData<'_> {
         NewStreamMetaData {
             stream_id,
             is_shig: self.is_shig,
@@ -43,7 +43,7 @@ impl StreamMetaData {
         }
     }
 
-    pub fn build_update_dao(&self, stream_id: i32) -> StreamMetaDataUpdate {
+    pub fn build_update_dao(&self, stream_id: i32) -> StreamMetaDataUpdate<'_> {
         StreamMetaDataUpdate {
             stream_id,
             is_shig: self.is_shig,

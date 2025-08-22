@@ -15,7 +15,7 @@ pub struct FullyLoadedStream {
     pub thumbnail: Option<StreamThumbnail>,
 }
 
-pub fn find_stream_by_uuid(
+pub fn find_full_stream_by_uuid(
     conn: &mut PgConnection,
     stream_uuid: String,
 ) -> DbResult<FullyLoadedStream> {
@@ -29,7 +29,7 @@ pub fn find_stream_by_uuid(
     let image_list: Vec<StreamThumbnail> = StreamThumbnail::belonging_to(&stream_dao)
         .select(StreamThumbnail::as_select())
         .load(conn)?;
-    
+
     let meta_data_list: Vec<StreamMetaData> = StreamMetaData::belonging_to(&stream_dao)
         .select(StreamMetaData::as_select())
         .load(conn)?;
@@ -45,4 +45,15 @@ pub fn find_stream_by_uuid(
             thumbnail: image_list.first().cloned(),
         }),
     }
+}
+
+#[allow(dead_code)]
+pub fn find_stream_by_uuid(conn: &mut PgConnection, stream_uuid: String) -> DbResult<Stream> {
+    use crate::db::schema::streams::dsl::streams;
+    use crate::db::schema::streams::uuid;
+    let stream_dao = streams
+        .filter(uuid.eq(stream_uuid.to_owned()))
+        .select(Stream::as_select())
+        .first(conn)?;
+    Ok(stream_dao)
 }

@@ -1,7 +1,7 @@
 mod error;
 
-use crate::db::fixtures::insert_fixtures;
-use crate::db::{build_pool, run_migrations, DbConfig};
+use crate::api;
+use crate::db::DbConfig;
 use crate::federation::FederationConfig;
 use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
@@ -9,10 +9,11 @@ use crate::models::mail::config::MailConfig;
 use crate::server::error::ServerResult;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::Sfu;
-use crate::{api, server};
 use actix::Addr;
 use actix_web::dev::Server;
 use actix_web::{get, web, App, HttpRequest, HttpServer, Responder};
+use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::PgConnection;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use std::fs;
@@ -50,7 +51,11 @@ pub struct TlsConfig {
     key: String,
 }
 
-pub async fn start(cfg: ConfigFile, sfu_addr: Addr<Sfu>) -> ServerResult<Server> {
+pub fn start(
+    cfg: ConfigFile,
+    sfu_addr: Addr<Sfu>,
+    pool: Pool<ConnectionManager<PgConnection>>,
+) -> ServerResult<Server> {
     // create static file dir if not exists
     let htdocs = cfg.files.htdocs.as_str();
     if !Path::new(htdocs).exists() {
@@ -62,13 +67,6 @@ pub async fn start(cfg: ConfigFile, sfu_addr: Addr<Sfu>) -> ServerResult<Server>
         fs::create_dir(banner)?;
         fs::create_dir(thumbnail)?;
     }
-
-    // Set up the connection pool
-    let pool = build_pool(cfg.database.clone())?;
-    let mut conn = pool.get().unwrap();
-    run_migrations(&mut conn).map_err(server::error::ServerError::from)?;
-
-    insert_fixtures(&mut conn, cfg.federation.clone())?;
 
     let svs = HttpServer::new(move || {
         App::new()

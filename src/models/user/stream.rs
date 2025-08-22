@@ -1,6 +1,6 @@
 use crate::db::channels::read::find_channel_by_id;
 use crate::db::streams::delete::delete_stream_by_id;
-use crate::db::streams::read::find_stream_by_uuid;
+use crate::db::streams::read::find_full_stream_by_uuid;
 use crate::db::users::read::find_user_by_id;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
@@ -45,7 +45,7 @@ impl Stream {
         principal: Principal,
     ) -> Result<Stream, ApiError> {
         let mut conn = pool.get()?;
-        let stream_dao = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
+        let stream_dao = find_full_stream_by_uuid(&mut conn, stream_uuid.clone())?;
 
         // Check if user is the owner of the stream
         if principal.id != stream_dao.stream.user_id {
@@ -69,7 +69,7 @@ impl Stream {
         principal: Principal,
     ) -> Result<(), ApiError> {
         let mut conn = pool.get()?;
-        let stream_dao = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
+        let stream_dao = find_full_stream_by_uuid(&mut conn, stream_uuid.clone())?;
 
         // Check if user is the owner of the stream
         if principal.id != stream_dao.stream.user_id {

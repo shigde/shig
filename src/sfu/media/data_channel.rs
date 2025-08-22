@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
-use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::Error;
 
 #[derive(Serialize, Deserialize, Debug, Message)]
@@ -22,11 +21,13 @@ pub enum DataChannelMsg {
 }
 
 impl DataChannelMsg {
+    #[allow(dead_code)]
     pub fn to_json(&self) -> anyhow::Result<String> {
         let json = serde_json::to_string(self)?; // serialize zu JSON-Bytes
         Ok(json)
     }
 
+    #[allow(dead_code)]
     pub fn to_bin(&self) -> anyhow::Result<Bytes> {
         let bin = bincode::serialize(self)?;
         Ok(Bytes::from(bin))
@@ -63,8 +64,7 @@ pub struct MuteMsgData {
     pub mute: bool,
 }
 
-const MESSAGE_SIZE: usize = 1500;
-
+#[allow(dead_code)]
 pub trait DataChannel: Connector {
     fn initialize_data_channel(&mut self, peer_addr: Addr<Peer>, kind: ConnectorType) {
         let peer_connection = self.get_pc();
@@ -121,5 +121,6 @@ pub trait DataChannel: Connector {
 #[rtype(result = "()")]
 pub struct OnDataChannel {
     pub kind: ConnectorType,
+    #[allow(dead_code)]
     pub dc: Arc<RTCDataChannel>,
 }

@@ -6,7 +6,7 @@ use chrono::Utc;
 pub struct StreamThumbnail {}
 
 impl StreamThumbnail {
-    pub fn build_insert_dao(stream_id: i32, thumbnail: &ImageUpload) -> NewStreamThumbnail {
+    pub fn build_insert_dao(stream_id: i32, thumbnail: &ImageUpload) -> NewStreamThumbnail<'_> {
         NewStreamThumbnail {
             filename: thumbnail.filename.as_str(),
             height: thumbnail.height,
@@ -18,7 +18,7 @@ impl StreamThumbnail {
         }
     }
 
-    pub fn build_update_dao(thumbnail: &ImageUpload) -> StreamThumbnailUpdate {
+    pub fn build_update_dao(thumbnail: &ImageUpload) -> StreamThumbnailUpdate<'_> {
         StreamThumbnailUpdate {
             filename: thumbnail.filename.as_str(),
             height: thumbnail.height,

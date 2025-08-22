@@ -53,7 +53,11 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     )
                     .service(web::scope("/federation").service(get_settings)),
             )
-            .service(web::scope("/channel").service(update_channel))
+            .service(
+                web::scope("/channel").service(update_channel), // .service(whip)
+                                                                // .service(whep)
+                                                                // .service(do_live)
+            )
             .service(
                 web::scope("/stream")
                     .service(get_stream)

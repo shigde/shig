@@ -49,6 +49,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    channel_friends (id) {
+        id -> Int4,
+        user_id -> Int4,
+        channel_id -> Int4,
+        friend_role_id -> Int4,
+        active -> Bool,
+        accepted -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     channels (id) {
         id -> Int4,
         #[max_length = 255]
@@ -61,6 +74,14 @@ diesel::table! {
         public -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    friend_roles (id) {
+        id -> Int4,
+        #[max_length = 40]
+        name -> Varchar,
     }
 }
 
@@ -87,9 +108,20 @@ diesel::table! {
         user_id -> Int4,
         channel_id -> Int4,
         stream_id -> Nullable<Int4>,
-        #[max_length = 45]
-        secret -> Varchar,
         is_open -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    stream_friends (id) {
+        id -> Int4,
+        user_id -> Int4,
+        stream_id -> Int4,
+        active -> Bool,
+        accepted -> Bool,
+        friend_role_id -> Int4,
         created_at -> Timestamp,
         updated_at -> Timestamp,
     }
@@ -204,12 +236,18 @@ diesel::table! {
 }
 
 diesel::joinable!(actor_images -> actors (actor_id));
+diesel::joinable!(channel_friends -> channels (channel_id));
+diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
+diesel::joinable!(channel_friends -> users (user_id));
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(lobbies -> channels (channel_id));
 diesel::joinable!(lobbies -> streams (stream_id));
 diesel::joinable!(lobbies -> users (user_id));
+diesel::joinable!(stream_friends -> friend_roles (friend_role_id));
+diesel::joinable!(stream_friends -> streams (stream_id));
+diesel::joinable!(stream_friends -> users (user_id));
 diesel::joinable!(stream_meta_data -> streams (stream_id));
 diesel::joinable!(stream_participants -> streams (stream_id));
 diesel::joinable!(stream_participants -> users (user_id));
@@ -223,9 +261,12 @@ diesel::joinable!(verification_tokens -> users (user_id));
 diesel::allow_tables_to_appear_in_same_query!(
     actor_images,
     actors,
+    channel_friends,
     channels,
+    friend_roles,
     instances,
     lobbies,
+    stream_friends,
     stream_meta_data,
     stream_participants,
     stream_thumbnails,

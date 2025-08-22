@@ -12,7 +12,6 @@ pub struct NewLobby<'a> {
     pub channel_id: i32,
     pub stream_id: Option<i32>,
     pub is_open: bool,
-    pub secret: &'a str,
     pub created_at: NaiveDateTime,
 }
 
@@ -24,14 +23,12 @@ pub fn insert_new_lobby(
     is_open: bool,
 ) -> DbResult<Lobby> {
     let uuid = Uuid::new_v4().to_string();
-    let secret = Uuid::new_v4().to_string();
     let new_lobby = NewLobby {
         uuid: &uuid,
         user_id,
         channel_id,
         stream_id,
         is_open,
-        secret: &secret,
         created_at: Utc::now().naive_utc().clone(),
     };
 
