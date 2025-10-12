@@ -1,6 +1,8 @@
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
-use crate::sfu::peer::{Peer, PeerId, PeerRole, PeerShutdown, PeerStartReceiving};
+use crate::sfu::peer::{
+    Peer, PeerId, PeerRole, PeerShutdown, PeerStartReceiving, PeerStartSending,
+};
 use crate::sfu::{LobbyStopped, Sfu};
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
@@ -53,21 +55,23 @@ impl Actor for Lobby {
 
 #[derive(Message)]
 #[rtype(result = " LobbyResult<String>")]
-pub struct JoinPeer {
+pub struct Publish {
     pub user_uuid: String,
     pub offer: String,
     pub role: PeerRole,
 }
 
-impl Handler<JoinPeer> for Lobby {
+impl Handler<Publish> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
-    fn handle(&mut self, msg: JoinPeer, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Publish, ctx: &mut Self::Context) -> Self::Result {
         let peer_id = PeerId::new(msg.user_uuid.clone());
 
         // If the peer already exists, directly return a completed Future with error
         if self.peers.contains_key(&peer_id) {
-            return Box::pin(async move { Err(LobbyError::PeerAlreadyExists()) }.into_actor(self));
+            return Box::pin(
+                async move { Err(LobbyError::PeerAlreadyExists(peer_id)) }.into_actor(self),
+            );
         }
 
         let peer_addr = Peer::new(peer_id.clone(), ctx.address(), msg.role).start();
@@ -93,18 +97,41 @@ impl Handler<JoinPeer> for Lobby {
 
 #[derive(Message)]
 #[rtype(result = " LobbyResult<String>")]
-pub struct SubscribeToPeers {
-    #[allow(dead_code)]
+pub struct Subscribe {
     pub user_uuid: String,
-    #[allow(dead_code)]
     pub offer: String,
 }
 
-impl Handler<SubscribeToPeers> for Lobby {
-    type Result = LobbyResult<String>;
+impl Handler<Subscribe> for Lobby {
+    type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
-    fn handle(&mut self, _msg: SubscribeToPeers, _: &mut Self::Context) -> Self::Result {
-        Ok("".to_string())
+    fn handle(&mut self, msg: Subscribe, _: &mut Self::Context) -> Self::Result {
+        let peer_id = PeerId::new(msg.user_uuid.clone());
+
+        let peer_addr = match self.peers.get(&peer_id) {
+            Some(addr) => addr.clone(),
+            None => {
+                return Box::pin(
+                    async move { Err(LobbyError::PeerNotExists(peer_id)) }.into_actor(self),
+                );
+            }
+        };
+
+        let offer = msg.offer.clone();
+        let fut = async move {
+            let result = peer_addr.send(PeerStartSending { offer }).await;
+
+            match result {
+                Ok(val) => match val {
+                    Ok(answer) => Ok(answer),
+                    Err(e) => Err(LobbyError::PeerInternalError(e)),
+                },
+                Err(e) => Err(LobbyError::MailboxError(e)),
+            }
+        }
+        .into_actor(self);
+
+        Box::pin(fut)
     }
 }
 

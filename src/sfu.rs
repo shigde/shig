@@ -1,6 +1,6 @@
 use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{SfuError, SfuResult};
-use crate::sfu::lobby::{JoinPeer, Lobby, LobbyShutdown, SubscribeToPeers};
+use crate::sfu::lobby::{Lobby, LobbyShutdown, Publish, Subscribe};
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
@@ -52,17 +52,17 @@ impl Actor for Sfu {
 
 #[derive(Message)]
 #[rtype(result = " SfuResult<String>")]
-pub struct JoinLobby {
+pub struct PublishLobby {
     pub offer: String,
     pub lobby_uuid: String,
     pub user_uuid: String,
     pub role: peer::PeerRole,
 }
 
-impl Handler<JoinLobby> for Sfu {
+impl Handler<PublishLobby> for Sfu {
     type Result = ResponseActFuture<Self, SfuResult<String>>;
 
-    fn handle(&mut self, msg: JoinLobby, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
@@ -82,7 +82,7 @@ impl Handler<JoinLobby> for Sfu {
         let fut = async move {
             log::info!("Peer joining lobby {}", user_uuid.clone());
             let result = lobby_addr
-                .send(JoinPeer {
+                .send(Publish {
                     user_uuid,
                     offer,
                     role: msg.role,
@@ -127,7 +127,7 @@ impl Handler<SubscribeLobby> for Sfu {
         let user_uuid = msg.user_uuid.clone();
         let offer = msg.offer.clone();
         let fut = async move {
-            let result = lobby_addr.send(SubscribeToPeers { user_uuid, offer }).await;
+            let result = lobby_addr.send(Subscribe { user_uuid, offer }).await;
 
             match result {
                 Ok(val) => match val {

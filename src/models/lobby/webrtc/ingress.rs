@@ -7,7 +7,7 @@ use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
 use crate::sfu::peer::PeerRole;
-use crate::sfu::{JoinLobby, Sfu};
+use crate::sfu::{PublishLobby, Sfu};
 use actix::Addr;
 use actix_web::web;
 
@@ -47,7 +47,7 @@ pub(crate) async fn whip(
         PeerRole::Guest
     };
     let answer = match sfu_addr
-        .send(JoinLobby {
+        .send(PublishLobby {
             lobby_uuid: db_lobby.uuid.clone(),
             user_uuid: user.user_uuid.clone(),
             offer,

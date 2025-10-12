@@ -1,4 +1,5 @@
 use crate::sfu::media::error::MediaError;
+use crate::sfu::peer::PeerId;
 use derive_more::Display;
 
 pub type SfuResult<T> = Result<T, SfuError>;
@@ -9,7 +10,7 @@ pub enum SfuError {
     LobbyAlreadyStarted(),
     LobbyNotExists(),
 
-    // Error by sendin msg to a lobby
+    // Error by sending msg to a lobby
     LobbyError(LobbyError),
     LobbyMailboxError(actix::MailboxError),
 }
@@ -18,9 +19,12 @@ pub type LobbyResult<T> = Result<T, LobbyError>;
 
 #[derive(Debug, Display)]
 pub enum LobbyError {
-    PeerInternalError(PeerError),
-    PeerAlreadyExists(),
     MailboxError(actix::MailboxError),
+    PeerInternalError(PeerError),
+    #[display(fmt = "Peer already exist: {}", _0)]
+    PeerAlreadyExists(PeerId),
+    #[display(fmt = "Peer not exist: {}", _0)]
+    PeerNotExists(PeerId),
 }
 
 pub type PeerResult<T> = Result<T, PeerError>;
