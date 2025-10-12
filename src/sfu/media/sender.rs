@@ -45,7 +45,6 @@ impl Sender {
         })
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
         self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
         let answer = self.create_answer(sdp_offer).await?;

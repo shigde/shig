@@ -1,6 +1,6 @@
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
-use crate::sfu::media::connector::{Connector, ConnectorType};
+use crate::sfu::media::connector::ConnectorType;
 use crate::sfu::media::data_channel::{DataChannelMsg, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
@@ -101,8 +101,8 @@ impl Handler<PeerStartSending> for Peer {
         // Prepare the Future
         Box::pin(
             async move {
-                let sender = Sender::new(id, addr).await?;
-                let answer = sender.create_answer(sdp_offer.as_str()).await?;
+                let mut sender = Sender::new(id, addr).await?;
+                let answer = sender.connect(sdp_offer.as_str()).await?;
                 Ok((sender, answer))
             }
             .into_actor(self)
