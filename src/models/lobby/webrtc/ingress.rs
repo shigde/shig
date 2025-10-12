@@ -1,7 +1,6 @@
 use crate::db::channel_friends::read::is_channel_friend;
 use crate::db::channels::read::find_channel_by_uuid;
 use crate::db::lobbies::read::find_lobby_by_channel_id;
-use crate::db::lobbies::update::update_lobby;
 use crate::db::stream_friends::read::is_stream_friend;
 use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::DbPool;

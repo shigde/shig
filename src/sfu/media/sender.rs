@@ -13,6 +13,7 @@ pub struct Sender {
     id: PeerId,
     pc: Arc<RTCPeerConnection>,
     dc: Option<Arc<RTCDataChannel>>,
+    #[allow(dead_code)]
     peer_addr: Addr<Peer>,
 }
 
@@ -44,12 +45,14 @@ impl Sender {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
         self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
         let answer = self.create_answer(sdp_offer).await?;
         Ok(answer)
     }
 
+    #[allow(dead_code)]
     pub async fn add_track(&self, track: Arc<dyn TrackLocal + Send + Sync>) -> MediaResult<()> {
         if let Err(e) = self.pc.add_track(track).await {
             return Err(e.into());

@@ -10,9 +10,11 @@ use std::collections::HashMap;
 
 pub struct Lobby {
     id: String,
+    #[allow(dead_code)]
     host_uuid: String,
     peers: Box<HashMap<PeerId, Addr<Peer>>>,
     parent_addr: Addr<Sfu>,
+    #[allow(dead_code)]
     router: Router,
     shutting_down: bool,
 }
@@ -92,7 +94,9 @@ impl Handler<JoinPeer> for Lobby {
 #[derive(Message)]
 #[rtype(result = " LobbyResult<String>")]
 pub struct SubscribeToPeers {
+    #[allow(dead_code)]
     pub user_uuid: String,
+    #[allow(dead_code)]
     pub offer: String,
 }
 
