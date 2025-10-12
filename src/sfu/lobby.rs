@@ -1,14 +1,17 @@
-use crate::sfu::error::LobbyResult;
+use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
-use crate::sfu::peer::{Peer, PeerId, PeerRole, PeerShutdown};
+use crate::sfu::peer::{Peer, PeerId, PeerRole, PeerShutdown, PeerStartReceiving};
 use crate::sfu::{LobbyStopped, Sfu};
-use actix::{Actor, ActorContext, Addr, Context, Handler, Message};
+use actix::{
+    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
+    WrapFuture,
+};
 use std::collections::HashMap;
 
 pub struct Lobby {
     id: String,
     host_uuid: String,
-    peers: HashMap<PeerId, Addr<Peer>>,
+    peers: Box<HashMap<PeerId, Addr<Peer>>>,
     parent_addr: Addr<Sfu>,
     router: Router,
     shutting_down: bool,
@@ -19,7 +22,7 @@ impl Lobby {
         Self {
             id: uuid,
             host_uuid,
-            peers: HashMap::new(),
+            peers: Box::new(HashMap::new()),
             parent_addr,
             router: Router::new(),
             shutting_down: false,
@@ -55,10 +58,34 @@ pub struct JoinPeer {
 }
 
 impl Handler<JoinPeer> for Lobby {
-    type Result = LobbyResult<String>;
+    type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
-    fn handle(&mut self, _msg: JoinPeer, _: &mut Self::Context) -> Self::Result {
-        Ok("".to_string())
+    fn handle(&mut self, msg: JoinPeer, ctx: &mut Self::Context) -> Self::Result {
+        let peer_id = PeerId::new(msg.user_uuid.clone());
+
+        // If the peer already exists, directly return a completed Future with error
+        if self.peers.contains_key(&peer_id) {
+            return Box::pin(async move { Err(LobbyError::PeerAlreadyExists()) }.into_actor(self));
+        }
+
+        let peer_addr = Peer::new(peer_id.clone(), ctx.address(), msg.role).start();
+        self.peers.insert(peer_id, peer_addr.clone());
+
+        let offer = msg.offer.clone();
+        let fut = async move {
+            let result = peer_addr.send(PeerStartReceiving { offer }).await;
+
+            match result {
+                Ok(val) => match val {
+                    Ok(answer) => Ok(answer),
+                    Err(e) => Err(LobbyError::PeerInternalError(e)),
+                },
+                Err(e) => Err(LobbyError::MailboxError(e)),
+            }
+        }
+        .into_actor(self);
+
+        Box::pin(fut)
     }
 }
 
@@ -77,6 +104,7 @@ impl Handler<SubscribeToPeers> for Lobby {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Message)]
 #[rtype(result = " LobbyResult<()>")]
 pub struct LeavePeer {
@@ -97,6 +125,7 @@ impl Handler<LeavePeer> for Lobby {
 #[derive(Message)]
 #[rtype(result = " LobbyResult<()>")]
 pub struct TimeoutPeer {
+    #[allow(dead_code)]
     user_uuid: String,
 }
 

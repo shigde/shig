@@ -1,18 +1,18 @@
 use crate::sfu::media::{Media, MediaId};
 use crate::sfu::peer::PeerId;
 use std::collections::HashMap;
-
+#[allow(dead_code)]
 pub struct Router {
     pub medias: HashMap<MediaId, Media>,
 }
-
+#[allow(dead_code)]
 impl Router {
     pub fn new() -> Self {
         Self {
             medias: HashMap::new(),
         }
     }
-
+    #[allow(dead_code)]
     pub fn get_medias_without_peer(&mut self, peer_id: PeerId) -> Vec<Media> {
         self.medias
             .values()
@@ -21,7 +21,7 @@ impl Router {
             .cloned()
             .collect()
     }
-
+    #[allow(dead_code)]
     pub fn get_medias_of_peer(&mut self, peer_id: PeerId) -> Vec<Media> {
         self.medias
             .values()
@@ -30,7 +30,7 @@ impl Router {
             .cloned()
             .collect()
     }
-
+    #[allow(dead_code)]
     pub fn remove_medias_of_peer(&mut self, peer_id: PeerId) {
         let keys: Vec<MediaId> = self
             .medias

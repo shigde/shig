@@ -42,6 +42,7 @@ impl DataChannelMsg {
         }
     }
 
+    #[allow(dead_code)]
     fn from_data_channel_message_bin(dcm: &DataChannelMessage) -> anyhow::Result<DataChannelMsg> {
         if !dcm.is_string {
             let msg: DataChannelMsg = bincode::deserialize(&dcm.data)?;

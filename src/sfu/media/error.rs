@@ -19,4 +19,5 @@ impl From<WebRTCError> for MediaError {
     }
 }
 
+#[allow(dead_code)]
 pub type DataChannelResult<T> = Result<T, MediaError>;

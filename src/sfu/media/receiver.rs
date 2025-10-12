@@ -10,9 +10,11 @@ use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
 
 pub struct Receiver {
-    id: PeerId,
+    #[allow(dead_code)]
+    pub id: PeerId,
     pc: Arc<RTCPeerConnection>,
     dc: Option<Arc<RTCDataChannel>>,
+    #[allow(dead_code)]
     peer_addr: Addr<Peer>,
 }
 

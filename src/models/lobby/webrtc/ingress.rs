@@ -8,7 +8,7 @@ use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
 use crate::sfu::peer::PeerRole;
-use crate::sfu::{JoinLobby, SartLobby, Sfu};
+use crate::sfu::{JoinLobby, Sfu};
 use actix::Addr;
 use actix_web::web;
 
@@ -32,72 +32,41 @@ pub(crate) async fn whip(
         });
     }
 
-    if !db_lobby.is_open {
-        if db_lobby.user_id != user.id {
-            return Err(ApiError::Forbidden {
-                error_message: "forbidden to join".to_string(),
-            });
-        }
+    let is_stream_friend = is_stream_friend(&mut conn, user.id, db_stream.id)?;
+    let is_channel_friend = is_channel_friend(&mut conn, user.id, db_channel.id)?;
+    let is_owner = db_lobby.user_id == user.id;
 
-        let answer = match sfu_addr
-            .send(SartLobby {
-                lobby_uuid: db_lobby.uuid.clone(),
-                user_uuid: user.user_uuid.clone(),
-                offer,
-            })
-            .await
-        {
-            Ok(result) => result.unwrap_or_else(|e| {
-                log::error!("sfu error: {}", e);
-                "answer error".to_string()
-            }),
-            Err(e) => {
-                log::error!("sfu error: {}", e);
-                return Err(ApiError::InternalServerError {
-                    error_message: "sfu mail error".to_string(),
-                });
-            }
-        };
-
-        update_lobby(&mut conn, db_lobby.uuid.as_str(), Some(db_stream.id), true)?;
-        Ok(answer)
-    } else {
-        let is_stream_friend = is_stream_friend(&mut conn, user.id, db_stream.id)?;
-        let is_channel_friend = is_channel_friend(&mut conn, user.id, db_channel.id)?;
-        let is_owner = db_lobby.user_id == user.id;
-
-        if !is_stream_friend && !is_channel_friend && !is_owner {
-            return Err(ApiError::Unauthorized {
-                error_message: "user is not authorized to join".to_string(),
-            });
-        }
-
-        let role = if is_owner {
-            PeerRole::Host
-        } else {
-            PeerRole::Guest
-        };
-        let answer = match sfu_addr
-            .send(JoinLobby {
-                lobby_uuid: db_lobby.uuid.clone(),
-                user_uuid: user.user_uuid.clone(),
-                offer,
-                role,
-            })
-            .await
-        {
-            Ok(result) => result.unwrap_or_else(|e| {
-                log::error!("sfu error: {}", e);
-                "answer error".to_string()
-            }),
-            Err(e) => {
-                log::error!("sfu error: {}", e);
-                return Err(ApiError::InternalServerError {
-                    error_message: "sfu mail error".to_string(),
-                });
-            }
-        };
-
-        Ok(answer)
+    if !is_stream_friend && !is_channel_friend && !is_owner {
+        return Err(ApiError::Unauthorized {
+            error_message: "user is not authorized to join".to_string(),
+        });
     }
+
+    let role = if is_owner {
+        PeerRole::Host
+    } else {
+        PeerRole::Guest
+    };
+    let answer = match sfu_addr
+        .send(JoinLobby {
+            lobby_uuid: db_lobby.uuid.clone(),
+            user_uuid: user.user_uuid.clone(),
+            offer,
+            role,
+        })
+        .await
+    {
+        Ok(result) => result.unwrap_or_else(|e| {
+            log::error!("sfu error: {}", e);
+            "answer error".to_string()
+        }),
+        Err(e) => {
+            log::error!("sfu error: {}", e);
+            return Err(ApiError::InternalServerError {
+                error_message: "sfu mail error".to_string(),
+            });
+        }
+    };
+    // update_lobby(&mut conn, db_lobby.uuid.as_str(), Some(db_stream.id), true)?;
+    Ok(answer)
 }

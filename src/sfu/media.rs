@@ -13,13 +13,17 @@ pub mod sender;
 
 #[derive(Clone)]
 pub struct Media {
+    #[allow(dead_code)]
     pub id: MediaId,
     pub peer_id: PeerId,
+    #[allow(dead_code)]
     pub track: Arc<dyn TrackLocal + Send + Sync>,
+    #[allow(dead_code)]
     pub kind: MediaKind,
 }
 
 impl Media {
+    #[allow(dead_code)]
     pub fn new(peer_id: PeerId, track: Arc<dyn TrackLocal + Send + Sync>, kind: MediaKind) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
         Self {
@@ -46,6 +50,7 @@ impl From<&str> for MediaId {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum MediaKind {
     Audio,

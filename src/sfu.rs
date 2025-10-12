@@ -52,51 +52,6 @@ impl Actor for Sfu {
 
 #[derive(Message)]
 #[rtype(result = " SfuResult<String>")]
-pub struct SartLobby {
-    pub offer: String,
-    pub lobby_uuid: String,
-    pub user_uuid: String,
-}
-
-impl Handler<SartLobby> for Sfu {
-    type Result = ResponseActFuture<Self, SfuResult<String>>;
-
-    fn handle(&mut self, msg: SartLobby, ctx: &mut Self::Context) -> Self::Result {
-        let lobby_uuid = msg.lobby_uuid.clone();
-        if self.lobbies.contains_key(&lobby_uuid) {
-            return Box::pin(fut::err(SfuError::LobbyAlreadyStarted()));
-        }
-        let lobby_addr =
-            Lobby::new(msg.lobby_uuid.clone(), msg.user_uuid.clone(), ctx.address()).start();
-        self.lobbies.insert(lobby_uuid, lobby_addr.clone());
-
-        let user_uuid = msg.user_uuid.clone();
-        let offer = msg.offer;
-        let fut = async move {
-            let result = lobby_addr
-                .send(JoinPeer {
-                    user_uuid,
-                    offer,
-                    role: peer::PeerRole::Host,
-                })
-                .await;
-
-            match result {
-                Ok(val) => match val {
-                    Ok(answer) => Ok(answer),
-                    Err(e) => Err(SfuError::LobbyError(e)),
-                },
-                Err(e) => Err(SfuError::LobbyMailboxError(e)),
-            }
-        }
-        .into_actor(self);
-
-        Box::pin(fut)
-    }
-}
-
-#[derive(Message)]
-#[rtype(result = " SfuResult<String>")]
 pub struct JoinLobby {
     pub offer: String,
     pub lobby_uuid: String,
@@ -107,19 +62,25 @@ pub struct JoinLobby {
 impl Handler<JoinLobby> for Sfu {
     type Result = ResponseActFuture<Self, SfuResult<String>>;
 
-    fn handle(&mut self, msg: JoinLobby, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: JoinLobby, ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
-                return Box::pin(fut::err(SfuError::LobbyNotExists()));
+                let lobby_addr =
+                    Lobby::new(msg.lobby_uuid.clone(), msg.user_uuid.clone(), ctx.address())
+                        .start();
+                self.lobbies.insert(lobby_uuid, lobby_addr.clone());
+                lobby_addr.clone()
             }
             Some(lobby_addr) => lobby_addr.clone(),
         };
 
         let user_uuid = msg.user_uuid.clone();
         let offer = msg.offer.clone();
+
         let fut = async move {
+            log::info!("Peer joining lobby {}", user_uuid.clone());
             let result = lobby_addr
                 .send(JoinPeer {
                     user_uuid,

@@ -11,6 +11,7 @@ use crate::api::auth::verify::verify;
 use crate::api::federation::settings::get_settings;
 use crate::api::user::channel::{get_channel, update_channel};
 use crate::api::user::get_active_user;
+use crate::api::user::lobby::{whep_endpoint, whip_endpoint};
 use crate::api::user::stream::{create_stream, delete_stream, get_stream, update_stream};
 use crate::api::user::stream_preview::{
     get_channel_stream_preview_list, get_stream_preview, get_stream_preview_list,
@@ -54,9 +55,10 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(web::scope("/federation").service(get_settings)),
             )
             .service(
-                web::scope("/channel").service(update_channel), // .service(whip)
-                                                                // .service(whep)
-                                                                // .service(do_live)
+                web::scope("/channel")
+                    .service(update_channel)
+                    .service(whip_endpoint)
+                    .service(whep_endpoint), // .service(do_live)
             )
             .service(
                 web::scope("/stream")
