@@ -106,7 +106,7 @@ pub struct Subscribe {
 impl Handler<Subscribe> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
-    fn handle(&mut self, msg: Subscribe, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = PeerId::new(msg.user_uuid.clone());
 
         let peer_addr = match self.peers.get(&peer_id) {
@@ -119,8 +119,9 @@ impl Handler<Subscribe> for Lobby {
         };
 
         let offer = msg.offer.clone();
+        let medias = self.router.get_medias_without_peer(&peer_id);
         let fut = async move {
-            let result = peer_addr.send(PeerStartSending { offer }).await;
+            let result = peer_addr.send(PeerStartSending { offer, medias }).await;
 
             match result {
                 Ok(val) => match val {

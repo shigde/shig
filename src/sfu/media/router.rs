@@ -13,7 +13,6 @@ impl Router {
         }
     }
 
-    #[allow(dead_code)]
     /// Returns all media *not* belonging to this peer.
     pub fn get_medias_without_peer(&self, peer_id: &PeerId) -> Vec<Media> {
         self.medias

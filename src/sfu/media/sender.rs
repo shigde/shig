@@ -8,6 +8,7 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::track::track_local::TrackLocal;
 
+#[derive(Clone)]
 pub struct Sender {
     #[allow(dead_code)]
     id: PeerId,
