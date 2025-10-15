@@ -20,8 +20,10 @@ pub mod sender;
 #[derive(Clone)]
 pub struct Media {
     pub id: MediaId,
+    #[allow(dead_code)]
     pub stream_id: String,
     pub peer_id: PeerId,
+    #[allow(dead_code)]
     pub kind: RTPCodecType,
     pub mime_type: String,
 
@@ -50,6 +52,7 @@ impl Media {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn subscribe(&self) -> Arc<dyn TrackLocal + Send + Sync> {
         let track = Arc::new(TrackLocalStaticRTP::new(
             RTCRtpCodecCapability {

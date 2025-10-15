@@ -12,6 +12,8 @@ impl Router {
             medias: HashMap::new(),
         }
     }
+
+    #[allow(dead_code)]
     /// Returns all media *not* belonging to this peer.
     pub fn get_medias_without_peer(&self, peer_id: &PeerId) -> Vec<Media> {
         self.medias
@@ -21,6 +23,7 @@ impl Router {
             .collect()
     }
 
+    #[allow(dead_code)]
     /// Returns all media for a specific peer.
     pub fn get_medias_of_peer(&self, peer_id: &PeerId) -> Vec<Media> {
         self.medias
@@ -30,6 +33,7 @@ impl Router {
             .collect()
     }
 
+    #[allow(dead_code)]
     /// Removes all media of a specific peer.
     pub fn remove_medias_of_peer(&mut self, peer_id: &PeerId) {
         let keys_to_remove: Vec<MediaId> = self
