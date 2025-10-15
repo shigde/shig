@@ -1,12 +1,15 @@
+use crate::sfu::lobby::Lobby;
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::DataChannel;
 use crate::sfu::media::error::MediaResult;
+use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
 
 pub struct Receiver {
@@ -16,6 +19,7 @@ pub struct Receiver {
     dc: Option<Arc<RTCDataChannel>>,
     #[allow(dead_code)]
     peer_addr: Addr<Peer>,
+    lobby_addr: Addr<Lobby>,
 }
 
 impl Connector for Receiver {
@@ -35,7 +39,11 @@ impl DataChannel for Receiver {
 }
 
 impl Receiver {
-    pub(crate) async fn new(id: PeerId, peer_addr: Addr<Peer>) -> MediaResult<Self> {
+    pub(crate) async fn new(
+        id: PeerId,
+        peer_addr: Addr<Peer>,
+        lobby_addr: Addr<Lobby>,
+    ) -> MediaResult<Self> {
         let pc =
             Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Receiver).await?;
         Ok(Self {
@@ -43,6 +51,7 @@ impl Receiver {
             pc,
             dc: None,
             peer_addr,
+            lobby_addr,
         })
     }
 
@@ -52,55 +61,66 @@ impl Receiver {
         // 2) on_track handler: read-only and discard (no decoding/rendering)
         {
             let pc_clone = Arc::clone(&self.pc);
-            let id = self.id.clone();
+            let peer_id = self.id.clone();
+            let lobby_addr = self.lobby_addr.clone();
             pc.on_track(Box::new(
                 move |track: Arc<TrackRemote>, _receiver, _streams| {
-                    let t = Arc::clone(&track);
-                    let id_clone = id.clone();
+                    let cancel = CancellationToken::new();
+                    let (rtp_tx, _) = broadcast::channel(32);
+                    let media = Media::new(
+                        peer_id.clone(),
+                        track.id().clone(),
+                        track.stream_id().clone(),
+                        track.kind().clone(),
+                        track.codec().capability.mime_type.clone(),
+                        rtp_tx.clone(),
+                        cancel.clone(),
+                    );
+
+                    let media_id = media.id.clone();
+                    lobby_addr.do_send(AddMedia { media });
+
+                    let peer_id = peer_id.clone();
+                    let rtp_tx = rtp_tx.clone();
+                    let lobby_addr = lobby_addr.clone();
                     // Spawn a background task that reads RTP packets (so we don't block the internal loop)
                     tokio::spawn(async move {
-                        let kind = t.kind();
+                        let kind = track.kind();
                         log::info!(
                             "New Remote-Track: kind={:?}, track_id={}, peer_id={}",
                             kind,
-                            t.id(),
-                            id_clone
+                            track.id(),
+                            peer_id
                         );
-                        // Option: only handle video
-                        if kind == RTPCodecType::Video {
-                            loop {
-                                match t.read_rtp().await {
-                                    Ok((rtp, _)) => {
-                                        // Minimal: Packet size log (or simply ignore)
-                                        // Warning: Frequent logs consume CPU; only sporadically useful here
-                                        // println!("Got RTP payload len={}", rtp.payload.len());
-                                        let _ = rtp; // wir verwerfen den Inhalt
-                                    }
-                                    Err(err) => {
-                                        log::error!(
-                                            "Track read error (closing): {err}, peer_id={}",
-                                            id_clone
-                                        );
-                                        break;
-                                    }
+
+                        loop {
+                            match track.read_rtp().await {
+                                Ok((rtp, _)) => {
+                                    // Minimal: Packet size log (or simply ignore)
+                                    // Warning: Frequent logs consume CPU; only sporadically useful here
+                                    // println!("Got RTP payload len={}", rtp.payload.len());
+                                    let _ = rtp_tx.send(Arc::new(rtp));
                                 }
-                            }
-                        } else {
-                            // If audio is received: reject it as well.
-                            loop {
-                                if t.read_rtp().await.is_err() {
+                                Err(err) => {
+                                    log::error!(
+                                        "Track read error (closing): {err}, peer_id={}",
+                                        peer_id.clone()
+                                    );
+                                    lobby_addr.do_send(RemoveMedia { media_id });
+                                    cancel.cancel();
                                     break;
                                 }
                             }
                         }
+
                         // When the track ends, automatically clean up.
                         let _ = pc_clone; // If you want to do some cleanup at the end
                     });
+
                     Box::pin(async {})
                 },
             ));
         }
-
         let answer = self.create_answer(sdp_offer).await?;
         Ok(answer)
     }

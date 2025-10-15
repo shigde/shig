@@ -1,5 +1,6 @@
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
+use crate::sfu::media::{AddMedia, RemoveMedia};
 use crate::sfu::peer::{
     Peer, PeerId, PeerRole, PeerShutdown, PeerStartReceiving, PeerStartSending,
 };
@@ -202,6 +203,46 @@ impl Handler<PeerStopped> for Lobby {
 
         if self.peers.is_empty() {
             self.stop(ctx);
+        }
+    }
+}
+
+impl Handler<AddMedia> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
+        if self.router.medias.contains_key(&msg.media.id) {
+            return;
+        }
+
+        if let Some(media) = self
+            .router
+            .medias
+            .insert(msg.media.id.clone(), msg.media.clone())
+        {
+            for (peer_id, peer_addr) in self.peers.iter() {
+                if peer_id != &media.peer_id {
+                    peer_addr.do_send(AddMedia {
+                        media: media.clone(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl Handler<RemoveMedia> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(media) = self.router.medias.remove(&msg.media_id) {
+            for (peer_id, peer_addr) in self.peers.iter() {
+                if peer_id != &media.peer_id {
+                    peer_addr.do_send(RemoveMedia {
+                        media_id: msg.media_id.clone(),
+                    });
+                }
+            }
         }
     }
 }

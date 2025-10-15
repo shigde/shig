@@ -5,6 +5,7 @@ use crate::sfu::media::data_channel::{DataChannelMsg, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
 use crate::sfu::media::sender::Sender;
+use crate::sfu::media::{AddMedia, RemoveMedia};
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
@@ -62,12 +63,13 @@ impl Handler<PeerStartReceiving> for Peer {
         log::info!("star receiving for peer actor peer_id={} is alive", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
+        let lobby_addr = self.parent_addr.clone();
         let sdp_offer = msg.offer;
 
         // Prepare the Future
         Box::pin(
             async move {
-                let mut receiver = Receiver::new(id, addr).await?;
+                let mut receiver = Receiver::new(id, addr, lobby_addr).await?;
                 let answer = receiver.connect(sdp_offer.as_str()).await?;
                 Ok((receiver, answer))
             }
@@ -198,5 +200,21 @@ impl PeerId {
 impl From<&str> for PeerId {
     fn from(s: &str) -> Self {
         Self(s.to_owned())
+    }
+}
+
+impl Handler<AddMedia> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, _msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {}
+}
+
+impl Handler<RemoveMedia> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(sender) = &self.sender {
+            let _ = sender.remove_track(msg.media_id.to_string());
+        }
     }
 }

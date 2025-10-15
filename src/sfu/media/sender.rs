@@ -58,4 +58,18 @@ impl Sender {
         };
         Ok(())
     }
+
+    #[allow(dead_code)]
+    pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
+        for sender in self.pc.get_senders().await.iter() {
+            if let Some(sender_track) = sender.track().await {
+                if sender_track.id() == track_id {
+                    if let Err(e) = self.pc.remove_track(sender).await {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
