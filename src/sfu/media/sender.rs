@@ -76,7 +76,7 @@ impl Sender {
 
     pub async fn send_signaling_offer(&mut self) -> MediaResult<()> {
         let peer_id = self.id.clone();
-        let Some(dc) = self.get_dc() else {
+        if self.get_dc().is_none() {
             log::warn!(
                 "Data channel is not initialized in sender of peer_id={}",
                 peer_id
