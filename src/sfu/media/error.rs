@@ -9,6 +9,10 @@ pub(crate) enum MediaError {
     WebRTC(WebRTCError),
     #[display(fmt = "SDP State error: {}", _0)]
     SdpState(String),
+    #[display(fmt = "DC error: {}", _0)]
+    DataCannel(String),
+    #[display(fmt = "Renegotiation error: {}", _0)]
+    Renegotiation(String),
 }
 
 impl MediaError {}

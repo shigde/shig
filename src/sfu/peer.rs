@@ -136,7 +136,7 @@ impl Handler<AddMedia> for Peer {
     fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         let media_id = msg.media.id.clone();
-        let Some(sender) = self.sender.clone() else {
+        let Some(mut sender) = self.sender.clone() else {
             return Box::pin(
                 async move {
                     log::warn!(
@@ -161,6 +161,14 @@ impl Handler<AddMedia> for Peer {
                         e
                     );
                 }
+                if let Err(e) = sender.send_signaling_offer().await {
+                    log::error!(
+                        "On add media, failed send offer media_id={} by sender of peer_id={}: {}",
+                        media_id,
+                        peer_id,
+                        e
+                    );
+                }
             }
             .into_actor(self),
         )
@@ -173,7 +181,7 @@ impl Handler<RemoveMedia> for Peer {
     fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         let media_id = msg.media_id;
-        let Some(sender) = self.sender.clone() else {
+        let Some(mut sender) = self.sender.clone() else {
             return Box::pin(
                 async move {
                     log::warn!(
@@ -196,6 +204,14 @@ impl Handler<RemoveMedia> for Peer {
                         e
                     );
                 }
+                if let Err(e) = sender.send_signaling_offer().await {
+                    log::error!(
+                        "On remove media, failed send offer media_id={} by sender of peer_id={}: {}",
+                        media_id,
+                        peer_id,
+                        e
+                    );
+                }
             }
             .into_actor(self),
         )
@@ -207,16 +223,17 @@ impl Handler<MediaMessage> for Peer {
 
     fn handle(&mut self, msg: MediaMessage, ctx: &mut Self::Context) -> Self::Result {
         match msg {
-            MediaMessage::Connected(_t) => {}
+            MediaMessage::Connected(_t) => {
+                log::info!("Connected media for peer_id={}", self.id);
+            }
             MediaMessage::Disconnected(_t) => {
+                log::info!("Disconnected media for peer_id={}", self.id);
                 self.stop(ctx);
             }
             _ => {}
         }
     }
 }
-
-// https://blog.lminiero.it/live-performance/
 
 impl Handler<OnDataChannel> for Peer {
     type Result = ();
@@ -230,19 +247,63 @@ impl Handler<OnDataChannel> for Peer {
 }
 
 impl Handler<DataChannelMsg> for Peer {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: DataChannelMsg, _ctx: &mut Self::Context) -> Self::Result {
+        let peer_id = self.id.clone();
         match msg {
-            DataChannelMsg::OfferMsg(_) => {
-                // update receiver
+            DataChannelMsg::OfferMsg(msg) => {
+                let Some(mut receiver) = self.receiver.clone() else {
+                    return Box::pin(
+                        async move {
+                            log::warn!(
+                                "Peer has no sender for signal answer for peer_id={}",
+                                peer_id
+                            );
+                        }
+                        .into_actor(self),
+                    );
+                };
+                Box::pin(
+                    async move {
+                        if let Err(e) = receiver.on_signaling_offer(msg).await {
+                            log::error!(
+                                "Failed to set signaling offer for peer_id={}: {}",
+                                peer_id,
+                                e
+                            );
+                        }
+                    }
+                    .into_actor(self),
+                )
             }
-            DataChannelMsg::AnswerMsg(_) => {
-                // update sender
+            DataChannelMsg::AnswerMsg(msg) => {
+                let Some(mut sender) = self.sender.clone() else {
+                    return Box::pin(
+                        async move {
+                            log::warn!(
+                                "Peer has no sender for signal answer for peer_id={}",
+                                peer_id
+                            );
+                        }
+                        .into_actor(self),
+                    );
+                };
+
+                Box::pin(
+                    async move {
+                        if let Err(e) = sender.on_signaling_answer(msg).await {
+                            log::error!(
+                                "Failed to set signaling answer for peer_id={}: {}",
+                                peer_id,
+                                e
+                            );
+                        }
+                    }
+                    .into_actor(self),
+                )
             }
-            DataChannelMsg::MuteMsg(_) => {
-                // ..
-            }
+            DataChannelMsg::MuteMsg(_) => Box::pin(async move {}.into_actor(self)),
         }
     }
 }

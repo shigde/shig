@@ -1,6 +1,6 @@
 use crate::sfu::media::connector::{Connector, ConnectorType};
-use crate::sfu::media::data_channel::DataChannel;
-use crate::sfu::media::error::MediaResult;
+use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, SdpMsgData};
+use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ pub struct Sender {
     dc: Option<Arc<RTCDataChannel>>,
     #[allow(dead_code)]
     peer_addr: Addr<Peer>,
+    last_offer_id: u64,
 }
 
 impl Connector for Sender {
@@ -43,6 +44,7 @@ impl Sender {
             pc,
             dc: None,
             peer_addr,
+            last_offer_id: 0,
         })
     }
 
@@ -52,7 +54,6 @@ impl Sender {
         Ok(answer)
     }
 
-    #[allow(dead_code)]
     pub async fn add_track(&self, track: Arc<dyn TrackLocal + Send + Sync>) -> MediaResult<()> {
         if let Err(e) = self.pc.add_track(track).await {
             return Err(e.into());
@@ -60,7 +61,6 @@ impl Sender {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
         for sender in self.pc.get_senders().await.iter() {
             if let Some(sender_track) = sender.track().await {
@@ -72,5 +72,48 @@ impl Sender {
             }
         }
         Ok(())
+    }
+
+    pub async fn send_signaling_offer(&mut self) -> MediaResult<()> {
+        let peer_id = self.id.clone();
+        let Some(dc) = self.get_dc() else {
+            log::warn!(
+                "Data channel is not initialized in sender of peer_id={}",
+                peer_id
+            );
+            return Err(MediaError::DataCannel(
+                "Data channel is not initialized".to_string(),
+            ));
+        };
+
+        let offer = self.create_offer().await?;
+        let offer_id = self.next_offer_id();
+
+        let msg = DataChannelMsg::OfferMsg(SdpMsgData {
+            number: offer_id,
+            sdp: offer,
+        });
+
+        match self.send_dcm(msg).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
+        }
+    }
+
+    pub async fn on_signaling_answer(&mut self, msg: SdpMsgData) -> MediaResult<()> {
+        if self.is_answer_stale(msg.number) {
+            log::info!("Answer is stale");
+            return Ok(());
+        }
+        self.set_answer(msg.sdp.as_str()).await
+    }
+
+    pub fn next_offer_id(&mut self) -> u64 {
+        self.last_offer_id += 1;
+        self.last_offer_id
+    }
+
+    pub fn is_answer_stale(&self, answer_id: u64) -> bool {
+        answer_id < self.last_offer_id
     }
 }

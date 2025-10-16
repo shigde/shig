@@ -55,7 +55,7 @@ impl DataChannelMsg {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SdpMsgData {
-    pub number: u32,
+    pub number: u64,
     pub sdp: String,
 }
 

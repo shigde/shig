@@ -100,5 +100,34 @@ pub trait Connector {
         Ok(local)
     }
 
+    async fn create_offer(&self) -> MediaResult<String> {
+        let pc = self.get_pc();
+
+        let offer = pc.create_offer(None).await?;
+
+        let mut gather_complete = pc.gathering_complete_promise().await;
+
+        pc.set_local_description(offer.clone()).await?;
+
+        // Block until ICE gather finished
+        let _ = gather_complete.recv().await;
+
+        let local = match pc.local_description().await {
+            Some(ld) => ld.sdp.clone(),
+            None => {
+                return Err(MediaError::SdpState("no local description".to_string()));
+            }
+        };
+
+        Ok(local)
+    }
+
+    async fn set_answer(&self, sdp_answer: &str) -> MediaResult<()> {
+        let pc = self.get_pc();
+        let answer = RTCSessionDescription::answer(sdp_answer.to_string())?;
+        pc.set_remote_description(answer).await?;
+        Ok(())
+    }
+
     fn get_pc(&self) -> Arc<RTCPeerConnection>;
 }

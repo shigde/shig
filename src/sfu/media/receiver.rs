@@ -1,7 +1,7 @@
 use crate::sfu::lobby::Lobby;
 use crate::sfu::media::connector::{Connector, ConnectorType};
-use crate::sfu::media::data_channel::DataChannel;
-use crate::sfu::media::error::MediaResult;
+use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, SdpMsgData};
+use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -12,8 +12,8 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::track::track_remote::TrackRemote;
 
+#[derive(Clone)]
 pub struct Receiver {
-    #[allow(dead_code)]
     pub id: PeerId,
     pc: Arc<RTCPeerConnection>,
     dc: Option<Arc<RTCDataChannel>>,
@@ -123,5 +123,18 @@ impl Receiver {
         }
         let answer = self.create_answer(sdp_offer).await?;
         Ok(answer)
+    }
+
+    pub(crate) async fn on_signaling_offer(&mut self, offer_msg: SdpMsgData) -> MediaResult<()> {
+        let answer = self.create_answer(offer_msg.sdp.as_str()).await?;
+        let answer_msg = DataChannelMsg::AnswerMsg(SdpMsgData {
+            number: offer_msg.number,
+            sdp: answer,
+        });
+
+        match self.send_dcm(answer_msg).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
+        }
     }
 }
