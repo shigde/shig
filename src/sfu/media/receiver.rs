@@ -122,6 +122,7 @@ impl Receiver {
             ));
         }
         let answer = self.create_answer(sdp_offer).await?;
+        log::info!("Connect and send answer to peer_id={}", self.id);
         Ok(answer)
     }
 
@@ -132,6 +133,7 @@ impl Receiver {
             sdp: answer,
         });
 
+        log::info!("Send signaling answer: peer_id={}", self.id);
         match self.send_dcm(answer_msg).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),

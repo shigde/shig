@@ -39,7 +39,7 @@ pub trait Connector {
             let conn_type_clone = conn_type.clone();
             let id_clone = id.clone();
             pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-                log::info!("Peer Connection State has changed: {s}, id: {id_clone}");
+                log::info!("Peer Connection State has changed: {s}, peer_id={id_clone}");
                 if s == RTCPeerConnectionState::Connected {
                     let _ = addr_clone.do_send(MediaMessage::Connected(conn_type_clone));
                 } else if s == RTCPeerConnectionState::Failed {

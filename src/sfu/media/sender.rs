@@ -10,7 +10,6 @@ use webrtc::track::track_local::TrackLocal;
 
 #[derive(Clone)]
 pub struct Sender {
-    #[allow(dead_code)]
     id: PeerId,
     pc: Arc<RTCPeerConnection>,
     dc: Option<Arc<RTCDataChannel>>,
@@ -51,10 +50,12 @@ impl Sender {
     pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
         self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
         let answer = self.create_answer(sdp_offer).await?;
+        log::info!("Connect and send answer: peer_id={}", self.id);
         Ok(answer)
     }
 
     pub async fn add_track(&self, track: Arc<dyn TrackLocal + Send + Sync>) -> MediaResult<()> {
+        log::info!("Add track: peer_id={}", self.id);
         if let Err(e) = self.pc.add_track(track).await {
             return Err(e.into());
         };
@@ -62,6 +63,7 @@ impl Sender {
     }
 
     pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
+        log::info!("Remove track: peer_id={}", self.id);
         for sender in self.pc.get_senders().await.iter() {
             if let Some(sender_track) = sender.track().await {
                 if sender_track.id() == track_id {
@@ -75,6 +77,7 @@ impl Sender {
     }
 
     pub async fn send_signaling_offer(&mut self) -> MediaResult<()> {
+        log::info!("Signaling offer: peer_id={}", self.id);
         let peer_id = self.id.clone();
         if self.get_dc().is_none() {
             log::warn!(
@@ -101,8 +104,10 @@ impl Sender {
     }
 
     pub async fn on_signaling_answer(&mut self, msg: SdpMsgData) -> MediaResult<()> {
+        log::info!("Receive signaling answer: peer_id={}", self.id);
+        let peer_id = self.id.clone();
         if self.is_answer_stale(msg.number) {
-            log::info!("Answer is stale");
+            log::info!("Signal answer is stale for peer_id={}", peer_id);
             return Ok(());
         }
         self.set_answer(msg.sdp.as_str()).await

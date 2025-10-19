@@ -42,11 +42,11 @@ impl Actor for Peer {
     type Context = Context<Self>;
 
     fn started(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("started: peer actor peer_id={} is alive", self.id);
+        log::info!("Peer actor peer_id={} is alive", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("stopped: peer actor peer_id={} is stopped", self.id);
+        log::info!("Peer actor peer_id={} is stopped", self.id);
     }
 }
 

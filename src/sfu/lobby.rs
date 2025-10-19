@@ -46,11 +46,11 @@ impl Actor for Lobby {
     type Context = Context<Self>;
 
     fn started(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("started: lobby actor {} is alive", self.id);
+        log::info!("Lobby actor lobby_id={} is alive", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("stopped: lobby actor {} is stopped", self.id);
+        log::info!("Lobby actor lobby_id={} is stopped", self.id);
     }
 }
 
