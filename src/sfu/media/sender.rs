@@ -50,12 +50,15 @@ impl Sender {
     pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
         self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
         let answer = self.create_answer(sdp_offer).await?;
-        log::info!("Connect and send answer: peer_id={}", self.id);
+        log::info!(
+            "connecting (Sender) and sending answer, peer_id={}",
+            self.id
+        );
         Ok(answer)
     }
 
     pub async fn add_track(&self, track: Arc<dyn TrackLocal + Send + Sync>) -> MediaResult<()> {
-        log::info!("Add track: peer_id={}", self.id);
+        log::info!("add track (Sender), peer_id={}", self.id);
         if let Err(e) = self.pc.add_track(track).await {
             return Err(e.into());
         };
@@ -63,7 +66,7 @@ impl Sender {
     }
 
     pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
-        log::info!("Remove track: peer_id={}", self.id);
+        log::info!("remove track (Sender) peer_id={}", self.id);
         for sender in self.pc.get_senders().await.iter() {
             if let Some(sender_track) = sender.track().await {
                 if sender_track.id() == track_id {
@@ -77,15 +80,15 @@ impl Sender {
     }
 
     pub async fn send_signaling_offer(&mut self) -> MediaResult<()> {
-        log::info!("Signaling offer: peer_id={}", self.id);
+        log::info!("signaling (Sender) offer, peer_id={}", self.id);
         let peer_id = self.id.clone();
         if self.get_dc().is_none() {
             log::warn!(
-                "Data channel is not initialized in sender of peer_id={}",
+                "data channel (Sender) is not initialized in sender of peer_id={}",
                 peer_id
             );
             return Err(MediaError::DataCannel(
-                "Data channel is not initialized".to_string(),
+                "Data channel (Sender) is not initialized".to_string(),
             ));
         };
 
@@ -104,10 +107,10 @@ impl Sender {
     }
 
     pub async fn on_signaling_answer(&mut self, msg: SdpMsgData) -> MediaResult<()> {
-        log::info!("Receive signaling answer: peer_id={}", self.id);
+        log::info!("receive (Sender) signaling answer, peer_id={}", self.id);
         let peer_id = self.id.clone();
         if self.is_answer_stale(msg.number) {
-            log::info!("Signal answer is stale for peer_id={}", peer_id);
+            log::info!("Signal answer (Sender) is stale, peer_id={}", peer_id);
             return Ok(());
         }
         self.set_answer(msg.sdp.as_str()).await

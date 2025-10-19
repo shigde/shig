@@ -2,6 +2,7 @@ use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
+use derive_more::Display;
 use std::sync::Arc;
 use webrtc::api::APIBuilder;
 use webrtc::peer_connection::configuration::RTCConfiguration;
@@ -9,7 +10,7 @@ use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Display)]
 pub enum ConnectorType {
     Sender,
     Receiver,
@@ -38,8 +39,12 @@ pub trait Connector {
             let addr_clone = peer_addr.clone();
             let conn_type_clone = conn_type.clone();
             let id_clone = id.clone();
+
             pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-                log::info!("Peer Connection State has changed: {s}, peer_id={id_clone}");
+                log::info!(
+                    "peer connection (type={}) state has changed to: {s}, peer_id={id_clone}",
+                    conn_type_clone.clone()
+                );
                 if s == RTCPeerConnectionState::Connected {
                     let _ = addr_clone.do_send(MediaMessage::Connected(conn_type_clone));
                 } else if s == RTCPeerConnectionState::Failed {

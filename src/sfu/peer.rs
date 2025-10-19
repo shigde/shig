@@ -42,11 +42,11 @@ impl Actor for Peer {
     type Context = Context<Self>;
 
     fn started(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("Peer actor peer_id={} is alive", self.id);
+        log::info!("peer actor peer_id={} is alive", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("Peer actor peer_id={} is stopped", self.id);
+        log::info!("peer actor peer_id={} is stopped", self.id);
     }
 }
 
@@ -60,7 +60,7 @@ impl Handler<PeerStartReceiving> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartReceiving, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("star receiving for peer actor peer_id={} is alive", self.id);
+        log::info!("setup receiving for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let lobby_addr = self.parent_addr.clone();
@@ -96,7 +96,7 @@ impl Handler<PeerStartSending> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartSending, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("star receiving for peer actor peer_id={} is alive", self.id);
+        log::info!("setup sending for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let sdp_offer = msg.offer;
@@ -140,7 +140,7 @@ impl Handler<AddMedia> for Peer {
             return Box::pin(
                 async move {
                     log::warn!(
-                        "Cant add media media_id={} because no sender for peer_id={}",
+                        "cant add media media_id={} because no sender for peer_id={}",
                         media_id,
                         peer_id
                     );
@@ -185,7 +185,7 @@ impl Handler<RemoveMedia> for Peer {
             return Box::pin(
                 async move {
                     log::warn!(
-                        "Cant remove media media_id={} because no sender for peer_id={}",
+                        "cant remove media media_id={} because no sender for peer_id={}",
                         media_id,
                         peer_id
                     );
@@ -224,10 +224,10 @@ impl Handler<MediaMessage> for Peer {
     fn handle(&mut self, msg: MediaMessage, ctx: &mut Self::Context) -> Self::Result {
         match msg {
             MediaMessage::Connected(_t) => {
-                log::info!("Connected media for peer_id={}", self.id);
+                log::info!("connected media for peer_id={}", self.id);
             }
             MediaMessage::Disconnected(_t) => {
-                log::info!("Disconnected media for peer_id={}", self.id);
+                log::info!("disconnected media for peer_id={}", self.id);
                 self.stop(ctx);
             }
             _ => {}

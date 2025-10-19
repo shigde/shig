@@ -65,7 +65,6 @@ pub struct MuteMsgData {
     pub mute: bool,
 }
 
-#[allow(dead_code)]
 pub trait DataChannel: Connector {
     fn initialize_data_channel(&mut self, peer_addr: Addr<Peer>, kind: ConnectorType) {
         let peer_connection = self.get_pc();
@@ -74,14 +73,20 @@ pub trait DataChannel: Connector {
             peer_connection.on_data_channel(Box::new(move |dc| {
                 let d_label = dc.label().to_owned();
                 let d_id = dc.id();
-                log::info!("New DataChannel {d_label} {d_id}");
+                log::info!("new data channel type={kind}, label={d_label},  dc_id={d_id}");
                 peer_addr.do_send(OnDataChannel {
                     kind,
                     dc: Arc::clone(&dc),
                 });
                 let peer_addr_clone = peer_addr.clone();
                 Box::pin(async move {
-                    dc.on_open(Box::new(move || Box::pin(async move {})));
+                    dc.on_open(Box::new(move || {
+                        Box::pin(async move {
+                            log::info!(
+                                "data channel is open type={kind}, label={d_label},  dc_id={d_id}"
+                            );
+                        })
+                    }));
 
                     dc.on_message(Box::new(move |dcm| {
                         //msg.is_string
@@ -105,6 +110,7 @@ pub trait DataChannel: Connector {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn send_dcm_bin(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
         let Some(dc) = self.get_dc() else {
             return Ok(());
@@ -114,6 +120,7 @@ pub trait DataChannel: Connector {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
     fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
 }

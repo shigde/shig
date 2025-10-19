@@ -87,7 +87,7 @@ impl Receiver {
                     tokio::spawn(async move {
                         let kind = track.kind();
                         log::info!(
-                            "New Remote-Track: kind={:?}, track_id={}, peer_id={}",
+                            "receive (Receiver) new Remote-Track, kind={:?}, track_id={}, peer_id={}",
                             kind,
                             track.id(),
                             peer_id
@@ -103,7 +103,7 @@ impl Receiver {
                                 }
                                 Err(err) => {
                                     log::error!(
-                                        "Track read error (closing): {err}, peer_id={}",
+                                        "track (Receiver) read error (closing): {err}, peer_id={}",
                                         peer_id.clone()
                                     );
                                     lobby_addr.do_send(RemoveMedia { media_id });
@@ -122,7 +122,10 @@ impl Receiver {
             ));
         }
         let answer = self.create_answer(sdp_offer).await?;
-        log::info!("Connect and send answer to peer_id={}", self.id);
+        log::info!(
+            "connecting (Receiver) and sending answer, peer_id={}",
+            self.id
+        );
         Ok(answer)
     }
 
@@ -133,7 +136,7 @@ impl Receiver {
             sdp: answer,
         });
 
-        log::info!("Send signaling answer: peer_id={}", self.id);
+        log::info!("send (Receiver) signaling answer: peer_id={}", self.id);
         match self.send_dcm(answer_msg).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),

@@ -70,7 +70,7 @@ impl Handler<PublishLobby> for Sfu {
                 let lobby_addr =
                     Lobby::new(msg.lobby_uuid.clone(), msg.user_uuid.clone(), ctx.address())
                         .start();
-                self.lobbies.insert(lobby_uuid, lobby_addr.clone());
+                self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
                 lobby_addr.clone()
             }
             Some(lobby_addr) => lobby_addr.clone(),
@@ -80,7 +80,11 @@ impl Handler<PublishLobby> for Sfu {
         let offer = msg.offer.clone();
 
         let fut = async move {
-            log::info!("Peer joining lobby {}", user_uuid.clone());
+            log::info!(
+                "peer joining lobby,  peer_id={}, lobby_id={}",
+                user_uuid.clone(),
+                lobby_uuid.clone()
+            );
             let result = lobby_addr
                 .send(Publish {
                     user_uuid,
@@ -127,6 +131,11 @@ impl Handler<SubscribeLobby> for Sfu {
         let user_uuid = msg.user_uuid.clone();
         let offer = msg.offer.clone();
         let fut = async move {
+            log::info!(
+                "peer subscribing lobby,  peer_id={}, lobby_id={}",
+                user_uuid.clone(),
+                lobby_uuid.clone()
+            );
             let result = lobby_addr.send(Subscribe { user_uuid, offer }).await;
 
             match result {
