@@ -1,5 +1,5 @@
 use crate::db::actor_images::create::insert_new_actor_image;
-use crate::db::actor_images::read::{find_actor_image_by_actor_id};
+use crate::db::actor_images::read::find_actor_image_by_actor_id;
 use crate::db::actor_images::update::update_actor_image;
 use crate::db::actor_images::ActorImageType;
 use crate::db::channels::read::{find_channel_by_user_id, find_channel_by_uuid};
@@ -30,16 +30,16 @@ pub struct Channel {
 }
 
 impl Channel {
-
     pub fn fetch(pool: &web::Data<DbPool>, channel_uuid: String) -> Result<Channel, ApiError> {
         let mut conn = pool.get()?;
         let channel: ChannelDb = find_channel_by_uuid(&mut conn, channel_uuid)?;
         let user: User = find_user_by_id(&mut conn, channel.user_id)?;
-        let banner = match find_actor_image_by_actor_id(&mut conn, channel.actor_id, ActorImageType::BANNER)
-        {
-            Ok(image) => image.file_url.unwrap_or("".to_string()),
-            Err(_) => "".to_string(),
-        };
+        let banner =
+            match find_actor_image_by_actor_id(&mut conn, channel.actor_id, ActorImageType::BANNER)
+            {
+                Ok(image) => image.file_url.unwrap_or("".to_string()),
+                Err(_) => "".to_string(),
+            };
 
         Ok(Channel {
             uuid: channel.uuid,
@@ -77,8 +77,8 @@ impl ChannelForm {
         cgf: &web::Data<FilesConfig>,
     ) -> Result<Channel, ApiError> {
         if principal.channel_uuid != self.channel.uuid {
-            return Err(ApiError::Unauthorized {
-                error_message: "unauthorized".to_string(),
+            return Err(ApiError::Forbidden {
+                error_message: "forbidden".to_string(),
             });
         }
 

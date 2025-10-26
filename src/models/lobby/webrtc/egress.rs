@@ -41,8 +41,8 @@ pub(crate) async fn whep(
     let is_owner = db_lobby.user_id == user.id;
 
     if !is_stream_friend && !is_channel_friend && !is_owner {
-        return Err(ApiError::Unauthorized {
-            error_message: "user is not authorized to subscribe".to_string(),
+        return Err(ApiError::Forbidden {
+            error_message: "user is not allowed to subscribe".to_string(),
         });
     }
 

@@ -30,7 +30,10 @@ pub fn create_home_instance(conn: &mut PgConnection, cfg: FederationConfig) -> D
 }
 
 pub fn create_standard_users(conn: &mut PgConnection, cfg: FederationConfig) -> DbResult<()> {
-    let domain = cfg.domain.as_str();
+    let mut domain = cfg.domain.as_str();
+    if domain.starts_with("localhost") {
+        domain = "localhost.de"
+    }
     let user_email = format!("user@{domain}");
     let admin_email = format!("admin@{domain}");
 

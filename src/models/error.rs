@@ -13,6 +13,7 @@ use serde::de::StdError;
 #[derive(Debug, Display, Error)]
 pub enum ApiError {
     #[display(fmt = "{error_message}")]
+    #[allow(dead_code)]
     Unauthorized { error_message: String },
 
     #[allow(dead_code)]

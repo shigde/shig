@@ -31,8 +31,8 @@ impl StreamForm {
     ) -> Result<Stream, ApiError> {
         // Check if user is the owner of the stream
         if principal.user_uuid != self.stream.owner_uuid {
-            return Err(ApiError::Unauthorized {
-                error_message: "unauthorized".to_string(),
+            return Err(ApiError::Forbidden {
+                error_message: "forbidden".to_string(),
             });
         }
 
@@ -105,8 +105,8 @@ impl StreamForm {
 
         // Check if user is the owner of the stream
         if principal.id != current_stream_dao.stream.user_id {
-            return Err(ApiError::Unauthorized {
-                error_message: "unauthorized".to_string(),
+            return Err(ApiError::Forbidden {
+                error_message: "forbidden".to_string(),
             });
         }
 

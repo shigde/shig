@@ -49,8 +49,8 @@ impl Stream {
 
         // Check if user is the owner of the stream
         if principal.id != stream_dao.stream.user_id {
-            return Err(ApiError::Unauthorized {
-                error_message: "unauthorized".to_string(),
+            return Err(ApiError::Forbidden {
+                error_message: "forbidden".to_string(),
             });
         }
 
@@ -73,8 +73,8 @@ impl Stream {
 
         // Check if user is the owner of the stream
         if principal.id != stream_dao.stream.user_id {
-            return Err(ApiError::Unauthorized {
-                error_message: "unauthorized".to_string(),
+            return Err(ApiError::Forbidden {
+                error_message: "forbidden".to_string(),
             });
         }
         delete_stream_by_id(&mut conn, stream_dao.stream.id)?;
