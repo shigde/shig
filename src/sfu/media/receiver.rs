@@ -6,10 +6,12 @@ use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
+use tokio::select;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
 
 #[derive(Clone)]
@@ -20,6 +22,7 @@ pub struct Receiver {
     #[allow(dead_code)]
     peer_addr: Addr<Peer>,
     lobby_addr: Addr<Lobby>,
+    stop: CancellationToken,
 }
 
 impl Connector for Receiver {
@@ -52,6 +55,7 @@ impl Receiver {
             dc: None,
             peer_addr,
             lobby_addr,
+            stop: CancellationToken::new(),
         })
     }
 
@@ -63,8 +67,16 @@ impl Receiver {
             let pc_clone = Arc::clone(&self.pc);
             let peer_id = self.id.clone();
             let lobby_addr = self.lobby_addr.clone();
+            let peer_stopped = self.stop.clone();
             pc.on_track(Box::new(
                 move |track: Arc<TrackRemote>, _receiver, _streams| {
+                    log::info!(
+                            "receive (Receiver) remote-Track, kind={:?}, track_id={}, peer_id={}",
+                            track.kind().clone(),
+                            track.id().clone(),
+                            peer_id.clone()
+                        );
+
                     let cancel = CancellationToken::new();
                     let (rtp_tx, _) = broadcast::channel(32);
                     let media = Media::new(
@@ -80,33 +92,48 @@ impl Receiver {
                     let media_id = media.id.clone();
                     lobby_addr.do_send(AddMedia { media });
 
+
                     let peer_id = peer_id.clone();
+                    let peer_stopped = peer_stopped.clone();
                     let rtp_tx = rtp_tx.clone();
                     let lobby_addr = lobby_addr.clone();
                     // Spawn a background task that reads RTP packets (so we don't block the internal loop)
                     tokio::spawn(async move {
-                        let kind = track.kind();
+                        let kind = track.kind().clone();
                         log::info!(
-                            "receive (Receiver) new Remote-Track, kind={:?}, track_id={}, peer_id={}",
-                            kind,
-                            track.id(),
-                            peer_id
+                            "start reading (Receiver) remote-Track, kind={:?}, track_id={}, peer_id={}",
+                            kind.clone(),
+                            track.id().clone(),
+                            peer_id.clone()
                         );
 
                         loop {
-                            match track.read_rtp().await {
-                                Ok((rtp, _)) => {
-                                    // Minimal: Packet size log (or simply ignore)
-                                    // Warning: Frequent logs consume CPU; only sporadically useful here
-                                    // println!("Got RTP payload len={}", rtp.payload.len());
-                                    let _ = rtp_tx.send(Arc::new(rtp));
+                            select! {
+                                rtp_result = track.read_rtp() => {
+                                    match rtp_result {
+                                    Ok((rtp, _)) => {
+                                        // Minimal: Packet size log (or simply ignore)
+                                        // Warning: Frequent logs consume CPU; only sporadically useful here
+                                        // println!("Got RTP payload len={}", rtp.payload.len());
+                                        let _ = rtp_tx.send(Arc::new(rtp));
+                                    }
+                                    Err(err) => {
+                                        log::error!(
+                                            "track (Receiver) read error (closing): {err}, peer_id={}",
+                                            peer_id.clone()
+                                        );
+                                        lobby_addr.do_send(RemoveMedia { media_id });
+                                        cancel.cancel();
+                                        break;
+                                    }
+                                        }
                                 }
-                                Err(err) => {
-                                    log::error!(
-                                        "track (Receiver) read error (closing): {err}, peer_id={}",
-                                        peer_id.clone()
+                                _ = peer_stopped.cancelled() => {
+                                    log::info!("peer (Receiver) stopped all tracks, kind={:?}, track_id={}, peer_id={}",
+                                        kind,
+                                        track.id(),
+                                        peer_id
                                     );
-                                    lobby_addr.do_send(RemoveMedia { media_id });
                                     cancel.cancel();
                                     break;
                                 }
@@ -121,6 +148,15 @@ impl Receiver {
                 },
             ));
         }
+
+        // Add Transceiver for Reception
+        // We expect the client to send video
+        pc.add_transceiver_from_kind(RTPCodecType::Video, None)
+            .await?;
+        // We expect the client to send audio
+        pc.add_transceiver_from_kind(RTPCodecType::Audio, None)
+            .await?;
+
         let answer = self.create_answer(sdp_offer).await?;
         log::info!(
             "connecting (Receiver) and sending answer, peer_id={}",
@@ -140,6 +176,29 @@ impl Receiver {
         match self.send_dcm(answer_msg).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
+        }
+    }
+
+    pub(crate) async fn shutdown(&self) {
+        log::info!("shutdown (Receiver), peer_id={}", self.id);
+
+        self.stop.cancel();
+
+        if let Some(dc) = self.get_dc() {
+            if let Err(e) = dc.close().await {
+                log::error!(
+                    "close data channel (Receiver) error: {e}, peer_id={}",
+                    self.id
+                );
+            }
+        }
+
+        let pc = self.get_pc();
+        if let Err(e) = pc.close().await {
+            log::error!(
+                "close peer_connection (Receiver) error: {e}, peer_id={}",
+                self.id
+            );
         }
     }
 }

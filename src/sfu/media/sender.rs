@@ -124,4 +124,25 @@ impl Sender {
     pub fn is_answer_stale(&self, answer_id: u64) -> bool {
         answer_id < self.last_offer_id
     }
+
+    pub(crate) async fn shutdown(&self) {
+        log::info!("shutdown (Sender), peer_id={}", self.id);
+
+        if let Some(dc) = self.get_dc() {
+            if let Err(e) = dc.close().await {
+                log::error!(
+                    "close data channel (Sender) error: {e}, peer_id={}",
+                    self.id
+                );
+            }
+        }
+
+        let pc = self.get_pc();
+        if let Err(e) = pc.close().await {
+            log::error!(
+                "close peer_connection (Sender) error: {e}, peer_id={}",
+                self.id
+            );
+        }
+    }
 }

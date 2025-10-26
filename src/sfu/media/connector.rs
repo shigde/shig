@@ -4,9 +4,13 @@ use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use derive_more::Display;
 use std::sync::Arc;
+use webrtc::api::interceptor_registry::register_default_interceptors;
+use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::APIBuilder;
+use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 
@@ -22,9 +26,22 @@ pub trait Connector {
         peer_addr: Addr<Peer>,
         conn_type: ConnectorType,
     ) -> MediaResult<Arc<RTCPeerConnection>> {
-        let api = APIBuilder::new().build();
+        let mut m = MediaEngine::default();
+
+        m.register_default_codecs()?;
+
+        let mut registry = Registry::new();
+        registry = register_default_interceptors(registry, &mut m)?;
+
+        // Create the API object with the MediaEngine
+        let api = APIBuilder::new()
+            .with_media_engine(m)
+            .with_interceptor_registry(registry)
+            .build();
+
         let config = RTCConfiguration {
             ice_servers: vec![], // Optional: add STUN/TURN if NAT is required.
+            bundle_policy: RTCBundlePolicy::MaxBundle,
             ..Default::default()
         };
 
@@ -46,12 +63,12 @@ pub trait Connector {
                     conn_type_clone.clone()
                 );
                 if s == RTCPeerConnectionState::Connected {
-                    let _ = addr_clone.do_send(MediaMessage::Connected(conn_type_clone));
+                    let _ = addr_clone.try_send(MediaMessage::Connected(conn_type_clone));
                 } else if s == RTCPeerConnectionState::Failed {
                     // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                     // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                     // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                    let _ = addr_clone.do_send(MediaMessage::Disconnected(conn_type_clone));
+                    let _ = addr_clone.try_send(MediaMessage::Disconnected(conn_type_clone));
                 }
                 Box::pin(async move {})
             }));
@@ -83,14 +100,13 @@ pub trait Connector {
             }
         };
 
-        // 5) Wait for ICE gathering to finish before setting local description to include candidates
-        //    webrtc-rs exposes a gathering_complete_promise() helper which returns a receiver to await.
-        let mut gather_complete = pc.gathering_complete_promise().await;
-
         if let Err(e) = pc.set_local_description(answer).await {
             return Err(MediaError::WebRTC(e));
         }
 
+        // 5) Wait for ICE gathering to finish before setting local description to include candidates
+        //    webrtc-rs exposes a gathering_complete_promise() helper which returns a receiver to await.
+        let mut gather_complete = pc.gathering_complete_promise().await;
         // Block until ICE gather finished
         let _ = gather_complete.recv().await;
 

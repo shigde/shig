@@ -29,13 +29,6 @@ impl Peer {
             sender: None,
         }
     }
-
-    fn stop(&self, ctx: &mut Context<Peer>) {
-        self.parent_addr.do_send(PeerStopped {
-            id: self.id.clone(),
-        });
-        ctx.stop();
-    }
 }
 
 impl Actor for Peer {
@@ -48,6 +41,11 @@ impl Actor for Peer {
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
         log::info!("peer actor peer_id={} is stopped", self.id);
     }
+    // fn stopping(&mut self, _ctx: &mut Context<Self>) -> Running {
+    //     log::info!("peer actor peer_id={} is stopping", self.id);
+    //     let _ = self.cleanup().await;
+    //     Running::Stop
+    // }
 }
 
 #[derive(Message)]
@@ -60,7 +58,7 @@ impl Handler<PeerStartReceiving> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartReceiving, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("setup receiving for peer actor peer_id={}", self.id);
+        log::info!("starting (Receiver) for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let lobby_addr = self.parent_addr.clone();
@@ -96,7 +94,7 @@ impl Handler<PeerStartSending> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartSending, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("setup sending for peer actor peer_id={}", self.id);
+        log::info!("setup (Sender) for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let sdp_offer = msg.offer;
@@ -109,7 +107,7 @@ impl Handler<PeerStartSending> for Peer {
                     let track = media.subscribe();
                     if let Err(e) = sender.add_track(track).await {
                         log::error!(
-                            "On subscribe, failed to add track to sender peer_id={} : {}",
+                            "On subscribe (Sender), failed to add track to peer_id={} : {}",
                             id,
                             e
                         );
@@ -140,7 +138,7 @@ impl Handler<AddMedia> for Peer {
             return Box::pin(
                 async move {
                     log::warn!(
-                        "cant add media media_id={} because no sender for peer_id={}",
+                        "cant add media media_id={} because no (Sender) for peer_id={}",
                         media_id,
                         peer_id
                     );
@@ -163,7 +161,7 @@ impl Handler<AddMedia> for Peer {
                 }
                 if let Err(e) = sender.send_signaling_offer().await {
                     log::error!(
-                        "On add media, failed send offer media_id={} by sender of peer_id={}: {}",
+                        "On add media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
                         media_id,
                         peer_id,
                         e
@@ -185,7 +183,7 @@ impl Handler<RemoveMedia> for Peer {
             return Box::pin(
                 async move {
                     log::warn!(
-                        "cant remove media media_id={} because no sender for peer_id={}",
+                        "cant remove media media_id={} because no (Sender) for peer_id={}",
                         media_id,
                         peer_id
                     );
@@ -206,7 +204,7 @@ impl Handler<RemoveMedia> for Peer {
                 }
                 if let Err(e) = sender.send_signaling_offer().await {
                     log::error!(
-                        "On remove media, failed send offer media_id={} by sender of peer_id={}: {}",
+                        "On remove media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
                         media_id,
                         peer_id,
                         e
@@ -221,16 +219,27 @@ impl Handler<RemoveMedia> for Peer {
 impl Handler<MediaMessage> for Peer {
     type Result = ();
 
-    fn handle(&mut self, msg: MediaMessage, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: MediaMessage, _ctx: &mut Context<Self>) -> Self::Result {
         match msg {
-            MediaMessage::Connected(_t) => {
-                log::info!("connected media for peer_id={}", self.id);
+            MediaMessage::Connected(connector_type) => {
+                let peer_id = self.id.clone();
+                log::info!(
+                    "media connected, type={}, peer_id={}",
+                    connector_type,
+                    peer_id
+                );
             }
-            MediaMessage::Disconnected(_t) => {
-                log::info!("disconnected media for peer_id={}", self.id);
-                self.stop(ctx);
+
+            MediaMessage::Disconnected(connector_type) => {
+                let peer_id = self.id.clone();
+                log::info!(
+                    "media disconnected,  type={}, peer_id={}",
+                    connector_type,
+                    peer_id
+                );
+                _ctx.notify(PeerShutdown {});
             }
-            _ => {}
+            _ => (),
         }
     }
 }
@@ -313,11 +322,37 @@ impl Handler<DataChannelMsg> for Peer {
 pub struct PeerShutdown {}
 
 impl Handler<PeerShutdown> for Peer {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
-    fn handle(&mut self, _msg: PeerShutdown, ctx: &mut Self::Context) -> Self::Result {
-        //@Todo implement shutdown logic
-        self.stop(ctx);
+    fn handle(&mut self, _msg: PeerShutdown, _ctx: &mut Self::Context) -> Self::Result {
+        log::info!("shutting down peer actor peer_id={}", self.id);
+
+        let peer_id = self.id.clone();
+        let parent_addr = self.parent_addr.clone();
+        let sender = self.sender.clone();
+        let receiver = self.receiver.clone();
+
+        Box::pin(
+            async move {
+                log::info!("cleanup peer actor, peer_id={}", peer_id);
+                if let Some(receiver) = receiver {
+                    let _ = receiver.shutdown().await;
+                }
+
+                if let Some(sender) = sender {
+                    let _ = sender.shutdown().await;
+                }
+
+                let _ = parent_addr.try_send(PeerStopped {
+                    id: peer_id.clone(),
+                });
+            }
+            .into_actor(self)
+            .map(|_, actor, ctx| {
+                log::info!("stop peer actor, peer_id={}", actor.id);
+                ctx.stop();
+            }),
+        )
     }
 }
 
