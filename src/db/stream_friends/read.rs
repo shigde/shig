@@ -33,7 +33,6 @@ pub fn find_all_by_stream(conn: &mut PgConnection, stream: i32) -> DbResult<Vec<
     Ok(friends)
 }
 
-#[allow(dead_code)]
 pub fn is_stream_friend(conn: &mut PgConnection, stream: i32, user: i32) -> DbResult<bool> {
     use crate::db::schema::stream_friends::dsl::*;
     let exists = select(exists(

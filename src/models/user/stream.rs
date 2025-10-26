@@ -1,4 +1,5 @@
 use crate::db::channels::read::find_channel_by_id;
+use crate::db::stream_friends::read::is_stream_friend;
 use crate::db::streams::delete::delete_stream_by_id;
 use crate::db::streams::read::find_full_stream_by_uuid;
 use crate::db::users::read::find_user_by_id;
@@ -49,9 +50,13 @@ impl Stream {
 
         // Check if user is the owner of the stream
         if principal.id != stream_dao.stream.user_id {
-            return Err(ApiError::Forbidden {
-                error_message: "forbidden".to_string(),
-            });
+            // Check if user is a friend of the stream
+            let is_stream_friend = is_stream_friend(&mut conn, stream_dao.stream.id, principal.id)?;
+            if !is_stream_friend {
+                return Err(ApiError::Forbidden {
+                    error_message: "forbidden".to_string(),
+                });
+            }
         }
 
         let channel = find_channel_by_id(&mut conn, stream_dao.stream.channel_id)?;
