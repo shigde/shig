@@ -1,18 +1,17 @@
 use crate::db::DbPool;
 use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
-use crate::models::lobby::webrtc::egress::whep;
-use crate::models::lobby::webrtc::ingress::whip;
-use actix_web::{http::header, post, web, HttpRequest, HttpResponse};
+use crate::models::lobby::webrtc::egress::{whep_answer, whep_offer};
+use actix_web::http::header;
+use actix_web::{patch, post, web, HttpRequest, HttpResponse};
 
-#[post("/{channel_uuid}/stream/{stream_uuid}/whip")]
-pub async fn whip_endpoint(
+#[post("/{channel_uuid}/stream/{stream_uuid}/whep")]
+pub async fn create_offer(
     req: HttpRequest,
     pool: web::Data<DbPool>,
     sfu_addr: web::Data<actix::Addr<crate::sfu::Sfu>>,
     path: web::Path<(String, String)>,
     session: web::ReqData<Session>,
-    body: String,
 ) -> Result<HttpResponse, ApiError> {
     let (channel_uuid, stream_uuid) = path.into_inner();
     let user = session.principal.clone();
@@ -32,23 +31,15 @@ pub async fn whip_endpoint(
         }
     }
 
-    let answer = whip(
-        &pool,
-        channel_uuid,
-        stream_uuid,
-        user,
-        sfu_addr.clone(),
-        body,
-    )
-    .await?;
+    let answer = whep_offer(&pool, channel_uuid, stream_uuid, user, sfu_addr.clone()).await?;
 
     Ok(HttpResponse::Created()
         .content_type("application/sdp")
         .body(answer))
 }
 
-#[post("/{channel_uuid}/stream/{stream_uuid}/whep")]
-pub async fn whep_endpoint(
+#[patch("/{channel_uuid}/stream/{stream_uuid}/whep")]
+pub async fn set_answer(
     req: HttpRequest,
     pool: web::Data<DbPool>,
     sfu_addr: web::Data<actix::Addr<crate::sfu::Sfu>>,
@@ -74,7 +65,7 @@ pub async fn whep_endpoint(
         }
     }
 
-    let answer = whep(
+    whep_answer(
         &pool,
         channel_uuid,
         stream_uuid,
@@ -86,5 +77,5 @@ pub async fn whep_endpoint(
 
     Ok(HttpResponse::Created()
         .content_type("application/sdp")
-        .body(answer))
+        .body("ok"))
 }

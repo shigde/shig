@@ -1,15 +1,19 @@
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
+use crate::sfu::media::Media;
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
+use uuid::Uuid;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocal;
 
 #[derive(Clone)]
 pub struct Sender {
+    unique_id: Uuid,
     id: PeerId,
     pc: Arc<RTCPeerConnection>,
     dc: Option<Arc<RTCDataChannel>>,
@@ -39,6 +43,7 @@ impl Sender {
         let pc =
             Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Sender).await?;
         Ok(Self {
+            unique_id: Uuid::new_v4(),
             id,
             pc,
             dc: None,
@@ -47,26 +52,55 @@ impl Sender {
         })
     }
 
-    pub(crate) async fn connect(&mut self, sdp_offer: &str) -> MediaResult<String> {
-        self.initialize_data_channel(self.peer_addr.clone(), ConnectorType::Sender);
-        let answer = self.create_answer(sdp_offer).await?;
+    pub(crate) async fn setup_offer(&mut self) -> MediaResult<String> {
+        if let Err(e) = self
+            .create_data_channel(self.peer_addr.clone(), ConnectorType::Sender)
+            .await
+        {
+            return Err(MediaError::DataCannel(e.to_string()));
+        }
         log::info!(
-            "connecting (Sender) and sending answer, peer_id={}",
-            self.id
+            "connect and create answer (Sender), peer_id={}, sender_id={}",
+            self.id,
+            self.unique_id
         );
-        Ok(answer)
+
+        let offer = self.create_offer().await?;
+        Ok(offer)
     }
 
-    pub async fn add_track(&self, track: Arc<dyn TrackLocal + Send + Sync>) -> MediaResult<()> {
-        log::info!("add track (Sender), peer_id={}", self.id);
-        if let Err(e) = self.pc.add_track(track).await {
+    pub async fn add_media(&self, media: Media) -> MediaResult<()> {
+        log::info!(
+            "add track (Sender), peer_id={}, sender_id={}",
+            self.id,
+            self.unique_id
+        );
+
+        let track = Arc::new(TrackLocalStaticRTP::new(
+            media.capability.clone(),
+            media.id.to_string(),
+            media.stream_id.clone(),
+        ));
+
+        let pc = self.get_pc();
+
+        if let Err(e) = pc
+            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await
+        {
             return Err(e.into());
         };
+
+        media.subscribe(track).await;
         Ok(())
     }
 
     pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
-        log::info!("remove track (Sender) peer_id={}", self.id);
+        log::info!(
+            "remove track (Sender) peer_id={}, sender_id={}",
+            self.id,
+            self.unique_id
+        );
         for sender in self.pc.get_senders().await.iter() {
             if let Some(sender_track) = sender.track().await {
                 if sender_track.id() == track_id {

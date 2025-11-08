@@ -1,6 +1,6 @@
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
-use crate::sfu::media::connector::ConnectorType;
+use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannelMsg, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
@@ -41,11 +41,6 @@ impl Actor for Peer {
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
         log::info!("peer actor peer_id={} is stopped", self.id);
     }
-    // fn stopping(&mut self, _ctx: &mut Context<Self>) -> Running {
-    //     log::info!("peer actor peer_id={} is stopping", self.id);
-    //     let _ = self.cleanup().await;
-    //     Running::Stop
-    // }
 }
 
 #[derive(Message)]
@@ -86,7 +81,6 @@ impl Handler<PeerStartReceiving> for Peer {
 #[derive(Message)]
 #[rtype(result = "PeerResult<String>")]
 pub struct PeerStartSending {
-    pub offer: String,
     pub medias: Vec<Media>,
 }
 
@@ -97,24 +91,27 @@ impl Handler<PeerStartSending> for Peer {
         log::info!("setup (Sender) for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
-        let sdp_offer = msg.offer;
 
         // Prepare the Future
         Box::pin(
             async move {
                 let mut sender = Sender::new(id.clone(), addr).await?;
                 for media in msg.medias {
-                    let track = media.subscribe();
-                    if let Err(e) = sender.add_track(track).await {
-                        log::error!(
-                            "On subscribe (Sender), failed to add track to peer_id={} : {}",
-                            id,
-                            e
-                        );
+                    match sender.add_media(media.clone()).await {
+                        Ok(_) => {
+                            log::info!("On subscribe (Sender), added media to peer_id={}, media_id= {}, kind={}", id, media.id, media.kind);
+                        },
+                        Err(e) => {
+                            log::error!(
+                                "On subscribe (Sender), failed to add media to peer_id={} : {}",
+                                id,
+                                e
+                            );
+                        }
                     }
                 }
-                let answer = sender.connect(sdp_offer.as_str()).await?;
-                Ok((sender, answer))
+                let offer = sender.setup_offer().await?;
+                Ok((sender, offer))
             }
             .into_actor(self)
             .map(|res, actor, _| match res {
@@ -124,6 +121,35 @@ impl Handler<PeerStartSending> for Peer {
                 }
                 Err(e) => Err(PeerError::InternalMedia(e)),
             }),
+        )
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "PeerResult<String>")]
+pub struct PeerSending {
+    pub answer: String,
+}
+
+impl Handler<PeerSending> for Peer {
+    type Result = ResponseActFuture<Self, PeerResult<String>>;
+
+    fn handle(&mut self, msg: PeerSending, _ctx: &mut Self::Context) -> Self::Result {
+        log::info!("setup (Sender) for peer actor peer_id={}", self.id);
+
+        let sdp_answer = msg.answer;
+        let sender = self.sender.clone().unwrap();
+
+        Box::pin(
+            async move {
+                if let Err(err) = sender.set_answer(sdp_answer.as_str()).await {
+                    log::error!("set_answer failed: {:?}", err);
+                    Err(err.into())
+                } else {
+                    Ok("".to_string())
+                }
+            }
+            .into_actor(self),
         )
     }
 }
@@ -150,8 +176,7 @@ impl Handler<AddMedia> for Peer {
         let media = msg.media;
         Box::pin(
             async move {
-                let track = media.subscribe();
-                if let Err(e) = sender.add_track(track).await {
+                if let Err(e) = sender.add_media(media).await {
                     log::error!(
                         "On subscribe, failed to add media media_id={} to sender of peer_id={}: {}",
                         media_id,

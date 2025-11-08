@@ -2,13 +2,14 @@ use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
 use crate::sfu::media::{AddMedia, RemoveMedia};
 use crate::sfu::peer::{
-    Peer, PeerId, PeerRole, PeerShutdown, PeerStartReceiving, PeerStartSending,
+    Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerStartReceiving, PeerStartSending,
 };
 use crate::sfu::{LobbyStopped, Sfu};
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
     WrapFuture,
 };
+use derive_more::Display;
 use std::collections::HashMap;
 
 pub struct Lobby {
@@ -99,8 +100,15 @@ impl Handler<Publish> for Lobby {
 #[derive(Message)]
 #[rtype(result = " LobbyResult<String>")]
 pub struct Subscribe {
+    pub kind: SubscribeKind,
     pub user_uuid: String,
-    pub offer: String,
+    pub answer: Option<String>,
+}
+
+#[derive(Display)]
+pub enum SubscribeKind {
+    Offer,
+    Answer,
 }
 
 impl Handler<Subscribe> for Lobby {
@@ -118,10 +126,23 @@ impl Handler<Subscribe> for Lobby {
             }
         };
 
-        let offer = msg.offer.clone();
-        let medias = self.router.get_medias_without_peer(&peer_id);
+        let answer_option = msg.answer.clone();
+        let kind = msg.kind;
+        let medias = match kind {
+            SubscribeKind::Offer => self.router.get_medias_without_peer(&peer_id),
+            SubscribeKind::Answer => vec![],
+        };
+
+        log::info!("has medias medias_len={}", medias.len());
+
         let fut = async move {
-            let result = peer_addr.send(PeerStartSending { offer, medias }).await;
+            let result = match kind {
+                SubscribeKind::Offer => peer_addr.send(PeerStartSending { medias }).await,
+                SubscribeKind::Answer => {
+                    let answer = answer_option.unwrap();
+                    peer_addr.send(PeerSending { answer }).await
+                }
+            };
 
             match result {
                 Ok(val) => match val {
@@ -213,19 +234,39 @@ impl Handler<AddMedia> for Lobby {
 
     fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
         if self.router.medias.contains_key(&msg.media.id) {
+            log::warn!(
+                "media already exists, peer_id={}, media_id={}, kind={}",
+                msg.media.peer_id,
+                msg.media.id,
+                msg.media.kind
+            );
             return;
         }
 
-        if let Some(media) = self
+        match self
             .router
             .medias
             .insert(msg.media.id.clone(), msg.media.clone())
         {
-            for (peer_id, peer_addr) in self.peers.iter() {
-                if peer_id != &media.peer_id {
-                    peer_addr.do_send(AddMedia {
-                        media: media.clone(),
-                    });
+            Some(_) => log::warn!(
+                "media already exists, peer_id={}, media_id={}, kind={}",
+                msg.media.peer_id,
+                msg.media.id,
+                msg.media.kind
+            ),
+            None => {
+                log::info!(
+                    "add media, peer_id={}, media_id={}, kind={}",
+                    msg.media.peer_id,
+                    msg.media.id,
+                    msg.media.kind
+                );
+                for (peer_id, peer_addr) in self.peers.iter() {
+                    if peer_id != &msg.media.peer_id {
+                        peer_addr.do_send(AddMedia {
+                            media: msg.media.clone(),
+                        });
+                    }
                 }
             }
         }

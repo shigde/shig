@@ -1,6 +1,6 @@
 use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{SfuError, SfuResult};
-use crate::sfu::lobby::{Lobby, LobbyShutdown, Publish, Subscribe};
+use crate::sfu::lobby::{Lobby, LobbyShutdown, Publish, Subscribe, SubscribeKind};
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
@@ -110,7 +110,8 @@ impl Handler<PublishLobby> for Sfu {
 #[derive(Message)]
 #[rtype(result = " SfuResult<String>")]
 pub struct SubscribeLobby {
-    pub offer: String,
+    pub kind: SubscribeKind,
+    pub answer: Option<String>,
     pub lobby_uuid: String,
     pub user_uuid: String,
 }
@@ -120,6 +121,7 @@ impl Handler<SubscribeLobby> for Sfu {
 
     fn handle(&mut self, msg: SubscribeLobby, _ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
+        let kind = msg.kind;
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
@@ -129,14 +131,21 @@ impl Handler<SubscribeLobby> for Sfu {
         };
 
         let user_uuid = msg.user_uuid.clone();
-        let offer = msg.offer.clone();
+        let answer = msg.answer.clone();
         let fut = async move {
             log::info!(
-                "peer subscribing lobby,  peer_id={}, lobby_id={}",
+                "peer subscribing lobby,  peer_id={}, lobby_id={}, kind={}",
                 user_uuid.clone(),
-                lobby_uuid.clone()
+                lobby_uuid.clone(),
+                kind,
             );
-            let result = lobby_addr.send(Subscribe { user_uuid, offer }).await;
+            let result = lobby_addr
+                .send(Subscribe {
+                    kind,
+                    user_uuid,
+                    answer,
+                })
+                .await;
 
             match result {
                 Ok(val) => match val {

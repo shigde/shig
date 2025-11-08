@@ -66,6 +66,35 @@ pub struct MuteMsgData {
 }
 
 pub trait DataChannel: Connector {
+    async fn create_data_channel(
+        &mut self,
+        peer_addr: Addr<Peer>,
+        kind: ConnectorType,
+    ) -> anyhow::Result<()> {
+        let peer_connection = self.get_pc();
+        let data_channel = peer_connection.create_data_channel("whep", None).await?;
+        log::info!("created whep data channel, kind={kind}");
+
+        let d_label = data_channel.label().to_owned();
+        let d_id = data_channel.id();
+        data_channel.on_open(Box::new(move || {
+            log::info!("new data channel type={kind}, label={d_label},  dc_id={d_id}");
+            Box::pin(async move {})
+        }));
+
+        // Register text message handling
+        let peer_addr_clone = peer_addr.clone();
+        data_channel.on_message(Box::new(move |dcm: DataChannelMessage| {
+            //msg.is_string
+            let addr = peer_addr_clone.clone();
+            let msg = DataChannelMsg::from_data_channel_message(&dcm).unwrap();
+            Box::pin(async move {
+                addr.do_send(msg);
+            })
+        }));
+        Ok(())
+    }
+
     fn initialize_data_channel(&mut self, peer_addr: Addr<Peer>, kind: ConnectorType) {
         let peer_connection = self.get_pc();
         {

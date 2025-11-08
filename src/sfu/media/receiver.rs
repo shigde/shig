@@ -6,11 +6,13 @@ use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtcp::payload_feedbacks::full_intra_request::{FirEntry, FullIntraRequest};
 use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
 
@@ -78,19 +80,49 @@ impl Receiver {
                         );
 
                     let cancel = CancellationToken::new();
-                    let (rtp_tx, _) = broadcast::channel(32);
+                    let (rtp_tx, mut _dummy_rx) = broadcast::channel(32);
                     let media = Media::new(
                         peer_id.clone(),
                         track.id().clone(),
                         track.stream_id().clone(),
+                        track.codec().capability.clone(),
                         track.kind().clone(),
-                        track.codec().capability.mime_type.clone(),
                         rtp_tx.clone(),
                         cancel.clone(),
                     );
 
                     let media_id = media.id.clone();
                     lobby_addr.do_send(AddMedia { media });
+
+
+                    let media_ssrc = track.ssrc();
+                    let kind = track.kind().clone();
+                    let mut seqno_fir = 0u8;
+                    let pc_xx = pc_clone.clone();
+                    // Send periodic PLI / FIR task
+                    tokio::spawn(async move {
+                        if kind == RTPCodecType::Video {
+                            let mut result = Result::<usize, anyhow::Error>::Ok(0);
+                            while result.is_ok() {
+                                let timeout = tokio::time::sleep(Duration::from_secs(3));
+                                tokio::pin!(timeout);
+
+                                tokio::select! {
+                            _ = timeout.as_mut() => {
+                                result = pc_xx.write_rtcp(&[Box::new(FullIntraRequest {
+                                    sender_ssrc: 0,
+                                    media_ssrc,
+                                    fir: vec![FirEntry {
+                                        ssrc: media_ssrc,
+                                        sequence_number: seqno_fir,
+                                    }]
+                                })]).await.map_err(Into::into);
+                                seqno_fir = seqno_fir.wrapping_add(1);
+                            }
+                        }
+                            }
+                        }
+                    });
 
 
                     let peer_id = peer_id.clone();
@@ -106,6 +138,7 @@ impl Receiver {
                             track.id().clone(),
                             peer_id.clone()
                         );
+                        let _dummy_rx = rtp_tx.subscribe();
 
                         loop {
                             select! {
@@ -115,7 +148,13 @@ impl Receiver {
                                         // Minimal: Packet size log (or simply ignore)
                                         // Warning: Frequent logs consume CPU; only sporadically useful here
                                         // println!("Got RTP payload len={}", rtp.payload.len());
-                                        let _ = rtp_tx.send(Arc::new(rtp));
+
+                                            match rtp_tx.send(Arc::new(rtp)) {
+                                                Ok(_) => {},
+                                                Err(err) => {
+                                                    log::error!("track (Receiver) send error: {err}, peer_id={}", peer_id.clone());
+                                                }
+                                            };
                                     }
                                     Err(err) => {
                                         log::error!(
