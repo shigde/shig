@@ -1,7 +1,8 @@
 use crate::sfu::lobby::Lobby;
 use crate::sfu::media::connector::{Connector, ConnectorType};
-use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, SdpMsgData};
+use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
+use crate::sfu::media::signaler::Signaler;
 use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -25,6 +26,7 @@ pub struct Receiver {
     peer_addr: Addr<Peer>,
     lobby_addr: Addr<Lobby>,
     stop: CancellationToken,
+    signaler: Signaler,
 }
 
 impl Connector for Receiver {
@@ -34,7 +36,7 @@ impl Connector for Receiver {
 }
 
 impl DataChannel for Receiver {
-    fn set_dc(&mut self, dc: Arc<RTCDataChannel>) {
+    async fn set_dc(&mut self, dc: Arc<RTCDataChannel>) {
         self.dc = Some(dc);
     }
 
@@ -51,6 +53,8 @@ impl Receiver {
     ) -> MediaResult<Self> {
         let pc =
             Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Receiver).await?;
+        let signaler = Signaler::new(id.clone(), peer_addr.clone());
+
         Ok(Self {
             id,
             pc,
@@ -58,6 +62,7 @@ impl Receiver {
             peer_addr,
             lobby_addr,
             stop: CancellationToken::new(),
+            signaler,
         })
     }
 
@@ -80,7 +85,7 @@ impl Receiver {
                         );
 
                     let cancel = CancellationToken::new();
-                    let (rtp_tx, mut _dummy_rx) = broadcast::channel(32);
+                    let (rtp_tx, _dummy_rx) = broadcast::channel(32);
                     let media = Media::new(
                         peer_id.clone(),
                         track.id().clone(),
@@ -206,13 +211,8 @@ impl Receiver {
 
     pub(crate) async fn on_signaling_offer(&mut self, offer_msg: SdpMsgData) -> MediaResult<()> {
         let answer = self.create_answer(offer_msg.sdp.as_str()).await?;
-        let answer_msg = DataChannelMsg::AnswerMsg(SdpMsgData {
-            number: offer_msg.number,
-            sdp: answer,
-        });
-
         log::info!("send (Receiver) signaling answer: peer_id={}", self.id);
-        match self.send_dcm(answer_msg).await {
+        match self.signaler.send_answer(answer, offer_msg.number).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
         }

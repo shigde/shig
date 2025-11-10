@@ -33,7 +33,7 @@ impl DataChannelMsg {
         Ok(Bytes::from(bin))
     }
 
-    fn from_data_channel_message(dcm: &DataChannelMessage) -> anyhow::Result<DataChannelMsg> {
+    pub fn from_data_channel_message(dcm: &DataChannelMessage) -> anyhow::Result<DataChannelMsg> {
         if dcm.is_string {
             let msg: DataChannelMsg = serde_json::from_slice(&dcm.data)?;
             Ok(msg)
@@ -43,7 +43,9 @@ impl DataChannelMsg {
     }
 
     #[allow(dead_code)]
-    fn from_data_channel_message_bin(dcm: &DataChannelMessage) -> anyhow::Result<DataChannelMsg> {
+    pub fn from_data_channel_message_bin(
+        dcm: &DataChannelMessage,
+    ) -> anyhow::Result<DataChannelMsg> {
         if !dcm.is_string {
             let msg: DataChannelMsg = bincode::deserialize(&dcm.data)?;
             Ok(msg)
@@ -53,7 +55,7 @@ impl DataChannelMsg {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SdpMsgData {
     pub number: u64,
     pub sdp: String,
@@ -75,61 +77,79 @@ pub trait DataChannel: Connector {
         let data_channel = peer_connection.create_data_channel("whep", None).await?;
         log::info!("created whep data channel, kind={kind}");
 
-        let d_label = data_channel.label().to_owned();
-        let d_id = data_channel.id();
-        data_channel.on_open(Box::new(move || {
-            log::info!("new data channel type={kind}, label={d_label},  dc_id={d_id}");
-            Box::pin(async move {})
-        }));
-
-        // Register text message handling
-        let peer_addr_clone = peer_addr.clone();
-        data_channel.on_message(Box::new(move |dcm: DataChannelMessage| {
-            //msg.is_string
-            let addr = peer_addr_clone.clone();
-            let msg = DataChannelMsg::from_data_channel_message(&dcm).unwrap();
-            Box::pin(async move {
-                addr.do_send(msg);
-            })
-        }));
+        attach_message_handler(&data_channel, peer_addr.clone(), kind.clone());
+        attach_on_open(&data_channel, peer_addr.clone(), kind.clone());
         Ok(())
     }
 
     fn initialize_data_channel(&mut self, peer_addr: Addr<Peer>, kind: ConnectorType) {
         let peer_connection = self.get_pc();
-        {
-            // Set a data channel handler so that we can receive data
-            peer_connection.on_data_channel(Box::new(move |dc| {
-                let d_label = dc.label().to_owned();
-                let d_id = dc.id();
-                log::info!("new data channel type={kind}, label={d_label},  dc_id={d_id}");
-                peer_addr.do_send(OnDataChannel {
-                    kind,
-                    dc: Arc::clone(&dc),
-                });
-                let peer_addr_clone = peer_addr.clone();
-                Box::pin(async move {
-                    dc.on_open(Box::new(move || {
-                        Box::pin(async move {
-                            log::info!(
-                                "data channel is open type={kind}, label={d_label},  dc_id={d_id}"
-                            );
-                        })
-                    }));
+        let peer_addr_clone = peer_addr.clone();
+        let kind_clone = kind.clone();
 
-                    dc.on_message(Box::new(move |dcm| {
-                        //msg.is_string
-                        let addr = peer_addr_clone.clone();
-                        let msg = DataChannelMsg::from_data_channel_message(&dcm).unwrap();
-                        Box::pin(async move {
-                            addr.do_send(msg);
-                        })
-                    }));
-                })
-            }));
-        }
+        peer_connection.on_data_channel(Box::new(move |dc| {
+            let kind = kind_clone.clone();
+            let peer_addr = peer_addr_clone.clone();
+
+            attach_message_handler(&dc, peer_addr.clone(), kind.clone());
+            attach_on_open(&dc, peer_addr.clone(), kind.clone());
+
+            Box::pin(async move {
+                log::info!(
+                    "New data channel announced (but not yet open): kind={}, label={}",
+                    kind,
+                    dc.label()
+                );
+            })
+        }));
     }
 
+    #[allow(dead_code)]
+    async fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
+    fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
+}
+
+fn attach_message_handler(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: ConnectorType) {
+    dc.on_message(Box::new(move |dcm: DataChannelMessage| {
+        let addr = peer_addr.clone();
+        Box::pin(async move {
+            match DataChannelMsg::from_data_channel_message(&dcm) {
+                Ok(msg) => addr.do_send(msg),
+                Err(err) => log::warn!(
+                    "Data Channel, failed to parse message, kind={}: {err:?}",
+                    kind
+                ),
+            }
+        })
+    }));
+}
+
+fn attach_on_open(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: ConnectorType) {
+    let dc_open = Arc::clone(dc);
+    let peer_addr_open = peer_addr.clone();
+    let kind_open = kind.clone();
+
+    dc.on_open(Box::new(move || {
+        let dc_open = Arc::clone(&dc_open);
+        let peer_addr_open = peer_addr_open.clone();
+        let kind_open = kind_open.clone();
+
+        Box::pin(async move {
+            log::info!(
+                "DataChannel opened: kind={}, label={}",
+                kind_open,
+                dc_open.label()
+            );
+
+            peer_addr_open.do_send(OnDataChannel {
+                kind: kind_open,
+                dc: dc_open.clone(),
+            });
+        })
+    }));
+}
+
+pub trait DataChannelMessanger {
     async fn send_dcm(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
         let Some(dc) = self.get_dc() else {
             return Ok(());
@@ -149,15 +169,13 @@ pub trait DataChannel: Connector {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
     fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
+    async fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct OnDataChannel {
     pub kind: ConnectorType,
-    #[allow(dead_code)]
     pub dc: Arc<RTCDataChannel>,
 }
