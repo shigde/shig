@@ -13,6 +13,8 @@ use webrtc::track::track_local::TrackLocalWriter;
 
 pub mod connector;
 pub mod data_channel;
+#[cfg(test)]
+mod data_channel_test;
 pub mod error;
 pub mod message;
 pub mod receiver;

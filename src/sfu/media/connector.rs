@@ -19,6 +19,14 @@ pub enum ConnectorType {
     Sender,
     Receiver,
 }
+impl ConnectorType {
+    pub fn channel_label(&self) -> &str {
+        match self {
+            ConnectorType::Sender => "whep",
+            ConnectorType::Receiver => "whip",
+        }
+    }
+}
 
 pub trait Connector {
     async fn create_connection(

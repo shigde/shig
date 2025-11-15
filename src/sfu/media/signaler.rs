@@ -34,7 +34,7 @@ impl DataChannelMessanger for Signaler {
         if let Some(offer) = self.offer_msg.take() {
             log::info!("send saved offer for peer_id={}", self.id);
             let msg = DataChannelMsg::OfferMsg(offer);
-            if let Err(err) = self.send_dcm(msg).await {
+            if let Err(err) = self.send_dcm_bin(msg).await {
                 log::error!("failed to send offer: {}", err);
             }
         }
@@ -75,7 +75,7 @@ impl Signaler {
             return Ok(());
         }
 
-        match self.send_dcm(DataChannelMsg::OfferMsg(msg)).await {
+        match self.send_dcm_bin(DataChannelMsg::OfferMsg(msg)).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
         }
@@ -88,7 +88,7 @@ impl Signaler {
             number,
             sdp: answer,
         });
-        match self.send_dcm(msg).await {
+        match self.send_dcm_bin(msg).await {
             Ok(_) => Ok(()),
             Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
         }

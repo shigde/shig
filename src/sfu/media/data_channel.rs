@@ -27,12 +27,12 @@ impl DataChannelMsg {
         Ok(json)
     }
 
-    #[allow(dead_code)]
     pub fn to_bin(&self) -> anyhow::Result<Bytes> {
-        let bin = bincode::serialize(self)?;
-        Ok(Bytes::from(bin))
+        let json = serde_json::to_vec(self)?;
+        Ok(Bytes::from(json))
     }
 
+    #[allow(dead_code)]
     pub fn from_data_channel_message(dcm: &DataChannelMessage) -> anyhow::Result<DataChannelMsg> {
         if dcm.is_string {
             let msg: DataChannelMsg = serde_json::from_slice(&dcm.data)?;
@@ -46,8 +46,18 @@ impl DataChannelMsg {
     pub fn from_data_channel_message_bin(
         dcm: &DataChannelMessage,
     ) -> anyhow::Result<DataChannelMsg> {
+        println!("######## RAW DATA: {:?}", &dcm.data);
+        println!(
+            "######## AS STRING: {:?}",
+            String::from_utf8_lossy(&dcm.data)
+        );
+        println!("#########is_string: {:?}", dcm.is_string);
+
         if !dcm.is_string {
-            let msg: DataChannelMsg = bincode::deserialize(&dcm.data)?;
+            let msg: DataChannelMsg = match serde_json::from_slice(&dcm.data) {
+                Ok(msg) => msg,
+                Err(err) => anyhow::bail!("Failed to deserialize data channel message: {err:?}"),
+            };
             Ok(msg)
         } else {
             anyhow::bail!("Expected binary but got string");
@@ -74,7 +84,9 @@ pub trait DataChannel: Connector {
         kind: ConnectorType,
     ) -> anyhow::Result<()> {
         let peer_connection = self.get_pc();
-        let data_channel = peer_connection.create_data_channel("whep", None).await?;
+        let data_channel = peer_connection
+            .create_data_channel(kind.channel_label(), None)
+            .await?;
         log::info!("created whep data channel, kind={kind}");
 
         attach_message_handler(&data_channel, peer_addr.clone(), kind.clone());
@@ -113,7 +125,7 @@ fn attach_message_handler(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind:
     dc.on_message(Box::new(move |dcm: DataChannelMessage| {
         let addr = peer_addr.clone();
         Box::pin(async move {
-            match DataChannelMsg::from_data_channel_message(&dcm) {
+            match DataChannelMsg::from_data_channel_message_bin(&dcm) {
                 Ok(msg) => addr.do_send(msg),
                 Err(err) => log::warn!(
                     "Data Channel, failed to parse message, kind={}: {err:?}",
@@ -150,6 +162,7 @@ fn attach_on_open(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: Connect
 }
 
 pub trait DataChannelMessanger {
+    #[allow(dead_code)]
     async fn send_dcm(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
         let Some(dc) = self.get_dc() else {
             return Ok(());
@@ -159,11 +172,11 @@ pub trait DataChannelMessanger {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn send_dcm_bin(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
         let Some(dc) = self.get_dc() else {
             return Ok(());
         };
+
         let dcm = msg.to_bin()?;
         let _ = dc.send(&dcm).await.map_err(|e| Error::from(e))?;
         Ok(())

@@ -119,7 +119,7 @@ impl Handler<PeerStartSending> for Peer {
             .into_actor(self)
             .map(|res, actor, _| match res {
                 Ok((sender, answer)) => {
-                    actor.sender = Some(sender);
+                    actor.sender = Some(Arc::new(Mutex::new(sender)));
                     Ok(answer)
                 }
                 Err(e) => Err(PeerError::InternalMedia(e)),
@@ -141,19 +141,29 @@ impl Handler<PeerSending> for Peer {
         log::info!("setup (Sender) for peer actor peer_id={}", self.id);
 
         let sdp_answer = msg.answer;
-        let mut sender = self.sender.clone().unwrap();
+        let sender_arc = self.sender.clone().unwrap();
 
         // add the receiver dc to the sender signaler, because we're doing signaling over the receiver channel
         let receiver_dc = self.receiver.clone().unwrap().get_dc();
+        let peer_id = self.id.clone();
 
         Box::pin(
             async move {
                 if let Some(dc) = receiver_dc {
+                    log::info!("adding receiver dc to sender signaler, peer_id={}", peer_id);
+
                     if dc.ready_state() == RTCDataChannelState::Open {
-                        sender.set_signal_dc(dc).await;
+                        {
+                            let mut sender = sender_arc.lock().await;
+                            sender.set_signal_dc(dc).await;
+                        }
                     }
                 }
-                if let Err(err) = sender.set_answer(sdp_answer.as_str()).await {
+
+                if let Err(err) = {
+                    let sender = sender_arc.lock().await;
+                    sender.set_answer(sdp_answer.as_str()).await
+                } {
                     log::error!("set_answer failed: {:?}", err);
                     Err(err.into())
                 } else {
@@ -171,7 +181,7 @@ impl Handler<AddMedia> for Peer {
     fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         let media_id = msg.media.id.clone();
-        let Some(mut sender) = self.sender.clone() else {
+        let Some(sender_arc) = self.sender.clone() else {
             return Box::pin(
                 async move {
                     log::warn!(
@@ -187,15 +197,23 @@ impl Handler<AddMedia> for Peer {
         let media = msg.media;
         Box::pin(
             async move {
-                if let Err(e) = sender.add_media(media).await {
+                if let Err(e) = {
+                    let sender = sender_arc.lock().await;
+                    sender.add_media(media).await
+                } {
                     log::error!(
-                        "On subscribe, failed to add media media_id={} to sender of peer_id={}: {}",
+                        "On add media, failed to add media media_id={} to sender of peer_id={}: {}",
                         media_id,
                         peer_id,
                         e
                     );
+                    return;
                 }
-                if let Err(e) = sender.create_signal_offer().await {
+
+                if let Err(e) = {
+                    let mut sender = sender_arc.lock().await;
+                    sender.create_signal_offer().await
+                } {
                     log::error!(
                         "On add media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
                         media_id,
@@ -215,7 +233,7 @@ impl Handler<RemoveMedia> for Peer {
     fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         let media_id = msg.media_id;
-        let Some(mut sender) = self.sender.clone() else {
+        let Some(sender_arc) = self.sender.clone() else {
             return Box::pin(
                 async move {
                     log::warn!(
@@ -230,7 +248,10 @@ impl Handler<RemoveMedia> for Peer {
 
         Box::pin(
             async move {
-                if let Err(e) = sender.remove_track(media_id.to_string()).await {
+                if let Err(e) = {
+                    let sender = sender_arc.lock().await;
+                    sender.remove_track(media_id.to_string()).await
+                } {
                     log::error!(
                         "Failed to remove media media_id={} from sender of peer_id={}: {}",
                         media_id,
@@ -238,7 +259,10 @@ impl Handler<RemoveMedia> for Peer {
                         e
                     );
                 }
-                if let Err(e) = sender.create_signal_offer().await {
+                if let Err(e) = {
+                    let mut sender = sender_arc.lock().await;
+                    sender.create_signal_offer().await
+                } {
                     log::error!(
                         "On remove media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
                         media_id,
@@ -289,11 +313,14 @@ impl Handler<OnDataChannel> for Peer {
         match kind {
             ConnectorType::Sender => Box::pin(async move {}.into_actor(self)),
             ConnectorType::Receiver => {
-                let sender_ref = self.sender.clone();
+                let sender_arc_opt = self.sender.clone();
                 Box::pin(
                     async move {
-                        if let Some(mut sender) = sender_ref {
-                            let _ = sender.set_signal_dc(dc).await;
+                        if let Some(sender_arc) = sender_arc_opt {
+                            {
+                                let mut sender = sender_arc.lock().await;
+                                sender.set_signal_dc(dc).await;
+                            }
                         }
                     }
                     .into_actor(self),
@@ -335,7 +362,7 @@ impl Handler<DataChannelMsg> for Peer {
                 )
             }
             DataChannelMsg::AnswerMsg(msg) => {
-                let Some(mut sender) = self.sender.clone() else {
+                let Some(sender_arc) = self.sender.clone() else {
                     return Box::pin(
                         async move {
                             log::warn!(
@@ -349,7 +376,10 @@ impl Handler<DataChannelMsg> for Peer {
 
                 Box::pin(
                     async move {
-                        if let Err(e) = sender.set_signal_answer(msg).await {
+                        if let Err(e) = {
+                            let mut sender = sender_arc.lock().await;
+                            sender.set_signal_answer(msg).await
+                        } {
                             log::error!(
                                 "Failed to set signaling answer for peer_id={}: {}",
                                 peer_id,
@@ -387,8 +417,11 @@ impl Handler<PeerShutdown> for Peer {
                     let _ = receiver.shutdown().await;
                 }
 
-                if let Some(sender) = sender {
-                    let _ = sender.shutdown().await;
+                if let Some(sender_arc) = sender {
+                    {
+                        let sender = sender_arc.lock().await;
+                        let _ = sender.shutdown().await;
+                    }
                 }
 
                 let _ = parent_addr.try_send(PeerStopped {

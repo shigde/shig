@@ -1,7 +1,7 @@
-use std::error::Error;
-use rsa::{RsaPrivateKey, RsaPublicKey};
 use rsa::pkcs1::LineEnding;
 use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+use rsa::{RsaPrivateKey, RsaPublicKey};
+use std::error::Error;
 
 /// A private/public key pair used for HTTP signatures
 #[derive(Debug, Clone)]
@@ -15,6 +15,7 @@ pub struct KeyPair {
 impl KeyPair {
     /// Helper method to turn this into an openssl private key
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn private_key(&self) -> Result<RsaPrivateKey, Box<dyn Error>> {
         use rsa::pkcs8::DecodePrivateKey;
         Ok(RsaPrivateKey::from_pkcs8_pem(&self.private_key)?)
@@ -26,14 +27,12 @@ impl KeyPair {
         let pkey = RsaPublicKey::from(&rsa);
         let public_key = pkey.to_public_key_pem(LineEnding::default())?;
         let private_key = rsa.to_pkcs8_pem(LineEnding::default())?.to_string();
-        Ok(Self{
+        Ok(Self {
             private_key,
             public_key,
         })
     }
-
 }
-
 
 // pub fn encrypt(data: String, pub_key: RsaPublicKey) {
 //     let mut rng = rand::thread_rng();
