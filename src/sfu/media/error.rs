@@ -7,8 +7,12 @@ pub type MediaResult<T> = Result<T, MediaError>;
 pub(crate) enum MediaError {
     #[display(fmt = "WebRTC error: {}", _0)]
     WebRTC(WebRTCError),
+    #[display(fmt = "RTCCreate error: {}", _0)]
+    RTCCreate(anyhow::Error),
     #[display(fmt = "SDP State error: {}", _0)]
     SdpState(String),
+    #[display(fmt = "SDP parse error: {}", _0)]
+    SdpParse(anyhow::Error),
     #[display(fmt = "DC error: {}", _0)]
     DataCannel(String),
     #[display(fmt = "Renegotiation error: {}", _0)]

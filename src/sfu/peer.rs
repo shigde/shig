@@ -5,7 +5,7 @@ use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, OnDataChannel
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
 use crate::sfu::media::sender::Sender;
-use crate::sfu::media::{AddMedia, Media, RemoveMedia};
+use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
@@ -198,7 +198,7 @@ impl Handler<AddMedia> for Peer {
         Box::pin(
             async move {
                 if let Err(e) = {
-                    let sender = sender_arc.lock().await;
+                    let mut sender = sender_arc.lock().await;
                     sender.add_media(media).await
                 } {
                     log::error!(
@@ -249,8 +249,8 @@ impl Handler<RemoveMedia> for Peer {
         Box::pin(
             async move {
                 if let Err(e) = {
-                    let sender = sender_arc.lock().await;
-                    sender.remove_track(media_id.to_string()).await
+                    let mut sender = sender_arc.lock().await;
+                    sender.remove_track(media_id.clone()).await
                 } {
                     log::error!(
                         "Failed to remove media media_id={} from sender of peer_id={}: {}",
@@ -390,8 +390,57 @@ impl Handler<DataChannelMsg> for Peer {
                     .into_actor(self),
                 )
             }
-            DataChannelMsg::MuteMsg(_) => Box::pin(async move {}.into_actor(self)),
+            DataChannelMsg::MuteMsg(mute_data) => {
+                let parent = self.parent_addr.clone();
+                let peer_id = self.id.clone();
+                let mid = mute_data.mid.clone();
+                let mute = mute_data.mute;
+                Box::pin(
+                    async move {
+                        parent.do_send(MuteMedia { peer_id, mid, mute });
+                    }
+                    .into_actor(self),
+                )
+            }
         }
+    }
+}
+
+impl Handler<MuteRemoteMedia> for Peer {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: MuteRemoteMedia, _ctx: &mut Self::Context) -> Self::Result {
+        let peer_id = self.id.clone();
+        let Some(sender_arc) = self.sender.clone() else {
+            return Box::pin(
+                async move {
+                    log::warn!(
+                        "Peer has no sender for send remote mute, peer_id={}",
+                        peer_id
+                    );
+                }
+                .into_actor(self),
+            );
+        };
+
+        let mute = msg.mute;
+        let media_id = msg.media_id;
+        log::info!("send mute remote signal for peer_id={}", peer_id);
+        Box::pin(
+            async move {
+                if let Err(e) = {
+                    let mut sender = sender_arc.lock().await;
+                    sender.send_mute_remote(media_id, mute).await
+                } {
+                    log::error!(
+                        "Failed to set signaling answer for peer_id={}: {}",
+                        peer_id,
+                        e
+                    );
+                }
+            }
+            .into_actor(self),
+        )
     }
 }
 

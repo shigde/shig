@@ -13,6 +13,14 @@ impl Router {
         }
     }
 
+    pub fn media(&self, id: &MediaId) -> Option<&Media> {
+        self.medias.get(id)
+    }
+
+    pub fn remove_medias_of_peer(&mut self, peer_id: &PeerId) {
+        self.medias.retain(|_, media| &media.peer_id != peer_id);
+    }
+
     /// Returns all media *not* belonging to this peer.
     pub fn get_medias_without_peer(&self, peer_id: &PeerId) -> Vec<Media> {
         self.medias
@@ -32,18 +40,9 @@ impl Router {
             .collect()
     }
 
-    #[allow(dead_code)]
-    /// Removes all media of a specific peer.
-    pub fn remove_medias_of_peer(&mut self, peer_id: &PeerId) {
-        let keys_to_remove: Vec<MediaId> = self
-            .medias
-            .iter()
-            .filter(|(_, media)| &media.peer_id == peer_id)
-            .map(|(id, _)| id.clone()) // statt *id → clone()
-            .collect();
-
-        for key in keys_to_remove {
-            self.medias.remove(&key);
-        }
+    pub fn get_media_of_peer_by_mid(&mut self, peer_id: &PeerId, mid: &str) -> Option<&mut Media> {
+        self.medias
+            .values_mut()
+            .find(|m| &m.peer_id == peer_id && m.mid == mid)
     }
 }

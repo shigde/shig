@@ -2,12 +2,15 @@ use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, DataChannelMessanger, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::signaler::Signaler;
-use crate::sfu::media::Media;
+use crate::sfu::media::{Media, MediaId};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
+use std::collections::HashMap;
 use std::sync::Arc;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
+use webrtc::rtp_transceiver::{RTCRtpTransceiver, RTCRtpTransceiverInit};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocal;
 
@@ -15,10 +18,15 @@ use webrtc::track::track_local::TrackLocal;
 pub struct Sender {
     id: PeerId,
     pc: Arc<RTCPeerConnection>,
+    // We are ignoring this DataChannel for now @see Handler<OnDataChannel> for Peer,
+    // every message exchange is sent via the Receiver DataChannel
     dc: Option<Arc<RTCDataChannel>>,
     #[allow(dead_code)]
     peer_addr: Addr<Peer>,
     signaler: Signaler,
+    // MediaId -> RTCRtpTransceiver
+    // This is used to send remote mute messages to the peer and identify the track by the mid
+    sending_media: HashMap<MediaId, Arc<RTCRtpTransceiver>>,
 }
 
 impl Connector for Sender {
@@ -48,6 +56,7 @@ impl Sender {
             dc: None,
             peer_addr,
             signaler,
+            sending_media: HashMap::new(),
         })
     }
 
@@ -64,36 +73,43 @@ impl Sender {
         Ok(offer)
     }
 
-    pub async fn add_media(&self, media: Media) -> MediaResult<()> {
+    pub async fn add_media(&mut self, media: Media) -> MediaResult<()> {
         log::info!("add track (Sender), peer_id={}", self.id);
 
         let track = Arc::new(TrackLocalStaticRTP::new(
             media.capability.clone(),
             media.id.to_string(),
-            media.stream_id.clone(),
+            media.src_stream_id.clone(),
         ));
 
         let pc = self.get_pc();
 
-        if let Err(e) = pc
-            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
-            .await
-        {
-            return Err(e.into());
-        };
+        let transceiver = pc
+            .add_transceiver_from_track(
+                Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>,
+                Some(RTCRtpTransceiverInit {
+                    direction: RTCRtpTransceiverDirection::Sendonly,
+                    send_encodings: vec![],
+                }),
+            )
+            .await?;
 
+        log::info!("track added (Sender), peer_id={}", self.id);
+        self.sending_media.insert(media.id.clone(), transceiver);
         media.subscribe(track).await;
         Ok(())
     }
 
-    pub async fn remove_track(&self, track_id: String) -> MediaResult<()> {
+    pub async fn remove_track(&mut self, media_id: MediaId) -> MediaResult<()> {
+        let media_id_string = media_id.to_string();
         log::info!("remove track (Sender) peer_id={}", self.id,);
         for sender in self.pc.get_senders().await.iter() {
             if let Some(sender_track) = sender.track().await {
-                if sender_track.id() == track_id {
+                if sender_track.id() == media_id_string {
                     if let Err(e) = self.pc.remove_track(sender).await {
                         return Err(e.into());
                     }
+                    self.sending_media.remove(&media_id);
                 }
             }
         }
@@ -122,6 +138,15 @@ impl Sender {
 
     pub async fn set_signal_dc(&mut self, dc: Arc<RTCDataChannel>) {
         self.signaler.set_dc(dc).await;
+    }
+
+    pub async fn send_mute_remote(&mut self, media_id: MediaId, mute: bool) -> MediaResult<()> {
+        log::info!("send mute remote (Sender), peer_id={}", self.id);
+        let Some(ts) = self.sending_media.get(&media_id) else {
+            return Ok(());
+        };
+        let Some(mid) = ts.mid() else { return Ok(()) };
+        self.signaler.send_mute(mid.as_str(), mute).await
     }
 
     pub(crate) async fn shutdown(&self) {

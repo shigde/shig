@@ -1,4 +1,6 @@
-use crate::sfu::media::data_channel::{DataChannelMessanger, DataChannelMsg, SdpMsgData};
+use crate::sfu::media::data_channel::{
+    DataChannelMessanger, DataChannelMsg, MuteMsgData, SdpMsgData,
+};
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -101,5 +103,18 @@ impl Signaler {
 
     pub fn is_answer_stale(&self, answer_id: u64) -> bool {
         answer_id < self.last_offer_number
+    }
+
+    pub async fn send_mute(&mut self, mid: &str, mute: bool) -> MediaResult<()> {
+        log::info!("muting (for Sender), peer_id={}", self.id);
+
+        let msg = DataChannelMsg::MuteMsg(MuteMsgData {
+            mid: mid.to_string(),
+            mute,
+        });
+        match self.send_dcm_bin(msg).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
+        }
     }
 }

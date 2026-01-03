@@ -1,6 +1,6 @@
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
-use crate::sfu::media::{AddMedia, RemoveMedia};
+use crate::sfu::media::{AddMedia, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::peer::{
     Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerStartReceiving, PeerStartSending,
 };
@@ -284,6 +284,29 @@ impl Handler<RemoveMedia> for Lobby {
                         media_id: msg.media_id.clone(),
                     });
                 }
+            }
+        }
+    }
+}
+
+impl Handler<MuteMedia> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, msg: MuteMedia, _ctx: &mut Self::Context) -> Self::Result {
+        let Some(media) = self
+            .router
+            .get_media_of_peer_by_mid(&msg.peer_id, msg.mid.as_str())
+        else {
+            return;
+        };
+        media.set_mut(msg.mute);
+
+        for (peer_id, peer_addr) in self.peers.iter() {
+            if peer_id != &media.peer_id {
+                peer_addr.do_send(MuteRemoteMedia {
+                    media_id: media.id.clone(),
+                    mute: msg.mute,
+                });
             }
         }
     }

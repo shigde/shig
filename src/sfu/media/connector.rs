@@ -1,5 +1,6 @@
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::message::MediaMessage;
+use crate::sfu::media::sdp::OfferedMid;
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use derive_more::Display;
@@ -13,6 +14,7 @@ use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
 
 #[derive(Clone, Copy, Display)]
 pub enum ConnectorType {
@@ -158,5 +160,29 @@ pub trait Connector {
         Ok(())
     }
 
+    async fn add_answerer_transceivers(
+        &mut self,
+        pc: &Arc<RTCPeerConnection>,
+        offered: &[OfferedMid],
+    ) -> anyhow::Result<()> {
+        for o in offered {
+            pc.add_transceiver_from_kind(o.kind, None).await?;
+        }
+        Ok(())
+    }
+
     fn get_pc(&self) -> Arc<RTCPeerConnection>;
+}
+
+pub async fn receiver_index(
+    pc: Arc<RTCPeerConnection>,
+    receiver: &Arc<RTCRtpReceiver>,
+) -> anyhow::Result<usize> {
+    for (i, t) in pc.get_transceivers().await.iter().enumerate() {
+        let r = t.receiver().await;
+        if Arc::ptr_eq(&r, receiver) {
+            return Ok(i);
+        }
+    }
+    anyhow::bail!("Receiver not found in transceivers");
 }
