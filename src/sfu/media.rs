@@ -14,6 +14,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
 pub mod connector;
+pub mod control_channel;
 pub mod data_channel;
 mod data_channel_test;
 pub mod error;

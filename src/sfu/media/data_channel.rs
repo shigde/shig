@@ -5,6 +5,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::Error;
 
@@ -174,10 +175,19 @@ pub trait DataChannelMessanger {
 
     async fn send_dcm_bin(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
         let Some(dc) = self.get_dc() else {
-            return Ok(());
+            log::warn!("No data channel available do send");
+            return Err(anyhow::anyhow!("No data channel available do send"));
         };
 
-        let dcm = msg.to_bin()?;
+        if dc.ready_state() != RTCDataChannelState::Open {
+            log::warn!("Data channel not open, dc in state: {}", dc.ready_state());
+            return Err(anyhow::anyhow!("Data channel not open"));
+        }
+
+        let Ok(dcm) = msg.to_bin() else {
+            log::warn!("Failed to serialize data channel message");
+            return Err(anyhow::anyhow!("Failed to serialize data channel message"));
+        };
         let _ = dc.send(&dcm).await.map_err(|e| Error::from(e))?;
         Ok(())
     }

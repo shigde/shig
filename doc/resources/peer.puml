@@ -1,0 +1,44 @@
+@startuml
+'https://plantuml.com/object-diagram
+
+
+object Lobby {
+}
+
+
+
+object PeerA {
+    sender
+    receiver
+}
+
+object SenderA
+object SenderB
+
+object ReceiverA
+object ReceiverB
+
+object PeerB
+
+object BrowserA
+object BrowserB
+
+
+map Peers {
+ 1 *--> PeerA
+ 2 *--> PeerB
+}
+
+Lobby --> Peers
+ReceiverA -- PeerA
+SenderA <-- PeerA
+
+ReceiverB -- PeerB
+SenderB -- PeerB
+
+BrowserA --> ReceiverA
+BrowserA <-- SenderA
+
+BrowserB --> ReceiverB
+BrowserB <-- SenderB
+@enduml

@@ -143,6 +143,7 @@ impl Sender {
     pub async fn send_mute_remote(&mut self, media_id: MediaId, mute: bool) -> MediaResult<()> {
         log::info!("send mute remote (Sender), peer_id={}", self.id);
         let Some(ts) = self.sending_media.get(&media_id) else {
+            log::warn!("mute remote track not found, peer_id={}", self.id);
             return Ok(());
         };
         let Some(mid) = ts.mid() else { return Ok(()) };

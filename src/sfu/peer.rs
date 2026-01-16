@@ -1,6 +1,7 @@
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
 use crate::sfu::media::connector::{Connector, ConnectorType};
+use crate::sfu::media::control_channel::ControlChannel;
 use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
@@ -11,7 +12,6 @@ use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 
 pub struct Peer {
     pub id: PeerId,
@@ -20,6 +20,7 @@ pub struct Peer {
     parent_addr: Addr<Lobby>,
     receiver: Option<Receiver>,
     sender: Option<Arc<Mutex<Sender>>>,
+    control_channel: Arc<ControlChannel>,
 }
 
 impl Peer {
@@ -30,6 +31,7 @@ impl Peer {
             parent_addr,
             receiver: None,
             sender: None,
+            control_channel: ControlChannel::new(),
         }
     }
 }
@@ -151,13 +153,18 @@ impl Handler<PeerSending> for Peer {
             async move {
                 if let Some(dc) = receiver_dc {
                     log::info!("adding receiver dc to sender signaler, peer_id={}", peer_id);
+                    // self.control_channel
+                    //     .send("signal-offer", serde_json::to_value(offer)?)
+                    //     .await;
 
-                    if dc.ready_state() == RTCDataChannelState::Open {
-                        {
-                            let mut sender = sender_arc.lock().await;
-                            sender.set_signal_dc(dc).await;
-                        }
-                    }
+                    //if dc.ready_state() == RTCDataChannelState::Open {
+                    //     {
+                    //         let mut sender = sender_arc.lock().await;
+                    //         sender.set_signal_dc(dc).await;
+                    //     }
+                    //} else {
+                    //    log::warn!("receiver dc not ready, peer_id={}", peer_id);
+                    //    return Err(PeerError::InternalMedia(anyhow!("receiver dc not ready")));
                 }
 
                 if let Err(err) = {
@@ -310,21 +317,31 @@ impl Handler<OnDataChannel> for Peer {
     fn handle(&mut self, msg: OnDataChannel, _ctx: &mut Self::Context) -> Self::Result {
         let dc = msg.dc.clone();
         let kind = msg.kind;
+        let messenger = self.control_channel.clone();
         match kind {
             ConnectorType::Sender => Box::pin(async move {}.into_actor(self)),
             ConnectorType::Receiver => {
-                let sender_arc_opt = self.sender.clone();
                 Box::pin(
                     async move {
-                        if let Some(sender_arc) = sender_arc_opt {
-                            {
-                                let mut sender = sender_arc.lock().await;
-                                sender.set_signal_dc(dc).await;
-                            }
-                        }
+                        log::info!("Receiver DataChannel arrived: attach to control_channe");
+
+                        // 🔗 Messenger an neuen DC binden
+                        crate::sfu::media::control_channel::bind_datachannel(dc, messenger).await;
                     }
                     .into_actor(self),
                 )
+                // let sender_arc_opt = self.sender.clone();
+                // Box::pin(
+                //     async move {
+                //         if let Some(sender_arc) = sender_arc_opt {
+                //             {
+                //                 let mut sender = sender_arc.lock().await;
+                //                 sender.set_signal_dc(dc).await;
+                //             }
+                //         }
+                //     }
+                //     .into_actor(self),
+                // )
             }
         }
     }
@@ -433,7 +450,7 @@ impl Handler<MuteRemoteMedia> for Peer {
                     sender.send_mute_remote(media_id, mute).await
                 } {
                     log::error!(
-                        "Failed to set signaling answer for peer_id={}: {}",
+                        "Failed to set send remote mute for peer_id={}: {}",
                         peer_id,
                         e
                     );
