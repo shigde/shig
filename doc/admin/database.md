@@ -1,8 +1,16 @@
 # Postgress
 
-## Create super user
+## Create super user in Mac
+
+to connect with: postgres@localhost
+
+Run
 
 ```
-/opt/homebrew/Cellar/postgresql\@17/17.2/bin/createuser -s postgres
+/opt/homebrew/opt/postgresql@18/bin/createuser -s postgres
 ```
-postgres@localhost
+
+
+```sql
+create database shig;
+```

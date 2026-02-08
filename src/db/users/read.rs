@@ -26,6 +26,19 @@ pub fn find_user_by_uuid(conn: &mut PgConnection, needle_uuid: String) -> DbResu
     Ok(user)
 }
 
+#[allow(dead_code)]
+pub fn find_if_exists_user_by_uuid(conn: &mut PgConnection, needle_uuid: String) -> DbResult<Option<User>> {
+    use crate::db::schema::users::dsl::users;
+    use crate::db::schema::users::user_uuid;
+    let user = users
+        .filter(user_uuid.eq(needle_uuid))
+        .select(User::as_select())
+        .first(conn)
+        .optional()?;
+
+    Ok(user)
+}
+
 pub fn find_user_by_email(conn: &mut PgConnection, needle_email: String) -> DbResult<User> {
     use crate::db::schema::users::dsl::users;
     use crate::db::schema::users::email;

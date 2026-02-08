@@ -1,5 +1,7 @@
 // @generated automatically by Diesel CLI.
 
+use crate::db::schema_views::active_users;
+
 diesel::table! {
     actor_images (id) {
         id -> Int4,
@@ -205,8 +207,7 @@ diesel::table! {
 diesel::table! {
     users (id) {
         id -> Int4,
-        #[max_length = 255]
-        name -> Varchar,
+        name -> Citext,
         #[max_length = 255]
         email -> Varchar,
         #[max_length = 255]
@@ -274,4 +275,5 @@ diesel::allow_tables_to_appear_in_same_query!(
     user_roles,
     users,
     verification_tokens,
+    active_users,
 );

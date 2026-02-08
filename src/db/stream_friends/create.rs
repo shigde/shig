@@ -9,10 +9,11 @@ pub struct NewStreamFriend {
     pub user_id: i32,
     pub stream_id: i32,
     pub friend_role_id: i32,
+    pub active: bool,
+    pub accepted: bool,
     pub created_at: NaiveDateTime,
 }
 
-#[allow(dead_code)]
 pub fn insert_new_stream_friend(
     conn: &mut PgConnection,
     user_id: i32,
@@ -23,6 +24,8 @@ pub fn insert_new_stream_friend(
         user_id,
         stream_id,
         friend_role_id,
+        active: true,
+        accepted: true,
         created_at: Utc::now().naive_utc().clone(),
     };
 

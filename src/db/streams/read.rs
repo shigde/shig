@@ -57,3 +57,19 @@ pub fn find_stream_by_uuid(conn: &mut PgConnection, stream_uuid: String) -> DbRe
         .first(conn)?;
     Ok(stream_dao)
 }
+
+pub fn find_if_exists_stream_by_uuid_for_owner(
+    conn: &mut PgConnection,
+    stream_uuid: &str,
+    owner_user_id: i32,
+) -> DbResult<Option<Stream>> {
+    use crate::db::schema::streams::dsl::*;
+
+    let stream_dao = streams
+        .filter(uuid.eq(stream_uuid))
+        .filter(user_id.eq(owner_user_id))
+        .select(Stream::as_select())
+        .first::<Stream>(conn)
+        .optional()?;
+    Ok(stream_dao)
+}

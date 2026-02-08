@@ -3,12 +3,14 @@ use crate::models::error::ApiError;
 use crate::models::http::response::Body;
 use crate::models::user::User;
 use actix_web::{get, web, HttpResponse};
+use serde::Deserialize;
 
 pub mod channel;
 pub mod stream;
 pub mod stream_preview;
 pub mod whep;
 pub mod whip;
+pub mod stream_friend;
 
 // GET api/pup/user/:user_uuid
 #[get("/{user_uuid}")]
@@ -18,4 +20,21 @@ pub async fn get_active_user(
 ) -> Result<HttpResponse, ApiError> {
     let user = User::find_as_active(&pool, path.into_inner().as_str())?;
     Ok(HttpResponse::Ok().json(Body::new("ok", user)))
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    q: String,
+}
+// GET api/pup/user/search?q=ccbxjcb
+#[get("/search")]
+pub async fn search_active_users_by_name(
+    pool: web::Data<DbPool>,
+    query: web::Query<SearchQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let needle = query.q.trim();
+
+    let users = User::search_active_users_by_name(&pool, needle)?;
+
+    Ok(HttpResponse::Ok().json(Body::new("ok", users)))
 }

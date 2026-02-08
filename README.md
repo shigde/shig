@@ -11,3 +11,7 @@
 ## Documentation
 
 Please follow this link: [Doc](doc/index.md).
+
+## Develop
+
+Please follow this link: [Doc](doc/development.md).

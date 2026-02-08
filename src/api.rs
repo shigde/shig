@@ -11,10 +11,13 @@ use crate::api::auth::verify::verify;
 use crate::api::federation::settings::get_settings;
 use crate::api::user::channel::{get_channel, update_channel};
 use crate::api::user::stream::{create_stream, delete_stream, get_stream, update_stream};
+use crate::api::user::stream_friend::{
+    create_stream_friend, delete_stream_friend, get_all_stream_friends, get_stream_friend,
+};
 use crate::api::user::stream_preview::{
     get_channel_stream_preview_list, get_stream_preview, get_stream_preview_list,
 };
-use crate::api::user::{get_active_user, whep, whip};
+use crate::api::user::{get_active_user, search_active_users_by_name, whep, whip};
 use actix_files as fs;
 use actix_web::web;
 
@@ -40,7 +43,11 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
         web::scope("/api")
             .service(
                 web::scope("/pub")
-                    .service(web::scope("/user").service(get_active_user))
+                    .service(
+                        web::scope("/user")
+                            .service(search_active_users_by_name)
+                            .service(get_active_user),
+                    )
                     .service(
                         web::scope("/channel")
                             .service(get_channel)
@@ -65,7 +72,11 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(get_stream)
                     .service(create_stream)
                     .service(update_stream)
-                    .service(delete_stream),
+                    .service(delete_stream)
+                    .service(get_stream_friend)
+                    .service(get_all_stream_friends)
+                    .service(create_stream_friend)
+                    .service(delete_stream_friend),
             )
             .service(
                 web::scope("/auth")
