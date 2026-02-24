@@ -1,13 +1,15 @@
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
 use crate::sfu::media::connector::{Connector, ConnectorType};
-use crate::sfu::media::control_channel::ControlChannel;
-use crate::sfu::media::data_channel::{DataChannel, DataChannelMsg, OnDataChannel};
+use crate::sfu::media::control_data_channel::ControlDataChannel;
+use crate::sfu::media::data_channel::{DataChannelMsg, EventType, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
 use crate::sfu::media::sender::Sender;
 use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
-use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
+use actix::{
+    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture,
+};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
@@ -18,20 +20,20 @@ pub struct Peer {
     #[allow(dead_code)]
     pub role: PeerRole,
     parent_addr: Addr<Lobby>,
-    receiver: Option<Receiver>,
+    receiver: Option<Arc<Mutex<Receiver>>>,
     sender: Option<Arc<Mutex<Sender>>>,
-    control_channel: Arc<ControlChannel>,
+    control_channel: Arc<Mutex<ControlDataChannel>>,
 }
 
 impl Peer {
     pub fn new(id: PeerId, parent_addr: Addr<Lobby>, role: PeerRole) -> Self {
         Self {
-            id,
+            id: id.clone(),
             role,
             parent_addr,
             receiver: None,
             sender: None,
-            control_channel: ControlChannel::new(),
+            control_channel: Arc::new(Mutex::new(ControlDataChannel::new(id))),
         }
     }
 }
@@ -74,7 +76,7 @@ impl Handler<PeerStartReceiving> for Peer {
             .into_actor(self)
             .map(|res, actor, _| match res {
                 Ok((receiver, answer)) => {
-                    actor.receiver = Some(receiver);
+                    actor.receiver = Some(Arc::new(Mutex::new(receiver)));
                     Ok(answer)
                 }
                 Err(e) => Err(PeerError::InternalMedia(e)),
@@ -90,6 +92,7 @@ pub struct PeerStartSending {
 }
 
 impl Handler<PeerStartSending> for Peer {
+    // Returns SDP Answer
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartSending, ctx: &mut Self::Context) -> Self::Result {
@@ -105,7 +108,7 @@ impl Handler<PeerStartSending> for Peer {
                     match sender.add_media(media.clone()).await {
                         Ok(_) => {
                             log::info!("On subscribe (Sender), added media to peer_id={}, media_id= {}, kind={}", id, media.id, media.kind);
-                        },
+                        }
                         Err(e) => {
                             log::error!(
                                 "On subscribe (Sender), failed to add media to peer_id={} : {}",
@@ -115,17 +118,17 @@ impl Handler<PeerStartSending> for Peer {
                         }
                     }
                 }
-                let offer = sender.setup_offer().await?;
-                Ok((sender, offer))
+                let answer = sender.setup_offer().await?;
+                Ok((sender, answer))
             }
-            .into_actor(self)
-            .map(|res, actor, _| match res {
-                Ok((sender, answer)) => {
-                    actor.sender = Some(Arc::new(Mutex::new(sender)));
-                    Ok(answer)
-                }
-                Err(e) => Err(PeerError::InternalMedia(e)),
-            }),
+                .into_actor(self)
+                .map(|res, actor, _| match res {
+                    Ok((sender, answer)) => {
+                        actor.sender = Some(Arc::new(Mutex::new(sender)));
+                        Ok(answer)
+                    }
+                    Err(e) => Err(PeerError::InternalMedia(e)),
+                }),
         )
     }
 }
@@ -145,33 +148,14 @@ impl Handler<PeerSending> for Peer {
         let sdp_answer = msg.answer;
         let sender_arc = self.sender.clone().unwrap();
 
-        // add the receiver dc to the sender signaler, because we're doing signaling over the receiver channel
-        let receiver_dc = self.receiver.clone().unwrap().get_dc();
         let peer_id = self.id.clone();
-
         Box::pin(
             async move {
-                if let Some(dc) = receiver_dc {
-                    log::info!("adding receiver dc to sender signaler, peer_id={}", peer_id);
-                    // self.control_channel
-                    //     .send("signal-offer", serde_json::to_value(offer)?)
-                    //     .await;
-
-                    //if dc.ready_state() == RTCDataChannelState::Open {
-                    //     {
-                    //         let mut sender = sender_arc.lock().await;
-                    //         sender.set_signal_dc(dc).await;
-                    //     }
-                    //} else {
-                    //    log::warn!("receiver dc not ready, peer_id={}", peer_id);
-                    //    return Err(PeerError::InternalMedia(anyhow!("receiver dc not ready")));
-                }
-
                 if let Err(err) = {
                     let sender = sender_arc.lock().await;
                     sender.set_answer(sdp_answer.as_str()).await
                 } {
-                    log::error!("set_answer failed: {:?}", err);
+                    log::error!("set_answer failed peer_id={}: {:?}", peer_id, err);
                     Err(err.into())
                 } else {
                     Ok("".to_string())
@@ -188,6 +172,7 @@ impl Handler<AddMedia> for Peer {
     fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         let media_id = msg.media.id.clone();
+
         let Some(sender_arc) = self.sender.clone() else {
             return Box::pin(
                 async move {
@@ -202,34 +187,34 @@ impl Handler<AddMedia> for Peer {
         };
 
         let media = msg.media;
+        let control_arc = self.control_channel.clone();
+
         Box::pin(
             async move {
                 if let Err(e) = {
                     let mut sender = sender_arc.lock().await;
                     sender.add_media(media).await
                 } {
-                    log::error!(
-                        "On add media, failed to add media media_id={} to sender of peer_id={}: {}",
-                        media_id,
-                        peer_id,
-                        e
-                    );
-                    return;
+                    log::error!("failed add media {} for peer {}: {}", media_id, peer_id, e);
+                    return None;
                 }
 
-                if let Err(e) = {
+                let offer = {
                     let mut sender = sender_arc.lock().await;
-                    sender.create_signal_offer().await
-                } {
-                    log::error!(
-                        "On add media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
-                        media_id,
-                        peer_id,
-                        e
-                    );
-                }
+                    sender.create_signal_offer().await.ok()
+                };
+                offer
             }
-            .into_actor(self),
+            .into_actor(self)
+            .then(|offer_opt, actor, _ctx| {
+                async move {
+                    if let Some(offer) = offer_opt {
+                        let mut control = control_arc.lock().await;
+                        let _ = control.send_offer(offer).await;
+                    }
+                }
+                .into_actor(actor)
+            }),
         )
     }
 }
@@ -252,7 +237,7 @@ impl Handler<RemoveMedia> for Peer {
                 .into_actor(self),
             );
         };
-
+        let control_arc = self.control_channel.clone();
         Box::pin(
             async move {
                 if let Err(e) = {
@@ -265,20 +250,24 @@ impl Handler<RemoveMedia> for Peer {
                         peer_id,
                         e
                     );
+                    return None;
                 }
-                if let Err(e) = {
+                let offer = {
                     let mut sender = sender_arc.lock().await;
-                    sender.create_signal_offer().await
-                } {
-                    log::error!(
-                        "On remove media, failed send offer media_id={} by (Sender) of peer_id={}: {}",
-                        media_id,
-                        peer_id,
-                        e
-                    );
-                }
+                    sender.create_signal_offer().await.ok()
+                };
+                offer
             }
-            .into_actor(self),
+            .into_actor(self)
+            .then(|offer_opt, actor, _ctx| {
+                async move {
+                    if let Some(offer) = offer_opt {
+                        let mut control = control_arc.lock().await;
+                        let _ = control.send_offer(offer).await;
+                    }
+                }
+                .into_actor(actor)
+            }),
         )
     }
 }
@@ -317,32 +306,28 @@ impl Handler<OnDataChannel> for Peer {
     fn handle(&mut self, msg: OnDataChannel, _ctx: &mut Self::Context) -> Self::Result {
         let dc = msg.dc.clone();
         let kind = msg.kind;
-        let messenger = self.control_channel.clone();
+        let event = msg.event;
+        let control_arc = self.control_channel.clone();
         match kind {
+            // ignore the sender dc
             ConnectorType::Sender => Box::pin(async move {}.into_actor(self)),
-            ConnectorType::Receiver => {
-                Box::pin(
-                    async move {
-                        log::info!("Receiver DataChannel arrived: attach to control_channe");
-
-                        // 🔗 Messenger an neuen DC binden
-                        crate::sfu::media::control_channel::bind_datachannel(dc, messenger).await;
+            ConnectorType::Receiver => Box::pin(
+                async move {
+                    match event {
+                        EventType::Open => {
+                            log::info!("Receiver DataChannel open: attach to control");
+                            let mut control = control_arc.lock().await;
+                            let _ = control.set_dc(dc).await;
+                        }
+                        EventType::Closed => {
+                            log::info!("Receiver DataChannel close: remove from control");
+                            let mut control = control_arc.lock().await;
+                            let _ = control.detach_channel(dc);
+                        }
                     }
-                    .into_actor(self),
-                )
-                // let sender_arc_opt = self.sender.clone();
-                // Box::pin(
-                //     async move {
-                //         if let Some(sender_arc) = sender_arc_opt {
-                //             {
-                //                 let mut sender = sender_arc.lock().await;
-                //                 sender.set_signal_dc(dc).await;
-                //             }
-                //         }
-                //     }
-                //     .into_actor(self),
-                // )
-            }
+                }
+                .into_actor(self),
+            ),
         }
     }
 }
@@ -354,28 +339,37 @@ impl Handler<DataChannelMsg> for Peer {
         let peer_id = self.id.clone();
         match msg {
             DataChannelMsg::OfferMsg(msg) => {
-                let Some(mut receiver) = self.receiver.clone() else {
+                let Some(mut receiver_arc) = self.receiver.clone() else {
                     return Box::pin(
                         async move {
                             log::warn!(
-                                "Peer has no sender for signal answer for peer_id={}",
+                                "Peer has no receiver to handle offer for peer_id={}",
                                 peer_id
                             );
                         }
                         .into_actor(self),
                     );
                 };
+                let control_arc = self.control_channel.clone();
+                let offer_number = msg.clone().number.clone();
                 Box::pin(
                     async move {
-                        if let Err(e) = receiver.on_signaling_offer(msg).await {
-                            log::error!(
-                                "Failed to set signaling offer for peer_id={}: {}",
-                                peer_id,
-                                e
-                            );
-                        }
+                        let anwser = {
+                            let mut receiver = receiver_arc.lock().await;
+                            receiver.on_signaling_offer(msg).await.ok()
+                        };
+                        anwser
                     }
-                    .into_actor(self),
+                    .into_actor(self)
+                    .then(move |answer_opt, actor, _ctx| {
+                        async move {
+                            if let Some(answer) = answer_opt {
+                                let mut control = control_arc.lock().await;
+                                let _ = control.send_answer(answer, offer_number).await;
+                            }
+                        }
+                        .into_actor(actor)
+                    }),
                 )
             }
             DataChannelMsg::AnswerMsg(msg) => {
@@ -391,8 +385,19 @@ impl Handler<DataChannelMsg> for Peer {
                     );
                 };
 
+                let control_arc = self.control_channel.clone();
                 Box::pin(
                     async move {
+                        let is_answer_stale = {
+                            let control = control_arc.lock().await;
+                            control.is_answer_stale(msg.number)
+                        };
+
+                        if is_answer_stale {
+                            log::info!("ignore staled answer peer_id={}", peer_id);
+                            return;
+                        }
+
                         if let Err(e) = {
                             let mut sender = sender_arc.lock().await;
                             sender.set_signal_answer(msg).await
@@ -440,18 +445,38 @@ impl Handler<MuteRemoteMedia> for Peer {
             );
         };
 
+        let control_arc = self.control_channel.clone();
         let mute = msg.mute;
         let media_id = msg.media_id;
-        log::info!("send mute remote signal for peer_id={}", peer_id);
+        log::info!(
+            "send mute remote signal for peer_id={} media_id={}",
+            peer_id.clone(),
+            media_id.clone()
+        );
         Box::pin(
             async move {
-                if let Err(e) = {
+                let mid_option = {
                     let mut sender = sender_arc.lock().await;
-                    sender.send_mute_remote(media_id, mute).await
+                    sender.get_mid(media_id.clone())
+                };
+
+                let Some(mid) = mid_option else {
+                    log::warn!(
+                        "no mid for peer_id={} media_id={}",
+                        peer_id.clone(),
+                        media_id.clone()
+                    );
+                    return;
+                };
+
+                if let Err(e) = {
+                    let mut control = control_arc.lock().await;
+                    control.send_mute(mid.as_str(), mute).await
                 } {
                     log::error!(
-                        "Failed to set send remote mute for peer_id={}: {}",
+                        "Failed to send remote mute for peer_id={} media_id={}: {}",
                         peer_id,
+                        media_id,
                         e
                     );
                 }
@@ -479,8 +504,11 @@ impl Handler<PeerShutdown> for Peer {
         Box::pin(
             async move {
                 log::info!("cleanup peer actor, peer_id={}", peer_id);
-                if let Some(receiver) = receiver {
-                    let _ = receiver.shutdown().await;
+                if let Some(receiver_arc) = receiver {
+                    {
+                        let receiver = receiver_arc.lock().await;
+                        let _ = receiver.shutdown().await;
+                    }
                 }
 
                 if let Some(sender_arc) = sender {

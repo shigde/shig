@@ -29,14 +29,14 @@ pub(crate) async fn whep_offer(
         });
     }
 
-    if !db_lobby.is_open {
-        return Err(ApiError::Forbidden {
-            error_message: "forbidden to subscribe".to_string(),
-        });
-    }
+    // if !db_lobby.is_open {
+    //     return Err(ApiError::Forbidden {
+    //         error_message: "forbidden to subscribe".to_string(),
+    //     });
+    // }
 
-    let is_stream_friend = is_stream_friend(&mut conn, user.id, db_stream.id)?;
-    let is_channel_friend = is_channel_friend(&mut conn, user.id, db_channel.id)?;
+    let is_stream_friend = is_stream_friend(&mut conn, db_stream.id, user.id)?;
+    let is_channel_friend = is_channel_friend(&mut conn, db_channel.id, user.id,)?;
     let is_owner = db_lobby.user_id == user.id;
 
     if !is_stream_friend && !is_channel_friend && !is_owner {
@@ -94,8 +94,8 @@ pub(crate) async fn whep_answer(
         });
     }
 
-    let is_stream_friend = is_stream_friend(&mut conn, user.id, db_stream.id)?;
-    let is_channel_friend = is_channel_friend(&mut conn, user.id, db_channel.id)?;
+    let is_stream_friend = is_stream_friend(&mut conn, db_stream.id, user.id,)?;
+    let is_channel_friend = is_channel_friend(&mut conn, db_channel.id, user.id)?;
     let is_owner = db_lobby.user_id == user.id;
 
     if !is_stream_friend && !is_channel_friend && !is_owner {

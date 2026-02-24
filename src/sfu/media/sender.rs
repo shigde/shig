@@ -1,7 +1,6 @@
 use crate::sfu::media::connector::{Connector, ConnectorType};
-use crate::sfu::media::data_channel::{DataChannel, DataChannelMessanger, SdpMsgData};
+use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
-use crate::sfu::media::signaler::Signaler;
 use crate::sfu::media::{Media, MediaId};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -23,7 +22,6 @@ pub struct Sender {
     dc: Option<Arc<RTCDataChannel>>,
     #[allow(dead_code)]
     peer_addr: Addr<Peer>,
-    signaler: Signaler,
     // MediaId -> RTCRtpTransceiver
     // This is used to send remote mute messages to the peer and identify the track by the mid
     sending_media: HashMap<MediaId, Arc<RTCRtpTransceiver>>,
@@ -49,13 +47,12 @@ impl Sender {
     pub(crate) async fn new(id: PeerId, peer_addr: Addr<Peer>) -> MediaResult<Self> {
         let pc =
             Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Sender).await?;
-        let signaler = Signaler::new(id.clone(), peer_addr.clone());
+        // let signaler = Signaler::new(id.clone(), peer_addr.clone());
         Ok(Self {
             id,
             pc,
             dc: None,
             peer_addr,
-            signaler,
             sending_media: HashMap::new(),
         })
     }
@@ -116,38 +113,55 @@ impl Sender {
         Ok(())
     }
 
-    pub async fn create_signal_offer(&mut self) -> MediaResult<()> {
-        log::info!("create (Sender) signaling offer, peer_id={}", self.id);
+    pub async fn create_signal_offer(&mut self) -> MediaResult<String> {
+        log::info!("create (Sender) signaling offer start, peer_id={}", self.id);
         let pc = self.get_pc();
-        let offer = pc.create_offer(None).await?;
-        pc.set_local_description(offer.clone()).await?;
-        if let Err(e) = self.signaler.send_offer(offer.sdp.to_string()).await {
-            log::error!("(Sender) send offer error: {e}, peer_id={}", self.id);
-            return Err(e.into());
+        let offer = match pc.create_offer(None).await {
+            Ok(o) => o,
+            Err(e) => {
+                log::error!("create_offer failed, peer_id={}, error={}", self.id, e);
+                return Err(MediaError::Renegotiation(e.to_string()));
+            }
+        };
+
+        if let Err(e) = pc.set_local_description(offer.clone()).await {
+            log::error!(
+                "set_local_description failed, peer_id={}, error={}",
+                self.id,
+                e
+            );
+            return Err(MediaError::Renegotiation(e.to_string()));
         }
-        Ok(())
+
+        log::info!(
+            "create (Sender) signaling offer success, peer_id={}",
+            self.id
+        );
+
+        Ok(offer.sdp.to_string())
     }
+
+    // pub async fn create_signal_offer(&mut self) -> MediaResult<String> {
+    //     log::info!("create (Sender) signaling offer, peer_id={}", self.id);
+    //     let pc = self.get_pc();
+    //     let offer = pc.create_offer(None).await?;
+    //     pc.set_local_description(offer.clone()).await?;
+    //     Ok(offer.sdp.to_string())
+    // }
 
     pub async fn set_signal_answer(&mut self, msg: SdpMsgData) -> MediaResult<()> {
         log::info!("receive (Sender) signaling answer, peer_id={}", self.id);
-        if self.signaler.is_answer_stale(msg.number) {
-            return Ok(());
-        }
         self.set_answer(msg.sdp.as_str()).await
     }
 
-    pub async fn set_signal_dc(&mut self, dc: Arc<RTCDataChannel>) {
-        self.signaler.set_dc(dc).await;
-    }
-
-    pub async fn send_mute_remote(&mut self, media_id: MediaId, mute: bool) -> MediaResult<()> {
+    pub fn get_mid(&mut self, media_id: MediaId) -> Option<String> {
         log::info!("send mute remote (Sender), peer_id={}", self.id);
         let Some(ts) = self.sending_media.get(&media_id) else {
             log::warn!("mute remote track not found, peer_id={}", self.id);
-            return Ok(());
+            return None;
         };
-        let Some(mid) = ts.mid() else { return Ok(()) };
-        self.signaler.send_mute(mid.as_str(), mute).await
+        let Some(mid) = ts.mid() else { return None };
+        Some(mid.to_string())
     }
 
     pub(crate) async fn shutdown(&self) {

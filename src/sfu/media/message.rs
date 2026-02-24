@@ -16,10 +16,3 @@ pub enum MediaMessage {
     RemoveMedia(PeerId, MediaId),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ControlChannelMessage {
-    pub id: String,
-    pub session: String,
-    pub kind: String,
-    pub payload: serde_json::Value,
-}

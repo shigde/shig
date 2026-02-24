@@ -10,6 +10,7 @@ use crate::sfu::peer::PeerRole;
 use crate::sfu::{PublishLobby, Sfu};
 use actix::Addr;
 use actix_web::web;
+use crate::db::lobbies::update::update_lobby;
 
 #[allow(dead_code)]
 pub(crate) async fn whip(
@@ -31,8 +32,8 @@ pub(crate) async fn whip(
         });
     }
 
-    let is_stream_friend = is_stream_friend(&mut conn, user.id, db_stream.id)?;
-    let is_channel_friend = is_channel_friend(&mut conn, user.id, db_channel.id)?;
+    let is_stream_friend = is_stream_friend(&mut conn, db_stream.id, user.id)?;
+    let is_channel_friend = is_channel_friend(&mut conn, db_channel.id, user.id,)?;
     let is_owner = db_lobby.user_id == user.id;
 
     if !is_stream_friend && !is_channel_friend && !is_owner {

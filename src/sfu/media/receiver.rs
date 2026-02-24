@@ -3,7 +3,6 @@ use crate::sfu::media::connector::{receiver_index, Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::sdp::{parse_offered_mids, OfferedMid};
-use crate::sfu::media::signaler::Signaler;
 use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -28,7 +27,6 @@ pub struct Receiver {
     peer_addr: Addr<Peer>,
     lobby_addr: Addr<Lobby>,
     stop: CancellationToken,
-    signaler: Signaler,
     offered_mids: Vec<OfferedMid>,
 }
 
@@ -56,7 +54,6 @@ impl Receiver {
     ) -> MediaResult<Self> {
         let pc =
             Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Receiver).await?;
-        let signaler = Signaler::new(id.clone(), peer_addr.clone());
 
         Ok(Self {
             id,
@@ -65,7 +62,6 @@ impl Receiver {
             peer_addr,
             lobby_addr,
             stop: CancellationToken::new(),
-            signaler,
             offered_mids: vec![],
         })
     }
@@ -222,13 +218,27 @@ impl Receiver {
         Ok(answer)
     }
 
-    pub(crate) async fn on_signaling_offer(&mut self, offer_msg: SdpMsgData) -> MediaResult<()> {
-        let answer = self.create_answer(offer_msg.sdp.as_str()).await?;
-        log::info!("send (Receiver) signaling answer: peer_id={}", self.id);
-        match self.signaler.send_answer(answer, offer_msg.number).await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MediaError::Renegotiation(format!("{:?}", e))),
-        }
+    pub(crate) async fn on_signaling_offer(
+        &mut self,
+        offer_msg: SdpMsgData,
+    ) -> MediaResult<String> {
+        self.create_answer(offer_msg.sdp.as_str())
+            .await
+            .map(|answer| {
+                log::info!(
+                    "create (Receiver) signaling answer success: peer_id={}",
+                    self.id
+                );
+                answer
+            })
+            .map_err(|err| {
+                log::error!(
+                    "create (Receiver) signaling answer failed: peer_id={}, error={}",
+                    self.id,
+                    err
+                );
+                err
+            })
     }
 
     pub(crate) async fn shutdown(&self) {

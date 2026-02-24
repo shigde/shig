@@ -14,7 +14,7 @@ use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
 
 pub mod connector;
-pub mod control_channel;
+pub mod control_data_channel;
 pub mod data_channel;
 mod data_channel_test;
 pub mod error;
@@ -24,7 +24,6 @@ pub mod router;
 mod router_test;
 mod sdp;
 pub mod sender;
-mod signaler;
 
 pub(crate) type RtpSenderChannel = broadcast::Sender<Arc<Packet>>;
 

@@ -4,12 +4,11 @@ use actix::{Addr, Message};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use derive_more::Display;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::data_channel_state::RTCDataChannelState;
 use webrtc::data_channel::RTCDataChannel;
-use webrtc::Error;
 
-#[derive(Serialize, Deserialize, Debug, Message)]
+#[derive(Serialize, Deserialize, Debug, Message, Clone)]
 #[serde(tag = "type", content = "data")]
 #[rtype(result = "()")]
 pub enum DataChannelMsg {
@@ -72,7 +71,7 @@ pub struct SdpMsgData {
     pub sdp: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MuteMsgData {
     pub mid: String,
     pub mute: bool,
@@ -90,8 +89,9 @@ pub trait DataChannel: Connector {
             .await?;
         log::info!("created whep data channel, kind={kind}");
 
-        attach_message_handler(&data_channel, peer_addr.clone(), kind.clone());
+        attach_on_message(&data_channel, peer_addr.clone(), kind.clone());
         attach_on_open(&data_channel, peer_addr.clone(), kind.clone());
+        attach_on_close(&data_channel, peer_addr.clone(), kind.clone());
         Ok(())
     }
 
@@ -104,8 +104,9 @@ pub trait DataChannel: Connector {
             let kind = kind_clone.clone();
             let peer_addr = peer_addr_clone.clone();
 
-            attach_message_handler(&dc, peer_addr.clone(), kind.clone());
+            attach_on_message(&dc, peer_addr.clone(), kind.clone());
             attach_on_open(&dc, peer_addr.clone(), kind.clone());
+            attach_on_close(&dc, peer_addr.clone(), kind.clone());
 
             Box::pin(async move {
                 log::info!(
@@ -122,7 +123,7 @@ pub trait DataChannel: Connector {
     fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
 }
 
-fn attach_message_handler(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: ConnectorType) {
+fn attach_on_message(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: ConnectorType) {
     dc.on_message(Box::new(move |dcm: DataChannelMessage| {
         let addr = peer_addr.clone();
         Box::pin(async move {
@@ -155,6 +156,7 @@ fn attach_on_open(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: Connect
             );
 
             peer_addr_open.do_send(OnDataChannel {
+                event: EventType::Open,
                 kind: kind_open,
                 dc: dc_open.clone(),
             });
@@ -162,43 +164,42 @@ fn attach_on_open(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: Connect
     }));
 }
 
-pub trait DataChannelMessanger {
-    #[allow(dead_code)]
-    async fn send_dcm(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
-        let Some(dc) = self.get_dc() else {
-            return Ok(());
-        };
-        let dcm = msg.to_json()?;
-        let _ = dc.send_text(dcm).await.map_err(|e| Error::from(e))?;
-        Ok(())
-    }
+fn attach_on_close(dc: &Arc<RTCDataChannel>, peer_addr: Addr<Peer>, kind: ConnectorType) {
+    let dc_closed = Arc::clone(dc);
+    let peer_addr_closed = peer_addr.clone();
+    let connector_kind = kind.clone();
 
-    async fn send_dcm_bin(&self, msg: DataChannelMsg) -> anyhow::Result<()> {
-        let Some(dc) = self.get_dc() else {
-            log::warn!("No data channel available do send");
-            return Err(anyhow::anyhow!("No data channel available do send"));
-        };
+    dc.on_close(Box::new(move || {
+        let dc_closed = Arc::clone(&dc_closed);
+        let peer_addr_closed = peer_addr_closed.clone();
+        let connector_kind = connector_kind.clone();
 
-        if dc.ready_state() != RTCDataChannelState::Open {
-            log::warn!("Data channel not open, dc in state: {}", dc.ready_state());
-            return Err(anyhow::anyhow!("Data channel not open"));
-        }
+        Box::pin(async move {
+            log::info!(
+                "DataChannel closed: kind={}, label={}",
+                connector_kind,
+                dc_closed.label()
+            );
 
-        let Ok(dcm) = msg.to_bin() else {
-            log::warn!("Failed to serialize data channel message");
-            return Err(anyhow::anyhow!("Failed to serialize data channel message"));
-        };
-        let _ = dc.send(&dcm).await.map_err(|e| Error::from(e))?;
-        Ok(())
-    }
+            peer_addr_closed.do_send(OnDataChannel {
+                event: EventType::Closed,
+                kind: connector_kind,
+                dc: dc_closed.clone(),
+            });
+        })
+    }));
+}
 
-    fn get_dc(&self) -> Option<Arc<RTCDataChannel>>;
-    async fn set_dc(&mut self, dc: Arc<RTCDataChannel>);
+#[derive(Clone, Copy, Display)]
+pub enum EventType {
+    Open,
+    Closed,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct OnDataChannel {
+    pub event: EventType,
     pub kind: ConnectorType,
     pub dc: Arc<RTCDataChannel>,
 }
