@@ -1,7 +1,7 @@
 use crate::db::error::DbResult;
 use crate::db::stream_participants::StreamParticipant;
 use chrono::{NaiveDateTime, Utc};
-use diesel::{Insertable, PgConnection, RunQueryDsl, SelectableHelper};
+use diesel::{Insertable, PgConnection};
 
 #[derive(Insertable, Debug)]
 #[diesel(table_name = crate::db::schema::stream_participants)]

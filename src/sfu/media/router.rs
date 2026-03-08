@@ -13,10 +13,12 @@ impl Router {
         }
     }
 
+    #[allow(dead_code)]
     pub fn media(&self, id: &MediaId) -> Option<&Media> {
         self.medias.get(id)
     }
 
+    #[allow(dead_code)]
     pub fn remove_medias_of_peer(&mut self, peer_id: &PeerId) {
         self.medias.retain(|_, media| &media.peer_id != peer_id);
     }

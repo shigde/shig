@@ -339,7 +339,7 @@ impl Handler<DataChannelMsg> for Peer {
         let peer_id = self.id.clone();
         match msg {
             DataChannelMsg::OfferMsg(msg) => {
-                let Some(mut receiver_arc) = self.receiver.clone() else {
+                let Some(receiver_arc) = self.receiver.clone() else {
                     return Box::pin(
                         async move {
                             log::warn!(

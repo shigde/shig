@@ -2,6 +2,7 @@ use diesel::PgConnection;
 use crate::db::error::DbResult;
 use crate::db::stream_participants::StreamParticipant;
 
+#[allow(dead_code)]
 pub fn read_stream_participant_by_user_and_stream_uuid(
     conn: &mut PgConnection,
     stream_uuid: &str,
