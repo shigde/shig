@@ -4,6 +4,7 @@ use actix::Message;
 #[rtype(result = "Result<(), diesel::result::Error>")]
 pub struct SetLobbyOnline {
     pub lobby_uuid: String,
+    pub stream_uuid: String,
 }
 
 #[derive(Message)]

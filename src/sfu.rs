@@ -69,6 +69,7 @@ impl Handler<PublishLobby> for Sfu {
 
     fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
+        let stream_uuid = msg.stream_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
@@ -83,6 +84,7 @@ impl Handler<PublishLobby> for Sfu {
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
                 self.db_actor.do_send(SetLobbyOnline {
                     lobby_uuid: lobby_uuid.clone(),
+                    stream_uuid: stream_uuid.clone(),
                 });
                 lobby_addr.clone()
             }
@@ -205,8 +207,9 @@ impl Handler<LobbyStopped> for Sfu {
 
     fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
         self.lobbies.remove(&msg.id);
-        self.db_actor
-            .do_send(SetLobbyOffline { lobby_uuid: msg.id });
+        self.db_actor.do_send(SetLobbyOffline {
+            lobby_uuid: msg.id.to_string(),
+        });
 
         if self.shutting_down && self.lobbies.is_empty() {
             ctx.stop();

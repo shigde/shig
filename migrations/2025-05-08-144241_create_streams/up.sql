@@ -61,4 +61,4 @@ CREATE TABLE stream_participants
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX index_stream_participants_stream ON stream_participants (stream_id);
+CREATE UNIQUE INDEX index_stream_participants_stream_user ON stream_participants (stream_id, user_id);
