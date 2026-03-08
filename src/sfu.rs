@@ -2,7 +2,7 @@ use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
-use crate::sfu::lobby::{Lobby, LobbyShutdown, Publish, Subscribe, SubscribeKind};
+use crate::sfu::lobby::{LeavePeer, Lobby, LobbyShutdown, Publish, Subscribe, SubscribeKind};
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
@@ -165,6 +165,49 @@ impl Handler<SubscribeLobby> for Sfu {
             match result {
                 Ok(val) => match val {
                     Ok(answer) => Ok(answer),
+                    Err(e) => Err(SfuError::LobbyError(e)),
+                },
+                Err(e) => Err(SfuError::LobbyMailboxError(e)),
+            }
+        }
+        .into_actor(self);
+
+        Box::pin(fut)
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = " SfuResult<()>")]
+pub struct LeaveLobby {
+    pub lobby_uuid: String,
+    pub user_uuid: String,
+}
+
+impl Handler<LeaveLobby> for Sfu {
+    type Result = ResponseActFuture<Self, SfuResult<()>>;
+
+    fn handle(&mut self, msg: LeaveLobby, _: &mut Self::Context) -> Self::Result {
+        let lobby_uuid = msg.lobby_uuid.clone();
+
+        let lobby_addr = match self.lobbies.get(&lobby_uuid) {
+            None => {
+                return Box::pin(fut::err(SfuError::LobbyNotExists()));
+            }
+            Some(lobby_addr) => lobby_addr.clone(),
+        };
+
+        let user_uuid = msg.user_uuid.clone();
+        let fut = async move {
+            log::info!(
+                "peer leave lobby, peer_id={}, lobby_id={}",
+                user_uuid.clone(),
+                lobby_uuid.clone(),
+            );
+            let result = lobby_addr.send(LeavePeer { user_uuid }).await;
+
+            match result {
+                Ok(val) => match val {
+                    Ok(_) => Ok(()),
                     Err(e) => Err(SfuError::LobbyError(e)),
                 },
                 Err(e) => Err(SfuError::LobbyMailboxError(e)),

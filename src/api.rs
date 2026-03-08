@@ -9,15 +9,13 @@ use crate::api::auth::signup::signup;
 use crate::api::auth::user::{delete_current_user, get_current_user};
 use crate::api::auth::verify::verify;
 use crate::api::federation::settings::get_settings;
-use crate::api::user::channel::{get_channel, update_channel};
 use crate::api::user::stream::{create_stream, delete_stream, get_stream, update_stream};
 use crate::api::user::stream_friend::{
     create_stream_friend, delete_stream_friend, get_all_stream_friends, get_stream_friend,
 };
-use crate::api::user::stream_preview::{
-    get_channel_stream_preview_list, get_stream_preview, get_stream_preview_list,
+use crate::api::user::{
+    channel, get_active_user, lobby, search_active_users_by_name, stream_preview, whep, whip,
 };
-use crate::api::user::{get_active_user, search_active_users_by_name, whep, whip};
 use actix_files as fs;
 use actix_web::web;
 
@@ -50,22 +48,25 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     )
                     .service(
                         web::scope("/channel")
-                            .service(get_channel)
-                            .service(get_channel_stream_preview_list),
+                            .service(channel::get_channel)
+                            .service(stream_preview::get_channel_stream_preview_list),
                     )
                     .service(
                         web::scope("/stream-preview")
-                            .service(get_stream_preview_list)
-                            .service(get_stream_preview),
+                            .service(stream_preview::get_stream_preview_list)
+                            .service(stream_preview::get_stream_preview),
                     )
                     .service(web::scope("/federation").service(get_settings)),
             )
             .service(
                 web::scope("/channel")
-                    .service(update_channel)
+                    .service(channel::update_channel)
                     .service(whip::create_answer)
-                    .service(whep::create_offer) // .service(do_live)
-                    .service(whep::set_answer), // .service(do_live)
+                    .service(whep::create_offer)
+                    .service(whep::set_answer)
+                    .service(lobby::participant_leave)
+                    .service(lobby::participants_list)
+                    .service(lobby::is_online),
             )
             .service(
                 web::scope("/stream")

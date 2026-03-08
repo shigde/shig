@@ -1,8 +1,8 @@
 use diesel::PgConnection;
+use crate::db::active_users::ActiveUser;
 use crate::db::error::DbResult;
 use crate::db::stream_participants::StreamParticipant;
 
-#[allow(dead_code)]
 pub fn read_stream_participant_by_user_and_stream_uuid(
     conn: &mut PgConnection,
     stream_uuid: &str,
@@ -32,4 +32,22 @@ pub fn read_stream_participant_by_user_and_stream_uuid(
         .optional()?;
 
     Ok(participant)
+}
+
+pub fn read_stream_participant_as_active_users_by_stream_uuid(
+    conn: &mut PgConnection,
+    stream_uuid: &str,
+) -> DbResult<Vec<ActiveUser>> {
+    use diesel::prelude::*;
+    use crate::db::schema::{stream_participants, streams};
+    use crate::db::schema_views::active_users;
+
+    let users = active_users::table
+        .inner_join(stream_participants::table.on(stream_participants::user_id.eq(active_users::id)))
+        .inner_join(streams::table.on(stream_participants::stream_id.eq(streams::id)))
+        .filter(streams::uuid.eq(stream_uuid))
+        .select(ActiveUser::as_select())
+        .load(conn)?;
+
+    Ok(users)
 }

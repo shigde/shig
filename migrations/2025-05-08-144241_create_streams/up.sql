@@ -62,3 +62,4 @@ CREATE TABLE stream_participants
 );
 
 CREATE UNIQUE INDEX index_stream_participants_stream_user ON stream_participants (stream_id, user_id);
+CREATE INDEX idx_stream_participants_stream_id ON stream_participants (stream_id);

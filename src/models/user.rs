@@ -6,6 +6,7 @@ pub mod stream_preview;
 pub mod stream_thumbnail;
 pub mod stream_friend;
 mod friend_role;
+pub mod stream_participant;
 
 use crate::db::active_users::read::{find_active_user_by_uuid, search_active_users_by_name};
 use crate::db::users::delete::delete_user_by_id;

@@ -154,7 +154,7 @@ impl Handler<Subscribe> for Lobby {
             SubscribeKind::Answer => vec![],
         };
 
-        log::info!("has medias medias_len={}", medias.len());
+        log::info!("subscribing Peer peer_id={} has medias medias_len={}", peer_id, medias.len());
 
         let fut = async move {
             let result = match kind {
@@ -179,20 +179,24 @@ impl Handler<Subscribe> for Lobby {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Message)]
 #[rtype(result = " LobbyResult<()>")]
 pub struct LeavePeer {
-    user_uuid: String,
-    offer: String,
-    role: PeerRole,
+    pub user_uuid: String,
 }
 
 impl Handler<LeavePeer> for Lobby {
     type Result = LobbyResult<()>;
 
-    fn handle(&mut self, _msg: LeavePeer, _: &mut Self::Context) -> Self::Result {
-        // send leave to peer
+    fn handle(&mut self, msg: LeavePeer, _: &mut Self::Context) -> Self::Result {
+        let peer_id = PeerId::new(msg.user_uuid.clone());
+
+        let Some(peer_add) = self.peers.get(&peer_id) else {
+            return Err(LobbyError::PeerNotExists(peer_id));
+        };
+
+        log::info!("send shutdown because peer_id={} is leaving lobby", peer_id);
+        peer_add.do_send(PeerShutdown {});
         Ok(())
     }
 }
