@@ -1,4 +1,6 @@
 use crate::sfu::config::SfuConfig;
+use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
+use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{Lobby, LobbyShutdown, Publish, Subscribe, SubscribeKind};
 use actix::prelude::*;
@@ -7,6 +9,7 @@ use diesel::PgConnection;
 use std::collections::HashMap;
 
 pub mod config;
+pub mod db;
 pub mod error;
 pub mod lobby;
 mod media;
@@ -17,17 +20,18 @@ pub struct Sfu {
     _config: SfuConfig,
     lobbies: Box<HashMap<String, Addr<Lobby>>>,
     shutting_down: bool,
-    _pool: Pool<ConnectionManager<PgConnection>>,
+    db_actor: Addr<DbActor>,
 }
 
 impl Sfu {
     pub fn new(config: SfuConfig, pool: Pool<ConnectionManager<PgConnection>>) -> Sfu {
         let lobbies = Box::new(HashMap::new());
+        let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
         Sfu {
             _config: config,
             lobbies,
             shutting_down: false,
-            _pool: pool,
+            db_actor,
         }
     }
 }
@@ -55,6 +59,7 @@ impl Actor for Sfu {
 pub struct PublishLobby {
     pub offer: String,
     pub lobby_uuid: String,
+    pub stream_uuid: String,
     pub user_uuid: String,
     pub role: peer::PeerRole,
 }
@@ -67,10 +72,18 @@ impl Handler<PublishLobby> for Sfu {
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
-                let lobby_addr =
-                    Lobby::new(msg.lobby_uuid.clone(), msg.user_uuid.clone(), ctx.address())
-                        .start();
+                let lobby_addr = Lobby::new(
+                    msg.lobby_uuid.clone(),
+                    msg.stream_uuid.clone(),
+                    msg.user_uuid.clone(),
+                    ctx.address(),
+                    self.db_actor.clone(),
+                )
+                .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
+                self.db_actor.do_send(SetLobbyOnline {
+                    lobby_uuid: lobby_uuid.clone(),
+                });
                 lobby_addr.clone()
             }
             Some(lobby_addr) => lobby_addr.clone(),
@@ -192,6 +205,8 @@ impl Handler<LobbyStopped> for Sfu {
 
     fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
         self.lobbies.remove(&msg.id);
+        self.db_actor
+            .do_send(SetLobbyOffline { lobby_uuid: msg.id });
 
         if self.shutting_down && self.lobbies.is_empty() {
             ctx.stop();

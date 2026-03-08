@@ -1,7 +1,7 @@
 use crate::db::DbPool;
 use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
-use crate::models::lobby::webrtc::egress::{whep_answer, whep_offer};
+use crate::models::lobby::webrtc::subscribe::{whep_answer, whep_offer};
 use actix_web::http::header;
 use actix_web::{patch, post, web, HttpRequest, HttpResponse};
 

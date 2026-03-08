@@ -25,3 +25,18 @@ pub fn update_lobby(
         .execute(conn)?;
     Ok(())
 }
+
+pub fn update_lobby_online_state(
+    conn: &mut PgConnection,
+    uuid_id: &str,
+    is_open_state: bool,
+) -> DbResult<()> {
+    use crate::db::schema::lobbies::dsl::is_open;
+    use crate::db::schema::lobbies::dsl::lobbies;
+    use crate::db::schema::lobbies::dsl::uuid;
+
+    diesel::update(lobbies.filter(uuid.eq(uuid_id)))
+        .set(is_open.eq(is_open_state))
+        .execute(conn)?;
+    Ok(())
+}

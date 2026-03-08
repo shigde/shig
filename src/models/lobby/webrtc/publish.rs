@@ -10,9 +10,7 @@ use crate::sfu::peer::PeerRole;
 use crate::sfu::{PublishLobby, Sfu};
 use actix::Addr;
 use actix_web::web;
-use crate::db::lobbies::update::update_lobby;
 
-#[allow(dead_code)]
 pub(crate) async fn whip(
     pool: &web::Data<DbPool>,
     channel_uuid: String,
@@ -22,23 +20,29 @@ pub(crate) async fn whip(
     offer: String,
 ) -> Result<String, ApiError> {
     let mut conn = pool.get()?;
-    let db_channel = find_channel_by_uuid(&mut conn, channel_uuid)?;
+    let db_channel = find_channel_by_uuid(&mut conn, channel_uuid.clone())?;
     let db_lobby = find_lobby_by_channel_id(&mut conn, db_channel.id)?;
-    let db_stream = find_stream_by_uuid(&mut conn, stream_uuid)?;
+    let db_stream = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
 
     if db_stream.channel_id != db_channel.id {
         return Err(ApiError::Conflict {
-            error_message: "stream is not in channel".to_string(),
+            error_message: format!(
+                "stream is not part of this channel channel_uuid={}, stream_uuid={}, user_uuid={}",
+                channel_uuid, stream_uuid, user.user_uuid
+            ),
         });
     }
 
     let is_stream_friend = is_stream_friend(&mut conn, db_stream.id, user.id)?;
-    let is_channel_friend = is_channel_friend(&mut conn, db_channel.id, user.id,)?;
+    let is_channel_friend = is_channel_friend(&mut conn, db_channel.id, user.id)?;
     let is_owner = db_lobby.user_id == user.id;
 
     if !is_stream_friend && !is_channel_friend && !is_owner {
         return Err(ApiError::Forbidden {
-            error_message: "user is not allowed to join".to_string(),
+            error_message: format!(
+                "user is not allowed to join, channel_uuid={}, stream_uuid={}, user_uuid={}",
+                channel_uuid, stream_uuid, user.user_uuid
+            ),
         });
     }
 
@@ -50,6 +54,7 @@ pub(crate) async fn whip(
     let answer = match sfu_addr
         .send(PublishLobby {
             lobby_uuid: db_lobby.uuid.clone(),
+            stream_uuid: db_stream.uuid.clone(),
             user_uuid: user.user_uuid.clone(),
             offer,
             role,
@@ -57,16 +62,23 @@ pub(crate) async fn whip(
         .await
     {
         Ok(result) => result.unwrap_or_else(|e| {
-            log::error!("sfu error: {}", e);
-            "answer error".to_string()
+            let error_message = format!(
+                "SFU error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
+                channel_uuid, stream_uuid, user.user_uuid
+            );
+            log::error!("{}: {}", error_message.as_str(), e);
+            error_message
         }),
+
         Err(e) => {
-            log::error!("sfu error: {}", e);
-            return Err(ApiError::InternalServerError {
-                error_message: "sfu mail error".to_string(),
-            });
+            let error_message = format!(
+                "internal message error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
+                channel_uuid, stream_uuid, user.user_uuid
+            );
+            log::error!("{}: {}", error_message.as_str(), e);
+            return Err(ApiError::InternalServerError { error_message });
         }
     };
-    // update_lobby(&mut conn, db_lobby.uuid.as_str(), Some(db_stream.id), true)?;
+
     Ok(answer)
 }

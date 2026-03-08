@@ -541,8 +541,12 @@ pub enum PeerRole {
 pub struct PeerId(String);
 
 impl PeerId {
-    pub fn new<S: Into<String>>(s: S) -> Self {
-        PeerId(s.into())
+    pub fn new<S: Into<String>>(user_uuid: S) -> Self {
+        PeerId(user_uuid.into())
+    }
+    
+    pub fn as_user_uuid(&self) -> String {
+        self.0.to_string()
     }
 
     #[allow(dead_code)]

@@ -49,6 +49,12 @@ impl From<diesel::r2d2::PoolError> for DbError {
     }
 }
 
+impl From<&str> for DbError {
+    fn from(e: &str) -> Self {
+        DbError::new(e.to_string(), DbErrorKind::Internal)
+    }
+}
+
 impl From<diesel::result::Error> for DbError {
     fn from(e: diesel::result::Error) -> Self {
         match e {

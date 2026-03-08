@@ -1,3 +1,5 @@
+use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
+use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
 use crate::sfu::media::{AddMedia, MuteMedia, MuteRemoteMedia, RemoveMedia};
@@ -14,22 +16,32 @@ use std::collections::HashMap;
 
 pub struct Lobby {
     id: String,
+    stream_uuid: String,
     #[allow(dead_code)]
-    host_uuid: String,
+    host_uuid: String, // owner of this stream
     peers: Box<HashMap<PeerId, Addr<Peer>>>,
     parent_addr: Addr<Sfu>,
+    db_actor_addr: Addr<DbActor>,
     #[allow(dead_code)]
     router: Router,
     shutting_down: bool,
 }
 
 impl Lobby {
-    pub fn new(uuid: String, host_uuid: String, parent_addr: Addr<Sfu>) -> Self {
+    pub fn new(
+        uuid: String,
+        stream_uuid: String,
+        host_uuid: String,
+        parent_addr: Addr<Sfu>,
+        db_actor_addr: Addr<DbActor>,
+    ) -> Self {
         Self {
             id: uuid,
+            stream_uuid,
             host_uuid,
             peers: Box::new(HashMap::new()),
             parent_addr,
+            db_actor_addr,
             router: Router::new(),
             shutting_down: false,
         }
@@ -68,6 +80,9 @@ impl Handler<Publish> for Lobby {
 
     fn handle(&mut self, msg: Publish, ctx: &mut Self::Context) -> Self::Result {
         let peer_id = PeerId::new(msg.user_uuid.clone());
+        let user_uuid = msg.user_uuid.clone();
+        let lobby_uuid = self.id.clone();
+        let stream_uuid = self.stream_uuid.clone();
 
         // If the peer already exists, directly return a completed Future with error
         if self.peers.contains_key(&peer_id) {
@@ -78,6 +93,12 @@ impl Handler<Publish> for Lobby {
 
         let peer_addr = Peer::new(peer_id.clone(), ctx.address(), msg.role).start();
         self.peers.insert(peer_id, peer_addr.clone());
+
+        self.db_actor_addr.do_send(AddParticipant {
+            lobby_uuid,
+            stream_uuid,
+            user_uuid,
+        });
 
         let offer = msg.offer.clone();
         let fut = async move {
@@ -222,6 +243,11 @@ impl Handler<PeerStopped> for Lobby {
 
     fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) -> Self::Result {
         self.peers.remove(&msg.id);
+        self.db_actor_addr.do_send(RemoveParticipant {
+            lobby_uuid: self.id.clone(),
+            stream_uuid: self.stream_uuid.clone(),
+            user_uuid: msg.id.as_user_uuid(),
+        });
 
         if self.peers.is_empty() {
             self.stop(ctx);
@@ -233,6 +259,12 @@ impl Handler<AddMedia> for Lobby {
     type Result = ();
 
     fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
+        log::info!(
+            "Handle add Media: peer_id={}, media_id={}, kind={}",
+            msg.media.peer_id,
+            msg.media.id,
+            msg.media.kind
+        );
         if self.router.medias.contains_key(&msg.media.id) {
             log::warn!(
                 "media already exists, peer_id={}, media_id={}, kind={}",
