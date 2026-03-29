@@ -457,7 +457,7 @@ impl Handler<MuteRemoteMedia> for Peer {
             async move {
                 let mid_option = {
                     let mut sender = sender_arc.lock().await;
-                    sender.get_mid(media_id.clone())
+                    sender.get_mid_and_mute(media_id.clone(), mute)
                 };
 
                 let Some(mid) = mid_option else {

@@ -1,6 +1,8 @@
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
+use crate::sfu::media::sdp::set_track_info;
+use crate::sfu::media::track_info::OutboundTrackInfo;
 use crate::sfu::media::{Media, MediaId};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection;
-use webrtc::rtp_transceiver::{RTCRtpTransceiver, RTCRtpTransceiverInit};
+use webrtc::rtp_transceiver::RTCRtpTransceiverInit;
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocal;
 
@@ -24,7 +26,7 @@ pub struct Sender {
     peer_addr: Addr<Peer>,
     // MediaId -> RTCRtpTransceiver
     // This is used to send remote mute messages to the peer and identify the track by the mid
-    sending_media: HashMap<MediaId, Arc<RTCRtpTransceiver>>,
+    sending_media: HashMap<MediaId, OutboundTrackInfo>,
 }
 
 impl Connector for Sender {
@@ -67,7 +69,11 @@ impl Sender {
         log::info!("connect and create answer (Sender), peer_id={}", self.id,);
 
         let offer = self.create_offer().await?;
-        Ok(offer)
+        let vec: Vec<&OutboundTrackInfo> = self.sending_media.values().collect();
+        let parsed_offer = set_track_info(offer, vec)
+            .map_err(|e| MediaError::SdpParse(anyhow::anyhow!("set_track_info failed: {}", e)))?;
+
+        Ok(parsed_offer.sdp.to_string())
     }
 
     pub async fn add_media(&mut self, media: Media) -> MediaResult<()> {
@@ -92,7 +98,16 @@ impl Sender {
             .await?;
 
         log::info!("track added (Sender), peer_id={}", self.id);
-        self.sending_media.insert(media.id.clone(), transceiver);
+        let msid = format!("{} {}", media.src_stream_id.clone(), media.id.clone());
+        let track_info = OutboundTrackInfo::new(
+            msid,
+            transceiver,
+            media.purpose.clone(),
+            media.muted,
+            media.info.clone(),
+        );
+        self.sending_media
+            .insert(media.id.clone(), track_info.clone());
         media.subscribe(track).await;
         Ok(())
     }
@@ -138,29 +153,28 @@ impl Sender {
             self.id
         );
 
-        Ok(offer.sdp.to_string())
-    }
+        let vec: Vec<&OutboundTrackInfo> = self.sending_media.values().collect();
+        let parsed_offer = set_track_info(offer, vec)
+            .map_err(|e| MediaError::SdpParse(anyhow::anyhow!("set_track_info failed: {}", e)))?;
 
-    // pub async fn create_signal_offer(&mut self) -> MediaResult<String> {
-    //     log::info!("create (Sender) signaling offer, peer_id={}", self.id);
-    //     let pc = self.get_pc();
-    //     let offer = pc.create_offer(None).await?;
-    //     pc.set_local_description(offer.clone()).await?;
-    //     Ok(offer.sdp.to_string())
-    // }
+        Ok(parsed_offer.sdp.to_string())
+    }
 
     pub async fn set_signal_answer(&mut self, msg: SdpMsgData) -> MediaResult<()> {
         log::info!("receive (Sender) signaling answer, peer_id={}", self.id);
         self.set_answer(msg.sdp.as_str()).await
     }
 
-    pub fn get_mid(&mut self, media_id: MediaId) -> Option<String> {
+    pub fn get_mid_and_mute(&mut self, media_id: MediaId, muted: bool) -> Option<String> {
         log::info!("send mute remote (Sender), peer_id={}", self.id);
-        let Some(ts) = self.sending_media.get(&media_id) else {
+        let Some(info) = self.sending_media.get_mut(&media_id) else {
             log::warn!("mute remote track not found, peer_id={}", self.id);
             return None;
         };
-        let Some(mid) = ts.mid() else { return None };
+        info.muted = muted;
+        let Some(mid) = info.transceiver.mid() else {
+            return None;
+        };
         Some(mid.to_string())
     }
 

@@ -2,7 +2,7 @@ use crate::sfu::lobby::Lobby;
 use crate::sfu::media::connector::{receiver_index, Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
-use crate::sfu::media::sdp::{parse_offered_mids, OfferedMid};
+use crate::sfu::media::sdp::parse_offered_track_info;
 use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -16,6 +16,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtcp::payload_feedbacks::full_intra_request::{FirEntry, FullIntraRequest};
 use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
+use crate::sfu::media::track_info::InboundTrackInfo;
 
 #[derive(Clone)]
 pub struct Receiver {
@@ -27,7 +28,7 @@ pub struct Receiver {
     peer_addr: Addr<Peer>,
     lobby_addr: Addr<Lobby>,
     stop: CancellationToken,
-    offered_mids: Vec<OfferedMid>,
+    offered_track_infos: Vec<InboundTrackInfo>,
 }
 
 impl Connector for Receiver {
@@ -62,7 +63,7 @@ impl Receiver {
             peer_addr,
             lobby_addr,
             stop: CancellationToken::new(),
-            offered_mids: vec![],
+            offered_track_infos: vec![],
         })
     }
 
@@ -71,14 +72,14 @@ impl Receiver {
         let pc = Arc::clone(&self.pc);
 
         // 1) parse offer
-        let offered_mids = parse_offered_mids(sdp_offer).map_err(MediaError::SdpParse)?;
+        let offered_track_infos = parse_offered_track_info(sdp_offer).map_err(MediaError::SdpParse)?;
 
         // 2) Create Transceiver (BEFORE setRemoteDescription)
-        self.add_answerer_transceivers(&pc, &offered_mids)
+        self.add_answerer_transceivers(&pc, &offered_track_infos)
             .await
             .map_err(MediaError::RTCCreate)?;
 
-        self.offered_mids = offered_mids;
+        self.offered_track_infos = offered_track_infos;
 
         // 3) on_track handler: read-only and discard (no decoding/rendering)
         {
@@ -86,21 +87,24 @@ impl Receiver {
             let peer_id = self.id.clone();
             let lobby_addr = self.lobby_addr.clone();
             let peer_stopped = self.stop.clone();
-            let offered_mids = self.offered_mids.clone();
+            let offered_track_infos = self.offered_track_infos.clone();
             pc.on_track(Box::new(
                 move |track: Arc<TrackRemote>, receiver, _streams| {
                     let pc = Arc::clone(&pc_clone);
                     let peer_id = peer_id.clone();
                     let lobby_addr = lobby_addr.clone();
                     let peer_stopped = peer_stopped.clone();
-                    let offered_mids = offered_mids.clone();
+                    let offered_track_infos = offered_track_infos.clone();
 
                     Box::pin(async move {
                         let Ok(index) = receiver_index(Arc::clone(&pc), &receiver).await else {
                             log::error!("failed to get receiver index, peer_id={}",peer_id);
                             return;
                         };
-                        let mid = offered_mids[index].mid.clone();
+                        let mid = offered_track_infos[index].mid.clone();
+                        let purpose = offered_track_infos[index].purpose.clone();
+                        let info = offered_track_infos[index].info.clone();
+                        let is_muted = offered_track_infos[index].muted;
                         log::info!(
                             "receive (Receiver) remote-Track, kind={:?}, track_id={}, mid={:?}, peer_id={}",
                             track.kind(),
@@ -121,6 +125,9 @@ impl Receiver {
                             track.kind(),
                             rtp_tx.clone(),
                             cancel.clone(),
+                            is_muted,
+                            purpose,
+                            info,
                         );
 
                         let media_id = media.id.clone();

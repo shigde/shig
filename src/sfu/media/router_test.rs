@@ -23,7 +23,9 @@ mod tests {
             kind: Default::default(),
             rtp_tx,
             stopped: Default::default(),
+            purpose: Default::default(),
             muted: false,
+            info: "info".into(),
         }
     }
 

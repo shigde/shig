@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::sfu::media::track_info::TrackInfo;
 use crate::util::id::random_id;
 use webrtc::rtp::packet::Packet;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
@@ -24,6 +25,7 @@ pub mod router;
 mod router_test;
 mod sdp;
 pub mod sender;
+mod track_info;
 
 pub(crate) type RtpSenderChannel = broadcast::Sender<Arc<Packet>>;
 
@@ -39,12 +41,12 @@ pub(crate) type RtpSenderChannel = broadcast::Sender<Arc<Packet>>;
 pub struct Media {
     pub id: MediaId,
     pub peer_id: PeerId,
+    // The MID is the unique identifier of the incoming source media track.
     pub mid: String,
     #[allow(dead_code)]
     pub src_track_id: String,
     pub src_stream_id: String,
     pub capability: RTCRtpCodecCapability,
-    #[allow(dead_code)]
     pub kind: RTPCodecType,
     rtp_tx: RtpSenderChannel,
     stopped: CancellationToken,
@@ -53,11 +55,14 @@ pub struct Media {
     // The state change is based on DataChannel messages. The MID is used as the identifier of
     // the media track within the messages. The flow of mute state from PeerA to PeerB is based on
     // the following sequence:
-    // 1. Browser<PeerA>      -> SFU<PeerA> (Receiver): MuteMsgData { mid(resv): String, mute: bool}
-    // 2. SFU<PeerA>          -> SFU<Lobby>           : MuteMedia { peer_id: PeerId, mid(resv): String, mute: bool}
-    // 3. SFU<Lobby>          -> SFU<PeerB>           : MuteRemoteMedia { media_id: MediaId, mute: bool}
-    // 4. SFU<PeerB> (Sender) -> Browser<PeerB>       : MuteMsgData { mid(send): String, mute: bool}
+    // 1. Browser<PeerA>      -> SFU<PeerA> (Receiver): MuteMsgData { mid(receiver): String, mute: bool}
+    // 2. SFU<PeerA>          -> SFU<Lobby>           : MuteMedia { peer_id: PeerId, mid(receiver): String, mute: bool}
+    // 3. SFU<Lobby>          -> SFU<PeerB>           : MuteRemoteMedia { media_id: MediaId, mute: bool} // here switch to use media_id as mid
+    // 4. SFU<PeerB> (Sender) -> Browser<PeerB>       : MuteMsgData { mid(sender): String, mute: bool}
     muted: bool,
+    #[allow(dead_code)]
+    pub purpose: MediaPurpose,
+    pub info: TrackInfo,
 }
 
 impl Media {
@@ -70,6 +75,9 @@ impl Media {
         kind: RTPCodecType,
         rtp_tx: broadcast::Sender<Arc<Packet>>,
         stopped: CancellationToken,
+        muted: bool,
+        purpose: MediaPurpose,
+        info: TrackInfo,
     ) -> Self {
         Self {
             id: MediaId::from(peer_id.clone()),
@@ -81,7 +89,9 @@ impl Media {
             capability,
             rtp_tx,
             stopped,
-            muted: false,
+            muted,
+            purpose,
+            info,
         }
     }
 
@@ -175,4 +185,34 @@ pub struct MuteMedia {
 pub struct MuteRemoteMedia {
     pub media_id: MediaId,
     pub mute: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum MediaPurpose {
+    PARTICIPANT = 1,
+    STREAM = 2,
+}
+
+impl Default for MediaPurpose {
+    fn default() -> MediaPurpose {
+        MediaPurpose::PARTICIPANT
+    }
+}
+
+impl MediaPurpose {
+    fn from_option_str(s: Option<&str>) -> MediaPurpose {
+        match s {
+            Some("1") => MediaPurpose::PARTICIPANT,
+            Some("2") => MediaPurpose::STREAM,
+            _ => MediaPurpose::PARTICIPANT,
+        }
+    }
+
+    fn to_string(&self) -> String {
+        let s = match self {
+            MediaPurpose::PARTICIPANT => "1",
+            MediaPurpose::STREAM => "2",
+        };
+        s.to_string()
+    }
 }

@@ -1,6 +1,5 @@
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::message::MediaMessage;
-use crate::sfu::media::sdp::OfferedMid;
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use derive_more::Display;
@@ -15,6 +14,7 @@ use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
+use crate::sfu::media::track_info::InboundTrackInfo;
 
 #[derive(Clone, Copy, Display)]
 pub enum ConnectorType {
@@ -131,7 +131,7 @@ pub trait Connector {
         Ok(local)
     }
 
-    async fn create_offer(&self) -> MediaResult<String> {
+    async fn create_offer(&self) -> MediaResult<RTCSessionDescription> {
         let pc = self.get_pc();
 
         let offer = pc.create_offer(None).await?;
@@ -144,7 +144,7 @@ pub trait Connector {
         let _ = gather_complete.recv().await;
 
         let local = match pc.local_description().await {
-            Some(ld) => ld.sdp.clone(),
+            Some(ld) => ld,
             None => {
                 return Err(MediaError::SdpState("no local description".to_string()));
             }
@@ -163,7 +163,7 @@ pub trait Connector {
     async fn add_answerer_transceivers(
         &mut self,
         pc: &Arc<RTCPeerConnection>,
-        offered: &[OfferedMid],
+        offered: &[InboundTrackInfo],
     ) -> anyhow::Result<()> {
         for o in offered {
             pc.add_transceiver_from_kind(o.kind, None).await?;
