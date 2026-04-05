@@ -32,7 +32,6 @@ impl Router {
             .collect()
     }
 
-    #[allow(dead_code)]
     /// Returns all media for a specific peer.
     pub fn get_medias_of_peer(&self, peer_id: &PeerId) -> Vec<Media> {
         self.medias

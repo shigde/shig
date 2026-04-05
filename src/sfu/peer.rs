@@ -1,5 +1,5 @@
 use crate::sfu::error::{PeerError, PeerResult};
-use crate::sfu::lobby::{Lobby, PeerStopped};
+use crate::sfu::lobby::{LeavePeer, Lobby, PeerStopped};
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::control_data_channel::ControlDataChannel;
 use crate::sfu::media::data_channel::{DataChannelMsg, EventType, OnDataChannel};
@@ -7,9 +7,7 @@ use crate::sfu::media::message::MediaMessage;
 use crate::sfu::media::receiver::Receiver;
 use crate::sfu::media::sender::Sender;
 use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
-use actix::{
-    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture,
-};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
@@ -293,7 +291,9 @@ impl Handler<MediaMessage> for Peer {
                     connector_type,
                     peer_id
                 );
-                _ctx.notify(PeerShutdown {});
+                self.parent_addr.do_send(LeavePeer {
+                    user_uuid: self.id.as_user_uuid(),
+                });
             }
             _ => (),
         }
@@ -544,7 +544,7 @@ impl PeerId {
     pub fn new<S: Into<String>>(user_uuid: S) -> Self {
         PeerId(user_uuid.into())
     }
-    
+
     pub fn as_user_uuid(&self) -> String {
         self.0.to_string()
     }

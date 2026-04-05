@@ -2,7 +2,7 @@ use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
-use crate::sfu::media::{AddMedia, MuteMedia, MuteRemoteMedia, RemoveMedia};
+use crate::sfu::media::{AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::peer::{
     Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerStartReceiving, PeerStartSending,
 };
@@ -52,6 +52,18 @@ impl Lobby {
             id: self.id.clone(),
         });
         ctx.stop();
+    }
+
+    fn remove_media(&mut self, media_id: MediaId) {
+        if let Some(media) = self.router.medias.remove(&media_id) {
+            for (peer_id, peer_addr) in self.peers.iter() {
+                if peer_id != &media.peer_id {
+                    peer_addr.do_send(RemoveMedia {
+                        media_id: media_id.clone(),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -191,9 +203,15 @@ impl Handler<LeavePeer> for Lobby {
     fn handle(&mut self, msg: LeavePeer, _: &mut Self::Context) -> Self::Result {
         let peer_id = PeerId::new(msg.user_uuid.clone());
 
-        let Some(peer_add) = self.peers.get(&peer_id) else {
+        let Some(peer_add) = self.peers.get(&peer_id).cloned() else {
             return Err(LobbyError::PeerNotExists(peer_id));
         };
+
+        // remove all medias
+        let medias = self.router.get_medias_of_peer(&peer_id);
+        for media in medias {
+            self.remove_media(media.id);
+        }
 
         log::info!("send shutdown because peer_id={} is leaving lobby", peer_id);
         peer_add.do_send(PeerShutdown {});
@@ -313,15 +331,7 @@ impl Handler<RemoveMedia> for Lobby {
     type Result = ();
 
     fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
-        if let Some(media) = self.router.medias.remove(&msg.media_id) {
-            for (peer_id, peer_addr) in self.peers.iter() {
-                if peer_id != &media.peer_id {
-                    peer_addr.do_send(RemoveMedia {
-                        media_id: msg.media_id.clone(),
-                    });
-                }
-            }
-        }
+        self.remove_media(msg.media_id);
     }
 }
 

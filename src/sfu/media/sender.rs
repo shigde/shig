@@ -112,21 +112,41 @@ impl Sender {
         Ok(())
     }
 
+
     pub async fn remove_track(&mut self, media_id: MediaId) -> MediaResult<()> {
         let media_id_string = media_id.to_string();
-        log::info!("remove track (Sender) peer_id={}", self.id,);
-        for sender in self.pc.get_senders().await.iter() {
-            if let Some(sender_track) = sender.track().await {
-                if sender_track.id() == media_id_string {
-                    if let Err(e) = self.pc.remove_track(sender).await {
-                        return Err(e.into());
-                    }
+        log::info!("remove track (Sender) peer_id={}", self.id);
+
+        let senders = self.pc.get_senders().await;
+
+        for sender in senders {
+            if let Some(track) = sender.track().await {
+                if track.id() == media_id_string {
+                    self.pc.remove_track(&sender).await?;
                     self.sending_media.remove(&media_id);
+                    return Ok(());
                 }
             }
         }
+
         Ok(())
     }
+
+    // pub async fn remove_track(&mut self, media_id: MediaId) -> MediaResult<()> {
+    //     let media_id_string = media_id.to_string();
+    //     log::info!("remove track (Sender) peer_id={}", self.id,);
+    //     for sender in self.pc.get_senders().await.iter() {
+    //         if let Some(sender_track) = sender.track().await {
+    //             if sender_track.id() == media_id_string {
+    //                 if let Err(e) = self.pc.remove_track(sender).await {
+    //                     return Err(e.into());
+    //                 }
+    //                 self.sending_media.remove(&media_id);
+    //             }
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
     pub async fn create_signal_offer(&mut self) -> MediaResult<String> {
         log::info!("create (Sender) signaling offer start, peer_id={}", self.id);
