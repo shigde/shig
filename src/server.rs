@@ -6,6 +6,7 @@ use crate::federation::FederationConfig;
 use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
 use crate::models::mail::config::MailConfig;
+use crate::relay::config::RelayConfig;
 use crate::server::error::ServerResult;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::Sfu;
@@ -34,6 +35,9 @@ pub struct ConfigFile {
     pub database: DbConfig,
     pub jwt: JWTConfig,
     pub mail: MailConfig,
+
+    #[serde(default)]
+    pub relay: RelayConfig,
 }
 
 // Config struct holds to data from the `[config]` section.

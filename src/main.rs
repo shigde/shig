@@ -9,6 +9,8 @@ mod models;
 mod server;
 mod sfu;
 mod util;
+mod relay;
+mod worker;
 
 use crate::db::fixtures::insert_fixtures;
 use crate::db::{build_pool, run_migrations};
@@ -21,6 +23,8 @@ use std::fs;
 use std::process::exit;
 use tokio::signal;
 
+use crate::relay::start_moq_udp_only;
+
 #[derive(Parser)]
 #[command(name = "Shig Server")]
 #[command(version, about, long_about = None)]
@@ -31,6 +35,9 @@ struct Cli {
 
     #[arg(short, long, default_value_t = String::from("config/default.toml"))]
     config: String,
+
+
+
 }
 
 fn main() {
@@ -46,15 +53,15 @@ fn main() {
         }
     };
 
-    actix::System::new().block_on(async {
-        let server_cfg: ConfigFile = match toml::from_str(&contents) {
-            Ok(d) => d,
-            Err(e) => {
-                log::error!("unable to load data from `{}`, {}", filename, e);
-                exit(1);
-            }
-        };
+    let server_cfg: ConfigFile = match toml::from_str(&contents) {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("unable to load data from `{}`, {}", filename, e);
+            exit(1);
+        }
+    };
 
+    actix::System::new().block_on(async {
         // Set up the connection pool
         let pool = build_pool(server_cfg.database.clone()).unwrap_or_else(|error| {
             log::error!("failed to create pool: {}", error);
@@ -80,7 +87,7 @@ fn main() {
         let sfu = Sfu::new(server_cfg.sfu.clone(), pool.clone());
         let sfu_addr = sfu.start();
 
-        // Shutdown-Signal vorbereiten
+        // Shutdown-Signal
         let sfu_addr_cp = sfu_addr.clone();
         let shutdown = async {
             signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
@@ -93,9 +100,9 @@ fn main() {
             actix::System::current().stop();
         };
 
-        // Start web server
-        log::info!("starting web server");
-        let server = match server::start(server_cfg, sfu_addr, pool.clone()) {
+        // HTTP/WS-Server
+        log::info!("starting actix web server on tcp/8080");
+        let web_server = match server::start(server_cfg.clone(), sfu_addr, pool.clone()) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("Failed to start server: {}", e);
@@ -103,9 +110,19 @@ fn main() {
             }
         };
 
+        // UDP/MoQ-Server
+        let moq_task = async {
+            if let Err(e) = start_moq_udp_only(server_cfg.relay.clone()).await {
+                log::error!("moq udp server failed: {:?}", e);
+            }
+        };
+
         tokio::select! {
-            _ = server => {
-                log::info!("Server was closed");
+            _ = web_server => {
+                log::info!("Actix web server was closed");
+            },
+            _ = moq_task => {
+                log::info!("MoQ UDP server was closed");
             },
             _ = shutdown => {
                 log::info!("Shutdown done!");
