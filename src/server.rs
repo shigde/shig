@@ -19,6 +19,7 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+use crate::relay::state::RelayState;
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> impl Responder {
@@ -59,6 +60,7 @@ pub fn start(
     cfg: ConfigFile,
     sfu_addr: Addr<Sfu>,
     pool: Pool<ConnectionManager<PgConnection>>,
+    relay_state: RelayState,
 ) -> ServerResult<Server> {
     // create static file dir if not exists
     let htdocs = cfg.files.htdocs.as_str();
@@ -76,6 +78,7 @@ pub fn start(
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(sfu_addr.clone()))
+            .app_data(web::Data::new(relay_state.clone()))
             .app_data(web::Data::new(cfg.federation.clone()))
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))

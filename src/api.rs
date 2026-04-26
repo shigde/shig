@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod federation;
 pub mod user;
+pub mod relay;
 
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
@@ -55,6 +56,13 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                         web::scope("/stream-preview")
                             .service(stream_preview::get_stream_preview_list)
                             .service(stream_preview::get_stream_preview),
+                    )
+                    .service(
+                        web::scope("/streaming")
+                            .service(relay::media::fetch)
+                            .service(relay::tls::get_fingerprint)
+                            .service(relay::announcement::get_root)
+                            .service(relay::announcement::get_prefix),
                     )
                     .service(web::scope("/federation").service(get_settings)),
             )

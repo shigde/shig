@@ -23,7 +23,7 @@ use std::fs;
 use std::process::exit;
 use tokio::signal;
 
-use crate::relay::start_moq_udp_only;
+use crate::relay::{new_relay_server, start_moq_udp_only};
 
 #[derive(Parser)]
 #[command(name = "Shig Server")]
@@ -100,20 +100,28 @@ fn main() {
             actix::System::current().stop();
         };
 
+        // relay server
+        let relay_server = new_relay_server(server_cfg.relay.clone()).await.unwrap_or_else(|e| {
+            log::error!("failed to init relay server: {:?}", e);
+            exit(1);
+        });
+
+        let relay_state = relay_server.state.clone();
+
+        // UDP/MoQ-Server
+        let moq_task = async move {
+            if let Err(e) = start_moq_udp_only(relay_server).await {
+                log::error!("moq udp server failed: {:?}", e);
+            }
+        };
+
         // HTTP/WS-Server
         log::info!("starting actix web server on tcp/8080");
-        let web_server = match server::start(server_cfg.clone(), sfu_addr, pool.clone()) {
+        let web_server = match server::start(server_cfg.clone(), sfu_addr, pool.clone(), relay_state) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("Failed to start server: {}", e);
                 exit(1);
-            }
-        };
-
-        // UDP/MoQ-Server
-        let moq_task = async {
-            if let Err(e) = start_moq_udp_only(server_cfg.relay.clone()).await {
-                log::error!("moq udp server failed: {:?}", e);
             }
         };
 

@@ -62,13 +62,21 @@ thiserror = "2.0.17"
 # - CMSF draft-00 SAP fields + event timeline
 # - Session::stats() for QUIC transport stats
 # Will switch to moq-dev/moq main when PRs are merged upstream.
-moq-lite = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
-hang = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
-moq-mux = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
-moq-msf = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
-moq-native = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
-moq-relay = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#moq-lite = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#hang = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#moq-mux = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#moq-msf = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#moq-native = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+#moq-relay = { git = "https://github.com/erikherz/moq", branch = "moqpush-lite03" }
+
+moq-lite = { version = "0.15"}
+hang = { version = "0.15"}
+moq-mux = { version = "0.3"}
+moq-msf = { version = "0.1"}
+moq-native = { version = "0.13"}
+moq-relay = { version = "0.10"}
 mp4 = "0.14.0"
 base64 = "0.22.1"
 rustls = "0.23.36"
 tracing = "0.1.44"
+async-stream = "0.3.6"
