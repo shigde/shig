@@ -74,7 +74,9 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(whep::set_answer)
                     .service(lobby::participant_leave)
                     .service(lobby::participants_list)
-                    .service(lobby::is_online),
+                    .service(lobby::is_online)
+                    .service(lobby::start_streaming)
+                    .service(lobby::stop_streaming),
             )
             .service(
                 web::scope("/stream")
