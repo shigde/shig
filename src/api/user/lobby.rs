@@ -3,7 +3,8 @@ use crate::models::auth::session::Session;
 use crate::models::error::ApiError;
 use crate::models::http::response::Body;
 use crate::models::http::MESSAGE_OK;
-use crate::models::lobby::{fetch_all_participants, is_lobby_online, leave_lobby, start_stream_in_lobby, stop_stream_in_lobby};
+use crate::models::lobby;
+use crate::models::lobby::{fetch_all_participants, is_lobby_online, leave_lobby};
 use actix_web::{delete, get, post, web, HttpRequest, HttpResponse};
 
 #[get("/{channel_uuid}/stream/{stream_uuid}/lobby/online")]
@@ -54,7 +55,7 @@ pub async fn start_streaming(
 ) -> Result<HttpResponse, ApiError> {
     let (channel_uuid, stream_uuid) = path.into_inner();
     let user = session.principal.clone();
-    start_stream_in_lobby(&pool, channel_uuid, stream_uuid, user, sfu_addr).await?;
+    lobby::streaming::publish(&pool, channel_uuid, stream_uuid, user, sfu_addr, true).await?;
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }
 
@@ -67,6 +68,6 @@ pub async fn stop_streaming(
 ) -> Result<HttpResponse, ApiError> {
     let (channel_uuid, stream_uuid) = path.into_inner();
     let user = session.principal.clone();
-    stop_stream_in_lobby(&pool, channel_uuid, stream_uuid, user, sfu_addr).await?;
+    lobby::streaming::publish(&pool, channel_uuid, stream_uuid, user, sfu_addr, false).await?;
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }

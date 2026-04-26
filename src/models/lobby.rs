@@ -16,6 +16,7 @@ use actix::Addr;
 use actix_web::web;
 
 pub mod macros;
+pub mod streaming;
 pub mod webrtc;
 
 pub(crate) async fn leave_lobby(
@@ -144,95 +145,6 @@ pub(crate) async fn is_lobby_online(
         return Err(ApiError::Forbidden {
             error_message: format!(
                 "user is not allowed to see lobby online state channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    Ok(db_lobby.is_open)
-}
-
-
-pub(crate) async fn start_stream_in_lobby(
-    pool: &web::Data<DbPool>,
-    channel_uuid: String,
-    stream_uuid: String,
-    user: Principal,
-    sfu_addr: web::Data<Addr<Sfu>>,
-) -> Result<bool, ApiError> {
-    let mut conn = pool.get()?;
-    let db_channel = find_channel_by_uuid(&mut conn, channel_uuid.clone())?;
-    let db_lobby = find_lobby_by_channel_id(&mut conn, db_channel.id)?;
-    let db_stream = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
-
-    if db_stream.channel_id != db_channel.id {
-        return Err(ApiError::Conflict {
-            error_message: format!(
-                "stream is not part of this channel channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    let is_owner = db_lobby.user_id == user.id;
-
-    if !is_owner {
-        return Err(ApiError::Forbidden {
-            error_message: format!(
-                "user is not allowed to start streaming channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    if !db_lobby.is_open {
-        return Err(ApiError::Forbidden {
-            error_message: format!(
-                "Streaming can't start, Lobby is not open, channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    Ok(db_lobby.is_open)
-}
-
-pub(crate) async fn stop_stream_in_lobby(
-    pool: &web::Data<DbPool>,
-    channel_uuid: String,
-    stream_uuid: String,
-    user: Principal,
-    sfu_addr: web::Data<Addr<Sfu>>,
-) -> Result<bool, ApiError> {
-    let mut conn = pool.get()?;
-    let db_channel = find_channel_by_uuid(&mut conn, channel_uuid.clone())?;
-    let db_lobby = find_lobby_by_channel_id(&mut conn, db_channel.id)?;
-    let db_stream = find_stream_by_uuid(&mut conn, stream_uuid.clone())?;
-
-    if db_stream.channel_id != db_channel.id {
-        return Err(ApiError::Conflict {
-            error_message: format!(
-                "stream is not part of this channel channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    let is_owner = db_lobby.user_id == user.id;
-
-    if !is_owner {
-        return Err(ApiError::Forbidden {
-            error_message: format!(
-                "user is not allowed to stop streaming channel_uuid={}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
-            ),
-        });
-    }
-
-    if !db_lobby.is_open {
-        return Err(ApiError::Forbidden {
-            error_message: format!(
-                "Streaming can't stop, Lobby is not open, channel_uuid={}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             ),
         });

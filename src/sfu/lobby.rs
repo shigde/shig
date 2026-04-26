@@ -357,3 +357,17 @@ impl Handler<MuteMedia> for Lobby {
         }
     }
 }
+
+#[derive(Message)]
+#[rtype(result = " LobbyResult<()>")]
+pub struct PublishStream {
+    pub publishing: bool,
+}
+
+impl Handler<PublishStream> for Lobby {
+    type Result = LobbyResult<()>;
+
+    fn handle(&mut self, msg: PublishStream, _ctx: &mut Self::Context) -> Self::Result {
+        Ok(())
+    }
+}
