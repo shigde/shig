@@ -1,8 +1,9 @@
 use crate::relay::config::RelayConfig;
 use crate::relay::state::RelayState;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 pub mod config;
 mod mp4;
@@ -14,8 +15,6 @@ mod track_state;
 pub struct RelayServer {
     pub state: RelayState,
     server: moq_native::Server,
-    cluster: moq_relay::Cluster,
-    auth: moq_relay::Auth,
 }
 
 pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelayServer> {
@@ -47,33 +46,33 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
     let cluster = Cluster::new(config.cluster, client);
 
     let state = RelayState {
-        auth: auth.clone(),
-        cluster: cluster.clone(),
+        auth,
+        cluster,
         tls_info: server.tls_info(),
         conn_id: Arc::new(AtomicU64::new(0)),
     };
 
-    Ok(RelayServer {
-        state,
-        server,
-        cluster,
-        auth,
-    })
+    Ok(RelayServer { state, server })
 }
 
-pub async fn start_moq_udp_only(relay: RelayServer) -> anyhow::Result<()> {
+pub async fn start_moq_udp_only(
+    relay: RelayServer,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     use anyhow::Context;
 
-    let RelayServer {
-        server,
-        cluster,
-        auth,
-        ..
-    } = relay;
+    let cluster_for_serve = relay.state.cluster.clone();
+    let cluster_for_run = relay.state.cluster;
 
+    let auth = relay.state.auth.clone();
+    let server = relay.server;
     tokio::select! {
-        Err(err) = cluster.clone().run() => Err(err).context("cluster failed"),
-        Err(err) = serve(server, cluster, auth) => Err(err).context("server failed"),
+        _ = shutdown.cancelled() => {
+            log::info!("handle relay shutdown requested");
+            Ok(())
+        }
+        Err(err) = cluster_for_run.run() => Err(err).context("cluster failed"),
+        Err(err) = serve(server, cluster_for_serve, auth, shutdown.clone()) => Err(err).context("server failed"),
         else => Ok(()),
     }
 }
@@ -82,30 +81,53 @@ async fn serve(
     mut server: moq_native::Server,
     cluster: moq_relay::Cluster,
     auth: moq_relay::Auth,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let mut conn_id = 0;
+    let mut tasks = tokio::task::JoinSet::new();
 
     log::info!(
         "relay server listening on {}",
         server.local_addr()?.to_string()
     );
 
-    while let Some(request) = server.accept().await {
-        let conn = moq_relay::Connection {
-            id: conn_id,
-            request,
-            cluster: cluster.clone(),
-            auth: auth.clone(),
-        };
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                log::info!("relay accept loop stopping");
+                tasks.abort_all();
 
-        conn_id += 1;
+                while let Some(res) = tasks.join_next().await {
+                    if let Err(err) = res {
+                        if !err.is_cancelled() {
+                            tracing::warn!(%err, "connection task failed");
+                        }
+                    }
+                }
 
-        tokio::spawn(async move {
-            if let Err(err) = conn.run().await {
-                tracing::warn!(%err, "connection closed");
+                return Ok(());
             }
-        });
-    }
 
-    anyhow::bail!("stopped accepting connections")
+            request = server.accept() => {
+                let Some(request) = request else {
+                    anyhow::bail!("stopped accepting connections");
+                };
+
+                let conn = moq_relay::Connection {
+                    id: conn_id,
+                    request,
+                    cluster: cluster.clone(),
+                    auth: auth.clone(),
+                };
+
+                conn_id += 1;
+
+                tasks.spawn(async move {
+                    if let Err(err) = conn.run().await {
+                        tracing::warn!(%err, "connection closed");
+                    }
+                });
+            }
+        }
+    }
 }

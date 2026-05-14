@@ -54,7 +54,6 @@ anyhow = "1.0.99"
 bytes = "1.9.0"
 regex = "1.11.1"
 futures-util = "0.3.31"
-thiserror = "2.0.17"
 
 # MoQ transport + catalog
 # Thin fork of moq-dev/moq with 4 additions:
@@ -80,3 +79,5 @@ base64 = "0.22.1"
 rustls = "0.23.36"
 tracing = "0.1.44"
 async-stream = "0.3.6"
+url = "2.5.8"
+libc = "0.2.180"

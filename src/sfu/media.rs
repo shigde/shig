@@ -48,7 +48,7 @@ pub struct Media {
     pub src_stream_id: String,
     pub capability: RTCRtpCodecCapability,
     pub kind: RTPCodecType,
-    rtp_tx: RtpSenderChannel,
+    pub rtp_tx: RtpSenderChannel,
     stopped: CancellationToken,
 
     // This is the muted state of a media track.
@@ -187,7 +187,7 @@ pub struct MuteRemoteMedia {
     pub mute: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MediaPurpose {
     PARTICIPANT = 1,
     STREAM = 2,

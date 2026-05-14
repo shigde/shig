@@ -22,7 +22,7 @@ use server::ConfigFile;
 use std::fs;
 use std::process::exit;
 use tokio::signal;
-
+use tokio_util::sync::CancellationToken;
 use crate::relay::{new_relay_server, start_moq_udp_only};
 
 #[derive(Parser)]
@@ -35,9 +35,6 @@ struct Cli {
 
     #[arg(short, long, default_value_t = String::from("config/default.toml"))]
     config: String,
-
-
-
 }
 
 fn main() {
@@ -83,34 +80,40 @@ fn main() {
             exit(1);
         }
 
-        // Start the SFU server
-        let sfu = Sfu::new(server_cfg.sfu.clone(), pool.clone());
-        let sfu_addr = sfu.start();
-
-        // Shutdown-Signal
-        let sfu_addr_cp = sfu_addr.clone();
-        let shutdown = async {
-            signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
-            log::info!("Shutdown signal received!");
-
-            sfu_addr_cp.do_send(Shutdown {});
-
-            // Currently running requests are allowed to complete
-            // Then stops the entire Actix system
-            actix::System::current().stop();
-        };
-
         // relay server
         let relay_server = new_relay_server(server_cfg.relay.clone()).await.unwrap_or_else(|e| {
             log::error!("failed to init relay server: {:?}", e);
             exit(1);
         });
-
         let relay_state = relay_server.state.clone();
 
-        // UDP/MoQ-Server
+        // Start the SFU server
+        let sfu = Sfu::new(server_cfg.sfu.clone(), pool.clone(), relay_server.state.clone());
+        let sfu_addr = sfu.start();
+
+        // Shutdown-Signal
+        let sfu_addr_cp = sfu_addr.clone();
+        let shutdown_token = CancellationToken::new();
+        let shutdown = async {
+            signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
+            log::info!("Shutdown signal received!");
+
+            // stop sfu
+            sfu_addr_cp.send(Shutdown {}).await.expect("Failed shut down sfu");
+
+            // stop relay
+            shutdown_token.cancel();
+
+            // Currently running requests are allowed to complete
+            // Then stops the entire Actix system
+            actix::System::current().stop();
+        };
+        
+
+        let relay_shutdown = shutdown_token.clone();
+        // Start UDP/MoQ-Server
         let moq_task = async move {
-            if let Err(e) = start_moq_udp_only(relay_server).await {
+            if let Err(e) = start_moq_udp_only(relay_server, relay_shutdown).await {
                 log::error!("moq udp server failed: {:?}", e);
             }
         };

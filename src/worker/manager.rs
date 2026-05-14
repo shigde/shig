@@ -1,23 +1,24 @@
 use crate::worker::error::WorkerError;
 use crate::worker::message::{
-    GetWorkerState, ListWorkers, RestartWorker, StartWorker, StopWorker, WorkerExited, WorkerHandle,
+    GetWorkerState, ListWorkers, RestartWorker, ShutdownWorkers, StartWorker, StopWorker,
+    WorkerExited, WorkerHandle,
 };
-use crate::worker::process::{run_process, Process};
+use crate::worker::process::Process;
 use crate::worker::state::WorkerState;
 use crate::worker::WorkerId;
-use actix::ActorFutureExt;
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, MessageResult, ResponseActFuture, WrapFuture,
 };
+use actix::{ActorContext, ActorFutureExt};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::oneshot;
 
-pub struct Manager {
+pub struct WorkerManager {
     workers: HashMap<WorkerId, WorkerHandle>,
 }
 
-impl Manager {
+impl WorkerManager {
     pub fn new() -> Self {
         Self {
             workers: HashMap::new(),
@@ -25,11 +26,11 @@ impl Manager {
     }
 }
 
-impl Actor for Manager {
+impl Actor for WorkerManager {
     type Context = Context<Self>;
 }
 
-impl Handler<StartWorker> for Manager {
+impl Handler<StartWorker> for WorkerManager {
     type Result = ResponseActFuture<Self, Result<WorkerId, WorkerError>>;
 
     fn handle(&mut self, msg: StartWorker, ctx: &mut Self::Context) -> Self::Result {
@@ -56,7 +57,7 @@ impl Handler<StartWorker> for Manager {
     }
 }
 
-impl Handler<StopWorker> for Manager {
+impl Handler<StopWorker> for WorkerManager {
     type Result = Result<(), WorkerError>;
 
     fn handle(&mut self, msg: StopWorker, _: &mut Self::Context) -> Self::Result {
@@ -70,7 +71,7 @@ impl Handler<StopWorker> for Manager {
     }
 }
 
-impl Handler<RestartWorker> for Manager {
+impl Handler<RestartWorker> for WorkerManager {
     type Result = ResponseActFuture<Self, Result<(), WorkerError>>;
 
     fn handle(&mut self, msg: RestartWorker, _ctx: &mut Self::Context) -> Self::Result {
@@ -115,7 +116,7 @@ impl Handler<RestartWorker> for Manager {
     }
 }
 
-impl Handler<GetWorkerState> for Manager {
+impl Handler<GetWorkerState> for WorkerManager {
     type Result = Option<WorkerState>;
 
     fn handle(&mut self, msg: GetWorkerState, _: &mut Self::Context) -> Self::Result {
@@ -123,7 +124,7 @@ impl Handler<GetWorkerState> for Manager {
     }
 }
 
-impl Handler<ListWorkers> for Manager {
+impl Handler<ListWorkers> for WorkerManager {
     type Result = MessageResult<ListWorkers>;
 
     fn handle(&mut self, _: ListWorkers, _: &mut Self::Context) -> Self::Result {
@@ -136,7 +137,7 @@ impl Handler<ListWorkers> for Manager {
     }
 }
 
-impl Handler<WorkerExited> for Manager {
+impl Handler<WorkerExited> for WorkerManager {
     type Result = ();
 
     fn handle(&mut self, msg: WorkerExited, _: &mut Self::Context) {
@@ -154,12 +155,12 @@ impl Handler<WorkerExited> for Manager {
 
 fn spawn_supervisor(
     id: WorkerId,
-    process: Process,
-    mut shutdown_rx: oneshot::Receiver<()>,
-    manager: Addr<Manager>,
+    mut process: Process,
+    shutdown_rx: oneshot::Receiver<()>,
+    manager: Addr<WorkerManager>,
 ) {
     actix_rt::spawn(async move {
-        let result = run_process(process, shutdown_rx).await;
+        let result = process.run(shutdown_rx).await;
 
         match result {
             Ok(reason) => {
@@ -182,4 +183,18 @@ fn spawn_supervisor(
             }
         }
     });
+}
+
+impl Handler<ShutdownWorkers> for WorkerManager {
+    type Result = ();
+
+    fn handle(&mut self, _msg: ShutdownWorkers, ctx: &mut Context<Self>) {
+        log::info!("stopping all workers");
+
+        for (_id, child) in self.workers.drain() {
+            let _ = child.start_kill();
+        }
+
+        ctx.stop();
+    }
 }

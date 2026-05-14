@@ -13,6 +13,9 @@ use actix::{
 };
 use derive_more::Display;
 use std::collections::HashMap;
+use crate::relay::state::RelayState;
+use crate::sfu::relay::actor::RelayActor;
+use crate::worker::manager::WorkerManager;
 
 pub struct Lobby {
     id: String,
@@ -22,7 +25,7 @@ pub struct Lobby {
     peers: Box<HashMap<PeerId, Addr<Peer>>>,
     parent_addr: Addr<Sfu>,
     db_actor_addr: Addr<DbActor>,
-    #[allow(dead_code)]
+    relay_addr: Addr<RelayActor>,
     router: Router,
     shutting_down: bool,
 }
@@ -34,7 +37,11 @@ impl Lobby {
         host_uuid: String,
         parent_addr: Addr<Sfu>,
         db_actor_addr: Addr<DbActor>,
+        relay_state: RelayState,
+        worker_manager: Addr<WorkerManager>,
     ) -> Self {
+        let relay_addr = RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
+
         Self {
             id: uuid,
             stream_uuid,
@@ -42,6 +49,7 @@ impl Lobby {
             peers: Box::new(HashMap::new()),
             parent_addr,
             db_actor_addr,
+            relay_addr,
             router: Router::new(),
             shutting_down: false,
         }

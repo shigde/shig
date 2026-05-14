@@ -4,7 +4,7 @@ use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
-use crate::sfu::{LeaveLobby, PublishLobbyStream, Sfu};
+use crate::sfu::{PublishLobbyStream, Sfu};
 use actix::Addr;
 use actix_web::web;
 

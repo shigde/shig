@@ -1,3 +1,4 @@
+use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
 use crate::sfu::db::DbActor;
@@ -5,9 +6,12 @@ use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
     LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
+use crate::worker::manager::WorkerManager;
+use crate::worker::message::ShutdownWorkers;
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
+use futures_util::future::join_all;
 use std::collections::HashMap;
 
 pub mod config;
@@ -17,23 +21,29 @@ pub mod lobby;
 mod media;
 mod message;
 pub mod peer;
+mod relay;
 
 pub struct Sfu {
     _config: SfuConfig,
     lobbies: Box<HashMap<String, Addr<Lobby>>>,
     shutting_down: bool,
     db_actor: Addr<DbActor>,
+    relay_state: RelayState,
+    worker_manager: Addr<WorkerManager>,
 }
 
 impl Sfu {
-    pub fn new(config: SfuConfig, pool: Pool<ConnectionManager<PgConnection>>) -> Sfu {
+    pub fn new(config: SfuConfig, pool: Pool<ConnectionManager<PgConnection>>, relay_state: RelayState) -> Sfu {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
+        let worker_manager = WorkerManager::new().start();
         Sfu {
             _config: config,
             lobbies,
+            relay_state,
             shutting_down: false,
             db_actor,
+            worker_manager,
         }
     }
 }
@@ -81,6 +91,8 @@ impl Handler<PublishLobby> for Sfu {
                     msg.user_uuid.clone(),
                     ctx.address(),
                     self.db_actor.clone(),
+                    self.relay_state.clone(),
+                    self.worker_manager.clone(),
                 )
                 .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
@@ -269,18 +281,29 @@ impl Handler<PublishLobbyStream> for Sfu {
 pub struct Shutdown {}
 
 impl Handler<Shutdown> for Sfu {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
-    fn handle(&mut self, _msg: Shutdown, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: Shutdown, _ctx: &mut Self::Context) -> Self::Result {
         self.shutting_down = true;
 
-        for (_, addr) in self.lobbies.iter() {
-            addr.do_send(LobbyShutdown {});
-        }
+        let lobbies: Vec<_> = self.lobbies.values().cloned().collect();
+        let worker = self.worker_manager.clone();
 
-        if self.lobbies.is_empty() {
-            ctx.stop();
-        }
+        Box::pin(
+            async move {
+                let lobby_shutdowns = lobbies
+                    .into_iter()
+                    .map(|lobby| lobby.send(LobbyShutdown {}));
+
+                let _ = join_all(lobby_shutdowns).await;
+
+                let _ = worker.send(ShutdownWorkers).await;
+            }
+            .into_actor(self)
+            .map(|_, _act, ctx| {
+                ctx.stop();
+            }),
+        )
     }
 }
 

@@ -1,13 +1,17 @@
-use thiserror::Error;
+use derive_more::Display;
 
-#[derive(Debug, Error)]
+pub type WorkerResult<T> = Result<T, WorkerError>;
+
+#[derive(Debug, Display)]
 pub enum WorkerError {
-    #[error("worker already exists")]
+    #[display(fmt = "worker already exists")]
     AlreadyExists,
-    #[error("worker not found")]
+    #[display(fmt = "worker not found")]
     NotFound,
-    #[error("failed to spawn process: {0}")]
+    #[display(fmt = "failed to spawn process {}", _0)]
     Spawn(String),
-    #[error("Process failed: {0}")]
-    ProcessFailed(String)
+    #[display(fmt = "Process failed: {}", _0)]
+    ProcessFailed(String),
+    #[display(fmt = "Filo error {}", _0)]
+    Filo(String),
 }
