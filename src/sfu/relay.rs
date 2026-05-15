@@ -1,7 +1,7 @@
 use crate::sfu::media::Media;
 
 pub mod actor;
-mod message;
+pub mod message;
 mod error;
 mod port_allocator;
 mod cmaf;

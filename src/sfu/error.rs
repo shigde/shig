@@ -25,6 +25,8 @@ pub enum LobbyError {
     PeerAlreadyExists(PeerId),
     #[display(fmt = "Peer not exist: {}", _0)]
     PeerNotExists(PeerId),
+    #[display(fmt = "Streaming error: {}", _0)]
+    StreamingError(String),
 }
 
 pub type PeerResult<T> = Result<T, PeerError>;

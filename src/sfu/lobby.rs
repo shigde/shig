@@ -1,3 +1,4 @@
+use crate::relay::state::RelayState;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
@@ -6,16 +7,17 @@ use crate::sfu::media::{AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMed
 use crate::sfu::peer::{
     Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerStartReceiving, PeerStartSending,
 };
+use crate::sfu::relay::actor::RelayActor;
+use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::{LobbyStopped, Sfu};
+use crate::worker::manager::WorkerManager;
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
     WrapFuture,
 };
 use derive_more::Display;
+use moq_relay::AuthToken;
 use std::collections::HashMap;
-use crate::relay::state::RelayState;
-use crate::sfu::relay::actor::RelayActor;
-use crate::worker::manager::WorkerManager;
 
 pub struct Lobby {
     id: String,
@@ -40,7 +42,8 @@ impl Lobby {
         relay_state: RelayState,
         worker_manager: Addr<WorkerManager>,
     ) -> Self {
-        let relay_addr = RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
+        let relay_addr =
+            RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
 
         Self {
             id: uuid,
@@ -174,7 +177,11 @@ impl Handler<Subscribe> for Lobby {
             SubscribeKind::Answer => vec![],
         };
 
-        log::info!("subscribing Peer peer_id={} has medias medias_len={}", peer_id, medias.len());
+        log::info!(
+            "subscribing Peer peer_id={} has medias medias_len={}",
+            peer_id,
+            medias.len()
+        );
 
         let fut = async move {
             let result = match kind {
@@ -370,12 +377,73 @@ impl Handler<MuteMedia> for Lobby {
 #[rtype(result = " LobbyResult<()>")]
 pub struct PublishStream {
     pub publishing: bool,
+    pub auth_token: Option<AuthToken>,
 }
 
 impl Handler<PublishStream> for Lobby {
-    type Result = LobbyResult<()>;
+    type Result = ResponseActFuture<Self, LobbyResult<()>>;
 
     fn handle(&mut self, msg: PublishStream, _ctx: &mut Self::Context) -> Self::Result {
-        Ok(())
+        let relay_addr = self.relay_addr.clone();
+        if msg.publishing {
+            let Some(auth_token) = msg.auth_token else {
+                return Box::pin(
+                    async { Err(LobbyError::StreamingError("missing auth_token".to_string())) }
+                        .into_actor(self),
+                );
+            };
+
+            let media_stream = self.router.get_media_stream();
+
+            if media_stream.audio.is_none() && media_stream.video.is_none() {
+                return Box::pin(
+                    async {
+                        Err(LobbyError::StreamingError(
+                            "no audio and video stream exists".to_string(),
+                        ))
+                    }
+                    .into_actor(self),
+                );
+            }
+
+            let stream_start = StartRelayMediaStream {
+                media_stream,
+                auth_token,
+            };
+
+            Box::pin(
+                async move {
+                    relay_addr
+                        .send(stream_start)
+                        .await
+                        .map_err(|e| {
+                            LobbyError::StreamingError(format!("relay mailbox error: {e}"))
+                        })?
+                        .map_err(|e| {
+                            LobbyError::StreamingError(format!("relay start error: {e}"))
+                        })?;
+
+                    Ok(())
+                }
+                .into_actor(self),
+            )
+        } else {
+            Box::pin(
+                async move {
+                    relay_addr
+                        .send(StopRelayMediaStream {})
+                        .await
+                        .map_err(|e| {
+                            LobbyError::StreamingError(format!("relay mailbox error: {e}"))
+                        })?
+                        .map_err(|e| {
+                            LobbyError::StreamingError(format!("relay stop error: {e}"))
+                        })?;
+
+                    Ok(())
+                }
+                .into_actor(self),
+            )
+        }
     }
 }

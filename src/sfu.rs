@@ -13,6 +13,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures_util::future::join_all;
 use std::collections::HashMap;
+use moq_relay::AuthToken;
 
 pub mod config;
 pub mod db;
@@ -238,6 +239,7 @@ impl Handler<LeaveLobby> for Sfu {
 pub struct PublishLobbyStream {
     pub lobby_uuid: String,
     pub publishing: bool,
+    pub auth_token: Option<AuthToken>,
 }
 
 impl Handler<PublishLobbyStream> for Sfu {
@@ -259,6 +261,7 @@ impl Handler<PublishLobbyStream> for Sfu {
             let result = lobby_addr
                 .send(PublishStream {
                     publishing: msg.publishing,
+                    auth_token: msg.auth_token,
                 })
                 .await;
 
