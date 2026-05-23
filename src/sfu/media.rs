@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::sfu::media::track_info::TrackInfo;
 use crate::util::id::random_id;
 use webrtc::rtp::packet::Packet;
+use webrtc::rtp_transceiver::PayloadType;
 use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
 use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::track::track_local::TrackLocalWriter;
@@ -63,6 +64,7 @@ pub struct Media {
     #[allow(dead_code)]
     pub purpose: MediaPurpose,
     pub info: TrackInfo,
+    pub payload_type: PayloadType,
 }
 
 impl Media {
@@ -78,6 +80,7 @@ impl Media {
         muted: bool,
         purpose: MediaPurpose,
         info: TrackInfo,
+        payload_type: PayloadType,
     ) -> Self {
         Self {
             id: MediaId::from(peer_id.clone()),
@@ -92,6 +95,7 @@ impl Media {
             muted,
             purpose,
             info,
+            payload_type
         }
     }
 

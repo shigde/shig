@@ -1,20 +1,15 @@
 use crate::relay::config::RelayConfig;
 use crate::relay::state::RelayState;
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 pub mod config;
-mod mp4;
-mod publisher;
 pub mod state;
-mod stats;
-mod track_state;
 
 pub struct RelayServer {
     pub state: RelayState,
     server: moq_native::Server,
+    web: moq_relay::Web,
 }
 
 pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelayServer> {
@@ -26,6 +21,8 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
 
     config.client.max_streams.get_or_insert(DEFAULT_MAX_STREAMS);
     config.server.max_streams.get_or_insert(DEFAULT_MAX_STREAMS);
+
+    // let mtls_enabled = !config.server.tls.root.is_empty();
 
     if config.server.tls.cert.is_empty()
         && config.server.tls.key.is_empty()
@@ -39,20 +36,38 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
         config.auth.public = Some(pc);
     }
 
+
     let server = config.server.init()?;
     let client = config.client.init()?;
 
+    let (server, client) = {
+        let iroh = config.iroh.bind().await?;
+        (server.with_iroh(iroh.clone()), client.with_iroh(iroh))
+    };
+
     let auth = config.auth.init().await?;
+
     let cluster = Cluster::new(config.cluster, client);
+
+    // Create a web server too. mTLS for HTTPS is opt-in via `--web-https-root`.
+    let web = Web::new(
+        WebState {
+            auth: auth.clone(),
+            cluster: cluster.clone(),
+            tls_info: server.tls_info(),
+            conn_id: Default::default(),
+        },
+        config.web,
+    );
+
 
     let state = RelayState {
         auth,
         cluster,
         tls_info: server.tls_info(),
-        conn_id: Arc::new(AtomicU64::new(0)),
     };
 
-    Ok(RelayServer { state, server })
+    Ok(RelayServer { state, server, web })
 }
 
 pub async fn start_moq_udp_only(
@@ -66,12 +81,14 @@ pub async fn start_moq_udp_only(
 
     let auth = relay.state.auth.clone();
     let server = relay.server;
+    let web = relay.web;
     tokio::select! {
         _ = shutdown.cancelled() => {
             log::info!("handle relay shutdown requested");
             Ok(())
         }
         Err(err) = cluster_for_run.run() => Err(err).context("cluster failed"),
+        Err(err) = web.run() => return Err(err).context("web server failed"),
         Err(err) = serve(server, cluster_for_serve, auth, shutdown.clone()) => Err(err).context("server failed"),
         else => Ok(()),
     }

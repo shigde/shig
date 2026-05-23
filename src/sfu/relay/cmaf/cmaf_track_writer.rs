@@ -7,7 +7,7 @@ use hang::moq_lite;
 use tokio_util::sync::CancellationToken;
 
 pub async fn write_cmaf_track(
-    label: &'static str,
+    label: String,
     mut track: moq_lite::TrackProducer,
     prepared: &mut PreparedCmafTrack,
     cancel: CancellationToken,

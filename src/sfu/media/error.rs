@@ -7,6 +7,7 @@ pub type MediaResult<T> = Result<T, MediaError>;
 pub(crate) enum MediaError {
     #[display(fmt = "WebRTC error: {}", _0)]
     WebRTC(WebRTCError),
+    #[allow(dead_code)]
     #[display(fmt = "RTCCreate error: {}", _0)]
     RTCCreate(anyhow::Error),
     #[display(fmt = "SDP State error: {}", _0)]

@@ -58,7 +58,7 @@ impl Handler<PeerStartReceiving> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerStartReceiving, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("starting (Receiver) for peer actor peer_id={}", self.id);
+        log::info!("Starting (Receiver) for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let lobby_addr = self.parent_addr.clone();

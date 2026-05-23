@@ -5,6 +5,7 @@ pub mod message;
 mod error;
 mod port_allocator;
 mod cmaf;
+mod rtp_forwarder;
 
 #[derive(Clone)]
 pub struct RelayMediaStream {

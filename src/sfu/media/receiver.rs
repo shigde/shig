@@ -3,6 +3,7 @@ use crate::sfu::media::connector::{receiver_index, Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::sdp::parse_offered_track_info;
+use crate::sfu::media::track_info::InboundTrackInfo;
 use crate::sfu::media::{AddMedia, Media, RemoveMedia};
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
@@ -13,10 +14,9 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtcp::payload_feedbacks::full_intra_request::{FirEntry, FullIntraRequest};
+use webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
-use crate::sfu::media::track_info::InboundTrackInfo;
 
 #[derive(Clone)]
 pub struct Receiver {
@@ -72,12 +72,13 @@ impl Receiver {
         let pc = Arc::clone(&self.pc);
 
         // 1) parse offer
-        let offered_track_infos = parse_offered_track_info(sdp_offer).map_err(MediaError::SdpParse)?;
+        let offered_track_infos =
+            parse_offered_track_info(sdp_offer).map_err(MediaError::SdpParse)?;
 
         // 2) Create Transceiver (BEFORE setRemoteDescription)
-        self.add_answerer_transceivers(&pc, &offered_track_infos)
-            .await
-            .map_err(MediaError::RTCCreate)?;
+        // self.add_answerer_transceivers(&pc, &offered_track_infos)
+        //     .await
+        //     .map_err(MediaError::RTCCreate)?;
 
         self.offered_track_infos = offered_track_infos;
 
@@ -96,9 +97,18 @@ impl Receiver {
                     let peer_stopped = peer_stopped.clone();
                     let offered_track_infos = offered_track_infos.clone();
 
+                    log::info!(
+                        "Received TRACK kind={:?} ssrc={} pt={} codec={} fmtp={}",
+                        track.kind(),
+                        track.ssrc(),
+                        track.payload_type(),
+                        track.codec().capability.mime_type,
+                        track.codec().capability.sdp_fmtp_line,
+                    );
+
                     Box::pin(async move {
                         let Ok(index) = receiver_index(Arc::clone(&pc), &receiver).await else {
-                            log::error!("failed to get receiver index, peer_id={}",peer_id);
+                            log::warn!("on track failed to find receiver, peer_id={}", peer_id);
                             return;
                         };
                         let mid = offered_track_infos[index].mid.clone();
@@ -114,7 +124,7 @@ impl Receiver {
                         );
 
                         let cancel = CancellationToken::new();
-                        let (rtp_tx, _dummy_rx) = broadcast::channel(32);
+                        let (rtp_tx, _dummy_rx) = broadcast::channel(2048);
 
                         let media = Media::new(
                             peer_id.clone(),
@@ -128,6 +138,7 @@ impl Receiver {
                             is_muted,
                             purpose,
                             info,
+                            track.payload_type().clone()
                         );
 
                         let media_id = media.id.clone();
@@ -135,27 +146,28 @@ impl Receiver {
 
                         let media_ssrc = track.ssrc();
                         let kind = track.kind();
-                        let mut seqno_fir = 0u8;
+                        // let mut seqno_fir = 0u8;
                         let pc_xx = Arc::clone(&pc);
 
                         // Send periodic PLI / FIR
                         tokio::spawn(async move {
-                            if kind == RTPCodecType::Video {
-                                while pc_xx
-                                    .write_rtcp(&[Box::new(FullIntraRequest {
+                            if kind != RTPCodecType::Video {
+                                return;
+                            }
+
+                            loop {
+                                if let Err(err) = pc_xx
+                                    .write_rtcp(&[Box::new(PictureLossIndication {
                                         sender_ssrc: 0,
                                         media_ssrc,
-                                        fir: vec![FirEntry {
-                                            ssrc: media_ssrc,
-                                            sequence_number: seqno_fir,
-                                        }],
                                     })])
                                     .await
-                                    .is_ok()
                                 {
-                                    seqno_fir = seqno_fir.wrapping_add(1);
-                                    tokio::time::sleep(Duration::from_secs(3)).await;
+                                    log::warn!("send PLI failed: {err}");
+                                    break;
                                 }
+
+                                tokio::time::sleep(Duration::from_millis(300)).await;
                             }
                         });
 
@@ -208,14 +220,6 @@ impl Receiver {
                 },
             ));
         }
-
-        // Add Transceiver for Reception
-        // We expect the client to send video
-        pc.add_transceiver_from_kind(RTPCodecType::Video, None)
-            .await?;
-        // We expect the client to send audio
-        pc.add_transceiver_from_kind(RTPCodecType::Audio, None)
-            .await?;
 
         let answer = self.create_answer(sdp_offer).await?;
         log::info!(

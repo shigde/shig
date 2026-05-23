@@ -1,29 +1,50 @@
+use std::os::unix::fs::FileTypeExt;
 use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use crate::worker::error::{WorkerError, WorkerResult};
 use crate::worker::process::OUTPUT_BUFFER_SIZE;
 
+
+pub fn cleanup_fifo(path: &str) -> std::io::Result<()> {
+    let p = std::path::Path::new(path);
+
+    if p.exists() {
+        std::fs::remove_file(p)?;
+    }
+
+    Ok(())
+}
+
 pub fn create_fifo(path: &str) -> std::io::Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
+    use std::fs;
 
-    let c_path = CString::new(std::path::Path::new(path).as_os_str().as_bytes())?;
+    let p = std::path::Path::new(path);
 
-    let result = unsafe {
-        libc::mkfifo(c_path.as_ptr(), 0o600)
-    };
+    // Wenn existiert → prüfen & ggf. löschen
+    if p.exists() {
+        let metadata = fs::metadata(p)?;
+
+        if metadata.file_type().is_fifo() {
+            fs::remove_file(p)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("Path exists but is not a FIFO: {}", path),
+            ));
+        }
+    }
+
+    let c_path = CString::new(p.as_os_str().as_bytes())?;
+
+    let result = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
 
     if result == 0 {
         Ok(())
     } else {
-        let err = std::io::Error::last_os_error();
-
-        if err.kind() == std::io::ErrorKind::AlreadyExists {
-            Ok(())
-        } else {
-            Err(err)
-        }
+        Err(std::io::Error::last_os_error())
     }
 }
 

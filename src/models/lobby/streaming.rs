@@ -54,7 +54,7 @@ pub(crate) async fn publish(
 
     let mut auth_token = None;
     if publishing {
-        let token = internal_publish_token(&stream_uuid);
+        let token = internal_publish_token(&channel_uuid, &stream_uuid);
         auth_token = Some(token);
     }
 
@@ -76,9 +76,9 @@ pub(crate) async fn publish(
 
     Ok(())
 }
-fn internal_publish_token(stream_id: &str) -> AuthToken {
+fn internal_publish_token(channel_id: &str, stream_id: &str) -> AuthToken {
     AuthToken {
-        root: Path::new("live").to_owned(),
+        root: Path::new(&format!("live/{}", channel_id)).to_owned(),
 
         publish: PathPrefixes::from(vec![Path::new(stream_id).to_owned()]),
 

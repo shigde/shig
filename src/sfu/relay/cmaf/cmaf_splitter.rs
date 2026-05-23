@@ -39,23 +39,25 @@ impl CmafSplitter {
                     b"moov" => {
                         self.seen_moov = true;
                         self.init.extend_from_slice(&mp4_box);
-                    }
 
-                    b"moof" => {
-                        if !self.seen_ftyp || !self.seen_moov {
-                            return Err(RelayError::CmafSplit(format!(
-                                "CMAF init segment incomplete before first moof: seen_ftyp={}, seen_moov={}",
-                                self.seen_ftyp,
-                                self.seen_moov,
-                            )));
+                        if !self.seen_ftyp {
+                            return Err(RelayError::CmafSplit(
+                                "moov received before ftyp".to_string(),
+                            ));
                         }
 
                         self.init_done = true;
 
                         let init = self.init.split().freeze();
                         out.push(CmafItem::Init(init));
+                    }
 
-                        self.fragment.extend_from_slice(&mp4_box);
+                    b"moof" => {
+                        return Err(RelayError::CmafSplit(format!(
+                            "CMAF init segment incomplete before first moof: seen_ftyp={}, seen_moov={}",
+                            self.seen_ftyp,
+                            self.seen_moov,
+                        )));
                     }
 
                     _ => {
@@ -85,6 +87,8 @@ impl CmafSplitter {
     // [ size = 1 ][ type ][ size64 (8 bytes) ][ ... ]
     //
     // Example result: Some((1024, *b"moof"))
+    // 28 bytes  = ftyp
+    // 736 bytes = moov
     fn peek_box(&self) -> RelayResult<Option<(usize, [u8; 4])>> {
         // check header length, must be at least 8 bytes
         if self.buffer.len() < 8 {

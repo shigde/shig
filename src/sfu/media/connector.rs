@@ -160,6 +160,7 @@ pub trait Connector {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn add_answerer_transceivers(
         &mut self,
         pc: &Arc<RTCPeerConnection>,
@@ -179,6 +180,7 @@ pub async fn receiver_index(
     receiver: &Arc<RTCRtpReceiver>,
 ) -> anyhow::Result<usize> {
     for (i, t) in pc.get_transceivers().await.iter().enumerate() {
+        log::warn!(" ### receiver_index: {:?} {:?}", i, t);
         let r = t.receiver().await;
         if Arc::ptr_eq(&r, receiver) {
             return Ok(i);

@@ -3,8 +3,8 @@ use crate::worker::process::Process;
 use crate::worker::state::WorkerState;
 use crate::worker::WorkerId;
 use actix::Message;
-use bytes::Bytes;
-use tokio::sync::{mpsc, oneshot};
+
+use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub struct WorkerHandle {

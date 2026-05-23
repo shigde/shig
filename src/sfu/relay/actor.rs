@@ -1,3 +1,5 @@
+use crate::relay::state::RelayState;
+use crate::sfu::relay::cmaf::publisher::HangAvPublisher;
 use crate::sfu::relay::error::{RelayError, RelayResult};
 use crate::sfu::relay::message::{RelayFailed, StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::relay::port_allocator::PortAllocator;
@@ -6,16 +8,11 @@ use crate::worker::message::StartWorker;
 use crate::worker::process::{Process, OUTPUT_BUFFER_SIZE};
 use actix::{Actor, ActorContext, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture};
 use bytes::Bytes;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::net::UdpSocket;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use webrtc::rtp::packet::Packet;
-use webrtc::util::Marshal;
-use crate::relay::state::RelayState;
-use crate::sfu::relay::cmaf::publisher::HangAvPublisher;
+
+use crate::sfu::relay::rtp_forwarder::{forward_rtp_sender_to_udp, RtpForwarderKind};
 
 pub struct RelayActor {
     stream_uuid: String,
@@ -30,7 +27,11 @@ impl Actor for RelayActor {
 }
 
 impl RelayActor {
-    pub fn new(relay_state: RelayState,worker_manager: Addr<WorkerManager>, stream_uuid: String) -> Self {
+    pub fn new(
+        relay_state: RelayState,
+        worker_manager: Addr<WorkerManager>,
+        stream_uuid: String,
+    ) -> Self {
         Self {
             relay_state,
             stream_uuid,
@@ -66,8 +67,6 @@ impl Handler<StartRelayMediaStream> for RelayActor {
             return Box::pin(async { Err(RelayError::PortAllocationError()) }.into_actor(self));
         };
 
-        let sdp = Process::build_ffmpeg_sdp(audio_port, video_port);
-
         let worker_manager = self.worker_manager.clone();
 
         let Some(audio_track) = msg.media_stream.audio else {
@@ -85,11 +84,24 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                 async { Err(RelayError::NoInputTrack("audio".to_string())) }.into_actor(self),
             );
         };
+        let sdp = Process::build_ffmpeg_sdp(
+            video_port,
+            audio_port,
+            video_track.payload_type,
+            audio_track.payload_type,
+            video_track.capability.sdp_fmtp_line,
+        );
 
+        // Wait points for ffmpeg worker to start and forwarder to start a pipeline
+        // 1. av publisher
+        // 2. ffmpeg worker
+        // 3. forwarder start sending
+        let (publisher_ready_tx, publisher_ready_rx) = watch::channel(false);
+        let (ffmpeg_ready_tx, ffmpeg_ready_rx) = watch::channel(false);
         let (video_tx, video_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
         let (audio_tx, audio_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
 
-        let process =  match Process::build(&sdp, self.stream_uuid.as_str(), video_tx, audio_tx) {
+        let process = match Process::build(&sdp, self.stream_uuid.as_str(), video_tx, audio_tx, publisher_ready_rx, ffmpeg_ready_tx) {
             Ok(process) => process,
             Err(err) => {
                 let err_str = format!("{:?}", err);
@@ -105,24 +117,32 @@ impl Handler<StartRelayMediaStream> for RelayActor {
 
         let Some(origin) = self.relay_state.cluster.publisher(&token) else {
             return Box::pin(
-                async { Err(RelayError::Unauthorized("Publisher not valid".to_string())) }.into_actor(self)
+                async { Err(RelayError::Unauthorized("Publisher not valid".to_string())) }
+                    .into_actor(self),
             );
         };
 
-        let publisher = HangAvPublisher::new(
-            origin,
-            self.stream_uuid.clone(),
-            video_rx,
-            audio_rx,
-        );
+        let publisher = HangAvPublisher::new(origin, self.stream_uuid.clone(), video_rx, audio_rx, publisher_ready_tx);
 
         Box::pin(
             async move {
+
+                let actor_addr_relay = actor_addr.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = publisher
+                        .run(publisher_cancel.clone())
+                        .await {
+                        log::error!("Hang AV publisher failed: {:?}", err);
+                        publisher_cancel.cancel();
+                        actor_addr_relay.do_send(RelayFailed {
+                            source: "Publisher",
+                            error: format!("{:?}", err),
+                        });
+                    }
+                });
+
                 let worker_id = worker_manager
-                    .send(StartWorker {
-                        id: None,
-                        process,
-                    })
+                    .send(StartWorker { id: None, process })
                     .await
                     .map_err(|e| RelayError::WorkerMailboxError(e.to_string()))?
                     .map_err(|e| RelayError::WorkerError(e))?;
@@ -139,11 +159,14 @@ impl Handler<StartRelayMediaStream> for RelayActor {
 
                 let cancel_audio = cancel_token.clone();
                 let actor_addr_audio = actor_addr.clone();
+                let ffmpeg_ready_audio_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
                     if let Err(err) = forward_rtp_sender_to_udp(
                         audio_track.rtp_tx.subscribe(),
                         audio_addr,
                         cancel_audio.clone(),
+                        ffmpeg_ready_audio_rx,
+                        RtpForwarderKind::Audio,
                     )
                     .await
                     {
@@ -158,11 +181,14 @@ impl Handler<StartRelayMediaStream> for RelayActor {
 
                 let cancel_video = cancel_token.clone();
                 let actor_addr_video = actor_addr.clone();
+                let ffmpeg_ready_video_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = forward_rtp_sender_to_udp(
+                    if let Err(err) = forward_rtp_sender_to_udp (
                         video_track.rtp_tx.subscribe(),
                         video_addr,
                         cancel_video.clone(),
+                        ffmpeg_ready_video_rx,
+                        RtpForwarderKind::Video,
                     )
                     .await
                     {
@@ -170,18 +196,6 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                         cancel_video.cancel();
                         actor_addr_video.do_send(RelayFailed {
                             source: "VideoForwardRtpSenderToUdp",
-                            error: format!("{:?}", err),
-                        });
-                    }
-                });
-
-                // run hang av publisher
-                tokio::spawn(async move {
-                    if let Err(err) = publisher.run(publisher_cancel.clone()).await {
-                        log::error!("Hang AV publisher failed: {:?}", err);
-                        publisher_cancel.cancel();
-                        actor_addr.do_send(RelayFailed {
-                            source: "Publisher",
                             error: format!("{:?}", err),
                         });
                     }
@@ -213,43 +227,12 @@ impl Handler<RelayFailed> for RelayActor {
     type Result = ();
 
     fn handle(&mut self, msg: RelayFailed, ctx: &mut Self::Context) {
-        log::error!("relay failed, stopping relay actor, source: {}, error: {}",msg.source, msg.error);
+        log::error!(
+            "relay failed, stopping relay actor, source: {}, error: {}",
+            msg.source,
+            msg.error
+        );
         ctx.address().do_send(StopRelayMediaStream {});
     }
 }
 
-pub async fn forward_rtp_sender_to_udp(
-    mut rx: broadcast::Receiver<Arc<Packet>>,
-    target: SocketAddr,
-    cancel: CancellationToken,
-) -> anyhow::Result<()> {
-    let socket = UdpSocket::bind("127.0.0.1:0").await?;
-
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                log::info!("RTP forwarder cancelled: {}", target);
-                return Ok(());
-            }
-
-            result = rx.recv() => {
-                match result {
-                    Ok(packet) => {
-                        let raw = packet.marshal()?;
-                        socket.send_to(&raw, target).await?;
-                    }
-
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        log::warn!("RTP forwarder lagged, skipped {} packets for {}", skipped, target);
-                        continue;
-                    }
-
-                    Err(broadcast::error::RecvError::Closed) => {
-                        log::info!("RTP sender closed for {}", target);
-                        return Ok(());
-                    }
-                }
-            }
-        }
-    }
-}

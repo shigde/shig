@@ -26,6 +26,7 @@ mod tests {
             purpose: Default::default(),
             muted: false,
             info: "info".into(),
+            payload_type: Default::default(),
         }
     }
 

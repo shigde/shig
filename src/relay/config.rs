@@ -36,7 +36,6 @@ pub struct RelayConfig {
     #[command(flatten)]
     #[serde(default)]
     pub web: WebConfig,
-
     /// If provided, load the configuration from this file.
     #[serde(default)]
     pub file: Option<String>,
@@ -44,6 +43,5 @@ pub struct RelayConfig {
     /// Iroh specific configuration, used for both a client and server.
     #[command(flatten)]
     #[serde(default)]
-    #[cfg(feature = "iroh")]
     pub iroh: moq_native::IrohEndpointConfig,
 }

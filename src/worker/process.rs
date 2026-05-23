@@ -5,7 +5,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::select;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 pub const OUTPUT_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -19,20 +19,32 @@ pub struct Process {
     audio_fifo: String,
     video_tx: mpsc::Sender<Bytes>,
     audio_tx: mpsc::Sender<Bytes>,
+
+    ffmpeg_ready_tx: watch::Sender<bool>,
+    #[allow(dead_code)]
+    publisher_ready_rx: watch::Receiver<bool>,
 }
 
 impl Process {
-    pub fn build_ffmpeg_sdp(audio_port: u16, video_port: u16) -> String {
+    pub fn build_ffmpeg_sdp(
+        video_port: u16,
+        audio_port: u16,
+        video_pt: u8,
+        audio_pt: u8,
+        video_sdp_fmtp_line: String,
+    ) -> String {
         format!(
             "v=0\r\n\
-         o=- 0 0 IN IP4 127.0.0.1\r\n\
-         s=Shig Stream\r\n\
-         c=IN IP4 127.0.0.1\r\n\
-         t=0 0\r\n\
-         m=audio {audio_port} RTP/AVP 111\r\n\
-         a=rtpmap:111 opus/48000/2\r\n\
-         m=video {video_port} RTP/AVP 96\r\n\
-         a=rtpmap:96 VP8/90000\r\n"
+o=- 0 0 IN IP4 127.0.0.1\r\n\
+s=Shig Stream\r\n\
+c=IN IP4 127.0.0.1\r\n\
+t=0 0\r\n\
+m=audio {audio_port} RTP/AVP {audio_pt}\r\n\
+a=rtpmap:{audio_pt} opus/48000/2\r\n\
+a=fmtp:{audio_pt} minptime=10;useinbandfec=1\r\n\
+m=video {video_port} RTP/AVP {video_pt}\r\n\
+a=rtpmap:{video_pt} H264/90000\r\n\
+a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
         )
     }
 
@@ -41,9 +53,16 @@ impl Process {
         stream_id: &str,
         video_tx: mpsc::Sender<Bytes>,
         audio_tx: mpsc::Sender<Bytes>,
+        publisher_ready_rx: watch::Receiver<bool>,
+        ffmpeg_ready_tx: watch::Sender<bool>,
     ) -> WorkerResult<Process> {
         let video_fifo = format!("/tmp/relay-{stream_id}-video.fmp4");
         let audio_fifo = format!("/tmp/relay-{stream_id}-audio.fmp4");
+
+        crate::worker::filo::cleanup_fifo(&video_fifo)
+            .map_err(|e| WorkerError::Filo(e.to_string()))?;
+        crate::worker::filo::cleanup_fifo(&audio_fifo)
+            .map_err(|e| WorkerError::Filo(e.to_string()))?;
 
         crate::worker::filo::create_fifo(&video_fifo)
             .map_err(|e| WorkerError::Filo(e.to_string()))?;
@@ -55,21 +74,31 @@ impl Process {
         Ok(Process {
             program: "ffmpeg".into(),
             args: vec![
+                "-y".into(),
                 "-hide_banner".into(),
                 "-loglevel".into(),
-                "warning".into(),
+                "info".into(),
                 // --
                 "-protocol_whitelist".into(),
                 "file,pipe,udp,rtp".into(),
                 // --
-                "-fflags".into(),
-                "nobuffer".into(),
+                // no buffer for low latency
+                //"-fflags".into(),
+                //"nobuffer".into(),
                 "-flags".into(),
                 "low_delay".into(),
+                // timestamp clock settings
+                "-fflags".into(),
+                "+genpts".into(),
+                "-use_wallclock_as_timestamps".into(),
+                "1".into(),
+                //--
+                // probe size set for H264 RTP
                 "-analyzeduration".into(),
-                "0".into(),
+                "10000000".into(),
                 "-probesize".into(),
-                "32".into(),
+                "10000000".into(),
+                // sdp Input
                 "-f".into(),
                 "sdp".into(),
                 "-i".into(),
@@ -82,10 +111,12 @@ impl Process {
                 // Video is already H.264 from WebRTC/RTP.
                 "-c:v".into(),
                 "copy".into(),
+                "-avoid_negative_ts".into(), // timestamp settings
+                "make_zero".into(),
                 "-f".into(),
                 "mp4".into(),
                 "-movflags".into(),
-                "frag_keyframe+empty_moov+default_base_moof+separate_moof".into(),
+                "frag_keyframe+empty_moov+default_base_moof+separate_moof+cmaf".into(),
                 video_fifo_arg.into(),
                 // ---
                 // AUDIO OUTPUT
@@ -103,10 +134,15 @@ impl Process {
                 "128k".into(),
                 // --
                 // Low-latency fragmented MP4 / CMAF-like output.
+                "-avoid_negative_ts".into(), // timestamp settings
+                "make_zero".into(),
+                // force audio pkg on every frame
+                "-frag_duration".into(),
+                "100000".into(),
                 "-f".into(),
                 "mp4".into(),
                 "-movflags".into(),
-                "frag_keyframe+empty_moov+default_base_moof+separate_moof".into(),
+                "frag_keyframe+empty_moov+default_base_moof+separate_moof+cmaf".into(),
                 audio_fifo_arg.into(),
             ],
             stdin: Some(sdp.into()),
@@ -114,6 +150,8 @@ impl Process {
             audio_tx,
             video_fifo: video_fifo.clone(),
             audio_fifo: audio_fifo.clone(),
+            ffmpeg_ready_tx,
+            publisher_ready_rx,
         })
     }
 
@@ -162,6 +200,32 @@ impl Process {
             self.audio_tx.clone(),
         ));
 
+        // wait for publisher ready
+        // while !*self.publisher_ready_rx.borrow() {
+        //     select! {
+        //         _ = &mut shutdown_rx => {
+        //             log::info!("shutdown while waiting for publisher ready");
+        //             return Ok("stopped".to_string());
+        //         }
+        //
+        //         changed = self.publisher_ready_rx.changed() => {
+        //             if changed.is_err() {
+        //                 return Err(WorkerError::ProcessFailed(
+        //                     "publisher ready channel closed".to_string()
+        //                 ));
+        //             }
+        //         }
+        //     }
+        // }
+
+        // send ready signal
+        let _ = self.ffmpeg_ready_tx.send(true).map_err(|e| {
+            WorkerError::ProcessFailed(format!("send ffmpeg ready: {}", e.to_string()))
+        })?;
+
+        log::info!("ffmpeg Process Started:");
+
+        // start ffmpeg
         loop {
             select! {
                 biased;

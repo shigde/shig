@@ -20,6 +20,7 @@ pub enum RelayError {
     InvalidAddress(AddrParseError),
     #[display(fmt = "No input track {}", _0)]
     NoInputTrack(String),
+    #[allow(dead_code)]
     #[display(fmt = "Publishing error {}", _0)]
     PublisherError(String),
     #[display(fmt = "Start ffmpeg process failed error {}", _0)]
@@ -34,5 +35,7 @@ pub enum RelayError {
     CmafWrite(String),
     #[display(fmt = "Cmaf publisher error: {}", _0)]
     CmafPublisher(String),
+    #[display(fmt = "Rtp forwarder error: {}", _0)]
+    RtpForwarder(String),
 }
 

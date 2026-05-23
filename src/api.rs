@@ -101,5 +101,6 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(reset_password)
                     .service(update_password),
             ),
+
     );
 }

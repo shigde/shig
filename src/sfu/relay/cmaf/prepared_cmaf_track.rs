@@ -5,6 +5,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub struct PreparedCmafTrack {
+    #[allow(dead_code)]
+    pub(crate) name: String,
     pub(crate) init: Bytes,
     pub(crate) pending: Vec<Bytes>,
     pub(crate) splitter: CmafSplitter,
@@ -13,6 +15,7 @@ pub struct PreparedCmafTrack {
 
 impl PreparedCmafTrack {
     pub async fn build(
+        name: String,
         mut rx: mpsc::Receiver<Bytes>,
         cancel: CancellationToken,
     ) -> RelayResult<PreparedCmafTrack> {
@@ -42,7 +45,9 @@ impl PreparedCmafTrack {
                     }
 
                     if let Some(init) = init {
+                        log::info!("CMAF init segment received for track {}", name);
                         return Ok(PreparedCmafTrack {
+                            name,
                             init,
                             pending,
                             splitter,

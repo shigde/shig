@@ -46,7 +46,7 @@ pub async fn participant_leave(
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }
 
-#[post("/{channel_uuid}/stream/{stream_uuid}/lobby/streaming/start")]
+#[post("/{channel_uuid}/stream/{stream_uuid}/lobby/live")]
 pub async fn start_streaming(
     pool: web::Data<DbPool>,
     sfu_addr: web::Data<actix::Addr<crate::sfu::Sfu>>,
@@ -56,10 +56,11 @@ pub async fn start_streaming(
     let (channel_uuid, stream_uuid) = path.into_inner();
     let user = session.principal.clone();
     lobby::streaming::publish(&pool, channel_uuid, stream_uuid, user, sfu_addr, true).await?;
+
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }
 
-#[post("/{channel_uuid}/stream/{stream_uuid}/lobby/streaming/stop")]
+#[delete("/{channel_uuid}/stream/{stream_uuid}/lobby/live")]
 pub async fn stop_streaming(
     pool: web::Data<DbPool>,
     sfu_addr: web::Data<actix::Addr<crate::sfu::Sfu>>,
