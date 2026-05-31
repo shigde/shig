@@ -1,21 +1,38 @@
-use crate::worker::error::WorkerError;
+use crate::worker::error::{WorkerError, WorkerResult};
 use crate::worker::process::Process;
 use crate::worker::state::WorkerState;
 use crate::worker::WorkerId;
 use actix::Message;
-
-use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
 pub struct WorkerHandle {
     pub state: WorkerState,
-    pub shutdown_tx: Option<oneshot::Sender<()>>,
+    pub shutdown: Option<CancellationToken>,
     pub process: Process,
 }
 
 impl WorkerHandle {
-    pub(crate) fn start_kill(&self) -> () {
-        todo!()
+    pub fn start_shutdown(&mut self, id: WorkerId) -> WorkerResult<()> {
+        log::info!("start shutdown worker, worker_id={}", id.0);
+        let stream_id = self.process.stream_id.clone();
+        if let Some(token) = self.shutdown.take() {
+            log::info!(
+                "shutting down worker, worker_id={}, stream_id={}",
+                id.0,
+                stream_id
+            );
+            let _ = token.cancel();
+            self.shutdown = None;
+        } else {
+            log::warn!(
+                "worker already stopped, worker_id={}, stream_id={}",
+                id.0,
+                stream_id
+            );
+            return Err(WorkerError::NotFound);
+        }
+        Ok(())
     }
 }
 

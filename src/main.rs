@@ -6,14 +6,15 @@ mod federation;
 mod files;
 mod middleware;
 mod models;
+mod relay;
 mod server;
 mod sfu;
 mod util;
-mod relay;
 mod worker;
 
 use crate::db::fixtures::insert_fixtures;
 use crate::db::{build_pool, run_migrations};
+use crate::relay::{new_relay_server, start_moq_udp_only};
 use crate::sfu::{Sfu, Shutdown};
 use actix::Actor;
 use clap::ArgAction;
@@ -23,7 +24,6 @@ use std::fs;
 use std::process::exit;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use crate::relay::{new_relay_server, start_moq_udp_only};
 
 #[derive(Parser)]
 #[command(name = "Shig Server")]
@@ -81,14 +81,20 @@ fn main() {
         }
 
         // relay server
-        let relay_server = new_relay_server(server_cfg.relay.clone()).await.unwrap_or_else(|e| {
-            log::error!("failed to init relay server: {:?}", e);
-            exit(1);
-        });
+        let relay_server = new_relay_server(server_cfg.relay.clone())
+            .await
+            .unwrap_or_else(|e| {
+                log::error!("failed to init relay server: {:?}", e);
+                exit(1);
+            });
         let relay_state = relay_server.state.clone();
 
         // Start the SFU server
-        let sfu = Sfu::new(server_cfg.sfu.clone(), pool.clone(), relay_server.state.clone());
+        let sfu = Sfu::new(
+            server_cfg.sfu.clone(),
+            pool.clone(),
+            relay_server.state.clone(),
+        );
         let sfu_addr = sfu.start();
 
         // Shutdown-Signal
@@ -99,16 +105,18 @@ fn main() {
             log::info!("Shutdown signal received!");
 
             // stop sfu
-            sfu_addr_cp.send(Shutdown {}).await.expect("Failed shut down sfu");
+            sfu_addr_cp
+                .send(Shutdown {})
+                .await
+                .expect("Failed shut down sfu");
 
             // stop relay
             shutdown_token.cancel();
 
-            // Currently running requests are allowed to complete
+            // Currently, running requests are allowed to complete
             // Then stops the entire Actix system
             actix::System::current().stop();
         };
-        
 
         let relay_shutdown = shutdown_token.clone();
         // Start UDP/MoQ-Server
@@ -119,25 +127,31 @@ fn main() {
         };
 
         // HTTP/WS-Server
-        log::info!("starting actix web server on tcp/8080");
-        let web_server = match server::start(server_cfg.clone(), sfu_addr, pool.clone(), relay_state) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("Failed to start server: {}", e);
-                exit(1);
-            }
-        };
+        log::info!("starting actix web server on");
+        let web_server =
+            match server::start(server_cfg.clone(), sfu_addr, pool.clone(), relay_state) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Failed to start server: {}", e);
+                    exit(1);
+                }
+            };
 
-        tokio::select! {
-            _ = web_server => {
+        let ((), (), ()) = tokio::join!(
+            async {
+                let  _ = web_server.await;
                 log::info!("Actix web server was closed");
             },
-            _ = moq_task => {
-                log::info!("MoQ UDP server was closed");
+            async {
+                moq_task.await;
+                log::info!("MoQ udp server was closed");
             },
-            _ = shutdown => {
-                log::info!("Shutdown done!");
+            async {
+                shutdown.await;
+                log::info!("shutdown signal received");
             }
-        }
+        );
+
+        log::info!("Shutdown done!");
     });
 }

@@ -23,11 +23,6 @@ pub async fn write_cmaf_track(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
-                log::info!("{} CMAF track cancelled", label);
-                return Ok(());
-            }
-
             maybe_chunk = prepared.rx.recv() => {
                 let Some(chunk) = maybe_chunk else {
                     log::info!("{} CMAF track finished", label);

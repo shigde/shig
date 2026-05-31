@@ -5,12 +5,14 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::select;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
 
 pub const OUTPUT_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Process {
+    pub stream_id: String,
     pub program: String,
     pub args: Vec<String>,
     pub stdin: Option<String>,
@@ -23,6 +25,7 @@ pub struct Process {
     ffmpeg_ready_tx: watch::Sender<bool>,
     #[allow(dead_code)]
     publisher_ready_rx: watch::Receiver<bool>,
+    stopped: CancellationToken,
 }
 
 impl Process {
@@ -55,6 +58,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
         audio_tx: mpsc::Sender<Bytes>,
         publisher_ready_rx: watch::Receiver<bool>,
         ffmpeg_ready_tx: watch::Sender<bool>,
+        stopped: CancellationToken,
     ) -> WorkerResult<Process> {
         let video_fifo = format!("/tmp/relay-{stream_id}-video.fmp4");
         let audio_fifo = format!("/tmp/relay-{stream_id}-audio.fmp4");
@@ -72,6 +76,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
         let video_fifo_arg = video_fifo.clone();
         let audio_fifo_arg = audio_fifo.clone();
         Ok(Process {
+            stream_id: stream_id.to_string(),
             program: "ffmpeg".into(),
             args: vec![
                 "-y".into(),
@@ -152,14 +157,16 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             audio_fifo: audio_fifo.clone(),
             ffmpeg_ready_tx,
             publisher_ready_rx,
+            stopped,
         })
     }
 
     pub async fn run(
         &mut self,
-        mut shutdown_rx: oneshot::Receiver<()>,
+        cancel_token: CancellationToken,
     ) -> Result<String, WorkerError> {
         let mut cmd = Command::new(&self.program);
+        cmd.kill_on_drop(true);
 
         cmd.args(&self.args)
             .stdout(Stdio::null())
@@ -223,15 +230,18 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             WorkerError::ProcessFailed(format!("send ffmpeg ready: {}", e.to_string()))
         })?;
 
-        log::info!("ffmpeg Process Started:");
+        let stream_id = self.stream_id.clone();
+        log::info!("ffmpeg Process Started: stream_id={}", stream_id);
 
         // start ffmpeg
+        let canceled = cancel_token.clone();
+        let stopped = self.stopped.clone();
         loop {
             select! {
                 biased;
 
-                _ = &mut shutdown_rx => {
-                    log::info!("ffmpeg AV shutdown requested");
+                _ = canceled.cancelled() => {
+                    log::info!("ffmpeg AV shutdown requested: stream_id={}", stream_id);
 
                     let _ = child.kill().await;
                     let _ = child.wait().await;
@@ -239,6 +249,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                     video_reader.abort();
                     audio_reader.abort();
 
+                    stopped.cancel();
                     return Ok("stopped".to_string());
                 }
 
@@ -247,6 +258,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
 
                     video_reader.abort();
                     audio_reader.abort();
+                    stopped.cancel();
 
                     return if status.success() {
                         Ok(format!("exit code {}", status.code().unwrap_or(0)))

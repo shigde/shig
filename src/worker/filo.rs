@@ -1,10 +1,9 @@
-use std::os::unix::fs::FileTypeExt;
-use bytes::Bytes;
-use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc;
 use crate::worker::error::{WorkerError, WorkerResult};
 use crate::worker::process::OUTPUT_BUFFER_SIZE;
-
+use bytes::Bytes;
+use std::os::unix::fs::FileTypeExt;
+use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc;
 
 pub fn cleanup_fifo(path: &str) -> std::io::Result<()> {
     let p = std::path::Path::new(path);
@@ -18,12 +17,11 @@ pub fn cleanup_fifo(path: &str) -> std::io::Result<()> {
 
 pub fn create_fifo(path: &str) -> std::io::Result<()> {
     use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
     use std::fs;
+    use std::os::unix::ffi::OsStrExt;
 
     let p = std::path::Path::new(path);
 
-    // Wenn existiert → prüfen & ggf. löschen
     if p.exists() {
         let metadata = fs::metadata(p)?;
 
@@ -62,25 +60,29 @@ pub async fn read_fifo_to_channel(
     let mut buf = vec![0u8; OUTPUT_BUFFER_SIZE];
 
     loop {
-        match file.read(&mut buf).await {
-            Ok(0) => {
-                log::info!("{label} fifo closed");
-                return Ok(());
-            }
+        tokio::select! {
+            result = file.read(&mut buf) => {
+                match result {
+                    Ok(0) => {
+                        log::info!("{label} fifo closed: path={}", path);
+                        return Ok(());
+                    }
 
-            Ok(n) => {
-                let chunk = Bytes::copy_from_slice(&buf[..n]);
+                    Ok(n) => {
+                        let chunk = Bytes::copy_from_slice(&buf[..n]);
 
-                if tx.send(chunk).await.is_err() {
-                    log::info!("{label} receiver dropped");
-                    return Ok(());
+                        if tx.send(chunk).await.is_err() {
+                            log::info!("{label} receiver dropped: path={}", path);
+                            return Ok(());
+                        }
+                    }
+
+                    Err(err) => {
+                        return Err(WorkerError::Filo(format!(
+                            "read {label} fifo failed: {err}"
+                        )));
+                    }
                 }
-            }
-
-            Err(err) => {
-                return Err(WorkerError::Filo(format!(
-                    "read {label} fifo failed: {err}"
-                )));
             }
         }
     }

@@ -1,25 +1,26 @@
 use crate::relay::state::RelayState;
+use crate::sfu::relay::actor_supervisor::RelayActorSupervisor;
 use crate::sfu::relay::cmaf::publisher::HangAvPublisher;
 use crate::sfu::relay::error::{RelayError, RelayResult};
 use crate::sfu::relay::message::{RelayFailed, StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::relay::port_allocator::PortAllocator;
+use crate::sfu::relay::rtp_forwarder::{forward_rtp_sender_to_udp, RtpForwarderKind};
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::StartWorker;
 use crate::worker::process::{Process, OUTPUT_BUFFER_SIZE};
-use actix::{Actor, ActorContext, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture};
+use actix::{
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture,
+};
 use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
-
-use crate::sfu::relay::rtp_forwarder::{forward_rtp_sender_to_udp, RtpForwarderKind};
 
 pub struct RelayActor {
     stream_uuid: String,
     relay_state: RelayState,
     worker_manager: Addr<WorkerManager>,
     port_allocator: PortAllocator,
-    cancel_token: Option<CancellationToken>,
+    supervisor: Option<RelayActorSupervisor>,
 }
 
 impl Actor for RelayActor {
@@ -37,7 +38,7 @@ impl RelayActor {
             stream_uuid,
             worker_manager,
             port_allocator: PortAllocator::new(10000, 20000),
-            cancel_token: None,
+            supervisor: None,
         }
     }
 }
@@ -46,16 +47,17 @@ impl Handler<StartRelayMediaStream> for RelayActor {
     type Result = ResponseActFuture<Self, RelayResult<()>>;
 
     fn handle(&mut self, msg: StartRelayMediaStream, ctx: &mut Self::Context) -> Self::Result {
-        if self.cancel_token.is_some() {
+        if self.supervisor.is_some() {
             return Box::pin(
                 async { Err(RelayError::MediaStreamAlreadyStarted()) }.into_actor(self),
             );
         }
 
-        let cancel_token = CancellationToken::new();
-        self.cancel_token = Some(cancel_token.clone());
+        let worker_manager = self.worker_manager.clone();
+        let supervisor =
+            RelayActorSupervisor::new(self.stream_uuid.clone(), worker_manager.clone());
+        self.supervisor = Some(supervisor.clone());
         let actor_addr = ctx.address();
-        let publisher_cancel = cancel_token.clone();
 
         let Some(audio_port) = self.port_allocator.allocate_port() else {
             return Box::pin(async { Err(RelayError::PortAllocationError()) }.into_actor(self));
@@ -66,8 +68,6 @@ impl Handler<StartRelayMediaStream> for RelayActor {
 
             return Box::pin(async { Err(RelayError::PortAllocationError()) }.into_actor(self));
         };
-
-        let worker_manager = self.worker_manager.clone();
 
         let Some(audio_track) = msg.media_stream.audio else {
             self.port_allocator.release_port(video_port);
@@ -101,7 +101,15 @@ impl Handler<StartRelayMediaStream> for RelayActor {
         let (video_tx, video_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
         let (audio_tx, audio_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
 
-        let process = match Process::build(&sdp, self.stream_uuid.as_str(), video_tx, audio_tx, publisher_ready_rx, ffmpeg_ready_tx) {
+        let process = match Process::build(
+            &sdp,
+            self.stream_uuid.as_str(),
+            video_tx,
+            audio_tx,
+            publisher_ready_rx,
+            ffmpeg_ready_tx,
+            supervisor.process_stopped.clone(),
+        ) {
             Ok(process) => process,
             Err(err) => {
                 let err_str = format!("{:?}", err);
@@ -122,16 +130,26 @@ impl Handler<StartRelayMediaStream> for RelayActor {
             );
         };
 
-        let publisher = HangAvPublisher::new(origin, self.stream_uuid.clone(), video_rx, audio_rx, publisher_ready_tx);
+        let publisher = HangAvPublisher::new(
+            origin,
+            self.stream_uuid.clone(),
+            video_rx,
+            audio_rx,
+            publisher_ready_tx,
+        );
 
+        let publisher_cancel = supervisor.publisher.clone();
+        let publisher_stopped = supervisor.publisher_stopped.clone();
+
+        let forwarder = supervisor.forwarder.clone();
         Box::pin(
             async move {
-
                 let actor_addr_relay = actor_addr.clone();
                 tokio::spawn(async move {
                     if let Err(err) = publisher
-                        .run(publisher_cancel.clone())
-                        .await {
+                        .run(publisher_cancel.clone(), publisher_stopped.clone())
+                        .await
+                    {
                         log::error!("Hang AV publisher failed: {:?}", err);
                         publisher_cancel.cancel();
                         actor_addr_relay.do_send(RelayFailed {
@@ -157,7 +175,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                     .parse()
                     .map_err(|e| RelayError::InvalidAddress(e))?;
 
-                let cancel_audio = cancel_token.clone();
+                let cancel_audio = forwarder.clone();
                 let actor_addr_audio = actor_addr.clone();
                 let ffmpeg_ready_audio_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
@@ -179,11 +197,11 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                     }
                 });
 
-                let cancel_video = cancel_token.clone();
+                let cancel_video = forwarder.clone();
                 let actor_addr_video = actor_addr.clone();
                 let ffmpeg_ready_video_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = forward_rtp_sender_to_udp (
+                    if let Err(err) = forward_rtp_sender_to_udp(
                         video_track.rtp_tx.subscribe(),
                         video_addr,
                         cancel_video.clone(),
@@ -201,6 +219,11 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                     }
                 });
 
+                // start the supervisor
+                tokio::spawn(async move {
+                    supervisor.start(worker_id).await;
+                });
+
                 Ok(())
             }
             .into_actor(self),
@@ -209,17 +232,36 @@ impl Handler<StartRelayMediaStream> for RelayActor {
 }
 
 impl Handler<StopRelayMediaStream> for RelayActor {
-    type Result = RelayResult<()>;
+    type Result = ResponseActFuture<Self, RelayResult<()>>;
 
-    fn handle(&mut self, _msg: StopRelayMediaStream, ctx: &mut Self::Context) -> Self::Result {
-        let Some(cancel_token) = self.cancel_token.as_ref() else {
-            return Err(RelayError::MediaStreamNotStarted());
+    fn handle(&mut self, _msg: StopRelayMediaStream, _ctx: &mut Self::Context) -> Self::Result {
+        let Some(supervisor) = self.supervisor.as_ref() else {
+            return Box::pin(async { Err(RelayError::MediaStreamNotStarted()) }.into_actor(self));
         };
 
-        cancel_token.cancel();
-        self.cancel_token = None;
-        ctx.stop();
-        Ok(())
+        log::info!(
+            "stopping relay media stream, stream_id={}",
+            self.stream_uuid
+        );
+        supervisor.shutdown.cancel();
+        let is_down = supervisor.is_down.clone();
+        Box::pin(
+            async move {
+                is_down.cancelled().await;
+                Ok(())
+            }
+            .into_actor(self)
+            .map(|result, actor, ctx| {
+                actor.supervisor = None;
+                ctx.stop();
+
+                log::info!(
+                    "relay media stream is stopped, stream_id={}",
+                    actor.stream_uuid
+                );
+                result
+            }),
+        )
     }
 }
 
@@ -235,4 +277,3 @@ impl Handler<RelayFailed> for RelayActor {
         ctx.address().do_send(StopRelayMediaStream {});
     }
 }
-

@@ -1,13 +1,14 @@
+use crate::sfu::relay::cmaf::box_payload::extract_box_payload;
 use crate::sfu::relay::cmaf::cmaf_track_writer::{write_cmaf_track, write_fragment};
 use crate::sfu::relay::cmaf::prepared_cmaf_track::PreparedCmafTrack;
 use crate::sfu::relay::error::{RelayError, RelayResult};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use bytes::Bytes;
 use hang::moq_lite;
+use moq_lite::Error;
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use crate::sfu::relay::cmaf::box_payload::extract_box_payload;
 
 pub struct HangAvPublisher {
     origin: moq_lite::OriginProducer,
@@ -34,7 +35,7 @@ impl HangAvPublisher {
         }
     }
 
-    pub async fn run(self, cancel: CancellationToken) -> RelayResult<()> {
+    pub async fn run(self, cancel: CancellationToken, stopped: CancellationToken) -> RelayResult<()> {
         log::info!("hang av publisher started");
 
         let video_rx = self.video_rx;
@@ -43,7 +44,10 @@ impl HangAvPublisher {
         let video_cancel = cancel.clone();
         let audio_cancel = cancel.clone();
 
-        log::info!("video and audio CMAF tracks prepared");
+        log::info!(
+            "video and audio CMAF tracks prepared, name={}",
+            self.name.clone()
+        );
 
         let mut broadcast = moq_lite::Broadcast::produce();
 
@@ -84,8 +88,9 @@ impl HangAvPublisher {
         .await?;
 
         log::info!(
-            "video init contains avcC: {}",
-            video.init.windows(4).any(|w| w == b"avcC")
+            "video init for publisher  name={} contains avcC= {}",
+            self.name.clone(),
+            video.init.windows(4).any(|w| w == b"avcC"),
         );
 
         let video_avcc = extract_box_payload(&video.init, b"avcC")
@@ -119,41 +124,8 @@ impl HangAvPublisher {
             write_cmaf_track("audio1".to_string(), audio_track, &mut audio, audio_cancel).await
         });
 
-        // let video_task = tokio::spawn(async move {
-        //     let name = video_track.info.name.clone();
-        //
-        //     let mut video =
-        //         PreparedCmafTrack::build(name.clone(), video_rx, video_cancel.clone()).await?;
-        //
-        //     log::info!(
-        //         "video init len={} first={:02x?}",
-        //         video.init.len(),
-        //         &video.init[..video.init.len().min(16)]
-        //     );
-        //
-        //     write_fragment(&mut video_track, video.init.clone())?;
-        //     let label = name.clone();
-        //     write_cmaf_track(name, video_track, &mut video, video_cancel).await
-        // });
-        //
-        // let audio_task = tokio::spawn(async move {
-        //     let name = audio_track.info.name.clone();
-        //     let mut audio =
-        //         PreparedCmafTrack::build(name.clone(), audio_rx, audio_cancel.clone()).await?;
-        //
-        //     log::info!(
-        //         "video init len={} first={:02x?}",
-        //         audio.init.len(),
-        //         &audio.init[..audio.init.len().min(16)]
-        //     );
-        //
-        //     write_fragment(&mut audio_track, audio.init.clone())?;
-        //
-        //     write_cmaf_track(name, audio_track, &mut audio, audio_cancel).await
-        // });
-
         let name = self.name.clone();
-        self.origin.publish_broadcast(name, broadcast.consume());
+        self.origin.publish_broadcast(name.clone(), broadcast.consume());
 
         tokio::select! {
             result = video_task => {
@@ -164,7 +136,7 @@ impl HangAvPublisher {
 
                 inner?;
 
-                cancel.cancel();
+                stopped.cancel();
             }
 
             result = audio_task => {
@@ -175,10 +147,21 @@ impl HangAvPublisher {
 
                 inner?;
 
-                cancel.cancel();
+                stopped.cancel();
             }
 
-            _ = cancel.cancelled() => {}
+            _ = cancel.cancelled() => {
+                log::info!("hang av publisher cancelled, name={}", name);
+                if let Err(e) = broadcast.abort(Error::Cancel) {
+                    log::error!("abort publisher: name={}, error={}", name, e);
+                    stopped.cancel();
+                    return Err(RelayError::CmafPublisher(format!("abort publisher: {}", e)));
+                }
+
+                log::info!("relay hang publisher aborted, name={}", name);
+                stopped.cancel();
+                return Ok(());
+            }
         }
 
         Ok(())
@@ -192,8 +175,7 @@ fn publish_catalog(
     video_init: Bytes,
     audio_init: Bytes,
     video_avcc: Bytes,
-    #[allow(unused)]
-    audio_esds: Bytes,
+    #[allow(unused)] audio_esds: Bytes,
 ) -> RelayResult<moq_lite::TrackProducer> {
     let video_config = hang::catalog::VideoConfig {
         codec: hang::catalog::H264 {
@@ -236,7 +218,7 @@ fn publish_catalog(
 
     let mut audio_renditions = BTreeMap::new();
     audio_renditions.insert(audio_track.name.clone(), audio_config);
-    
+
     let _catalog = hang::catalog::Catalog {
         video: hang::catalog::Video {
             renditions: video_renditions,
@@ -261,7 +243,6 @@ fn publish_catalog(
     // let catalog_json = catalog
     //     .to_string()
     //     .map_err(|e| RelayError::CmafPublisher(format!("serialize catalog: {}", e)))?;
-
 
     let catalog_json = serde_json::json!({
         "video": {
@@ -304,11 +285,13 @@ fn publish_catalog(
                 }
             }
         }
-    }).to_string();
-
+    })
+    .to_string();
 
     log::info!("MOQ catalog: {}", catalog_json);
-    group.write_frame(catalog_json).map_err(|e| RelayError::CmafPublisher(format!("write frame: {}", e)))?;
+    group
+        .write_frame(catalog_json)
+        .map_err(|e| RelayError::CmafPublisher(format!("write frame: {}", e)))?;
 
     // group
     //     .write_frame(

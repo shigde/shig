@@ -35,29 +35,29 @@ pub async fn forward_rtp_sender_to_udp(
         RtpForwarderKind::Audio => true,
     };
 
-    // wait for publisher ready
+    // wait for ffmpeg publisher ready
     while !*ffmpeg_ready_rx.borrow() {
         select! {
                 _ = cancel.cancelled() => {
-                    log::info!("RTP forwarder cancelled while waiting for ffmpeg ready");
+                    log::info!("RTP forwarder {}, cancelled while waiting for ffmpeg ready", kind);
                     return Ok(());
                 }
 
                 changed = ffmpeg_ready_rx.changed() => {
                     if changed.is_err() {
                         return Err(RelayError::RtpForwarder(
-                            "publisher ready channel closed".to_string()
+                            format!("RTP forwarder {},ready channel closed", kind)
                         ));
                     }
                 }
             }
     }
 
-    log::info!("start forward_rtp_sender_to_udp: {}", kind);
+    log::info!("RTP forwarder {}, start forwarding rtp pkgs to udp", kind);
     loop {
         select! {
             _ = cancel.cancelled() => {
-                log::info!("RTP forwarder cancelled: {}", target);
+                log::info!("RTP forwarder {} cancelled: {}", kind, target);
                 return Ok(());
             }
 
@@ -80,17 +80,17 @@ pub async fn forward_rtp_sender_to_udp(
                             // Forward SPS/PPS anyway!
                             if info.sps || info.pps {
                                 let raw = packet.marshal().map_err(|e| {
-                                    RelayError::RtpForwarder(format!("Marshal rtp pkg: {}", e.to_string()))
+                                    RelayError::RtpForwarder(format!("RTP forwarder {}, marshal rtp pkg: {}", kind, e.to_string()))
                                 })?;
                                 socket.send_to(&raw, target).await.map_err(|e| {
-                                    RelayError::RtpForwarder(format!("Sending rtp pkg: {}", e.to_string()))
+                                    RelayError::RtpForwarder(format!("RTP forwarder {}, sending rtp pkg: {}", kind, e.to_string()))
                                 })?;
                                 continue;
                             }
 
                             if seen_sps && seen_pps && info.idr && !ready{
                                 ready = true;
-                                log::info!("H264 ready: SPS + PPS + IDR");
+                                log::info!("RTP forwarder {}, codec for H264 ready: SPS + PPS + IDR", kind);
                             } else {
                                 continue;
                             }
@@ -105,12 +105,12 @@ pub async fn forward_rtp_sender_to_udp(
                     }
 
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        log::warn!("RTP forwarder lagged, skipped {} packets for {}", skipped, target);
+                        log::warn!("RTP forwarder {} lagged, skipped {} packets for {}", kind, skipped, target);
                         continue;
                     }
 
                     Err(broadcast::error::RecvError::Closed) => {
-                        log::info!("RTP sender closed for {}", target);
+                        log::info!("RTP forwarder {} closed for {}", kind, target);
                         return Ok(());
                     }
                 }

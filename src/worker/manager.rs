@@ -12,7 +12,7 @@ use actix::{
 use actix::{ActorContext, ActorFutureExt};
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 pub struct WorkerManager {
     workers: HashMap<WorkerId, WorkerHandle>,
@@ -40,18 +40,18 @@ impl Handler<StartWorker> for WorkerManager {
             return Box::pin(async { Err(WorkerError::AlreadyExists) }.into_actor(self));
         }
 
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let cancel_token = CancellationToken::new();
 
         self.workers.insert(
             id.clone(),
             WorkerHandle {
                 state: WorkerState::Running,
-                shutdown_tx: Some(shutdown_tx),
+                shutdown: Some(cancel_token.clone()),
                 process: msg.process.clone(),
             },
         );
 
-        spawn_supervisor(id.clone(), msg.process, shutdown_rx, ctx.address());
+        spawn_supervisor(id.clone(), msg.process, cancel_token, ctx.address());
 
         Box::pin(async move { Ok(id) }.into_actor(self))
     }
@@ -61,10 +61,12 @@ impl Handler<StopWorker> for WorkerManager {
     type Result = Result<(), WorkerError>;
 
     fn handle(&mut self, msg: StopWorker, _: &mut Self::Context) -> Self::Result {
+        let id = msg.id.clone();
+        log::info!("stopping worker {}", id.0);
         let handle = self.workers.get_mut(&msg.id).ok_or(WorkerError::NotFound)?;
 
-        if let Some(tx) = handle.shutdown_tx.take() {
-            let _ = tx.send(());
+        if let Err(error) = handle.start_shutdown(id.clone()) {
+            log::error!("failed to stop worker {}: {}", id.0, error);
         }
 
         Ok(())
@@ -75,20 +77,20 @@ impl Handler<RestartWorker> for WorkerManager {
     type Result = ResponseActFuture<Self, Result<(), WorkerError>>;
 
     fn handle(&mut self, msg: RestartWorker, _ctx: &mut Self::Context) -> Self::Result {
-        let process = match self.workers.get(&msg.id) {
-            Some(h) => h.process.clone(),
+        let id = msg.id.clone();
+
+        let process = match self.workers.get_mut(&msg.id) {
+            Some(h) => {
+                if let Err(error) = h.start_shutdown(id.clone()) {
+                    log::error!("failed to stop worker {}: {}", id.0, error);
+                    return Box::pin(async { Err(WorkerError::NotFound) }.into_actor(self));
+                }
+                h.process.clone()
+            },
             None => {
                 return Box::pin(async { Err(WorkerError::NotFound) }.into_actor(self));
             }
         };
-
-        if let Some(handle) = self.workers.get_mut(&msg.id) {
-            if let Some(tx) = handle.shutdown_tx.take() {
-                let _ = tx.send(());
-            }
-        }
-
-        let id = msg.id.clone();
 
         Box::pin(
             async move {
@@ -97,18 +99,18 @@ impl Handler<RestartWorker> for WorkerManager {
             }
             .into_actor(self)
             .map(move |(id, process), act, ctx| {
-                let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                let cancel_token = CancellationToken::new();
 
                 act.workers.insert(
                     id.clone(),
                     WorkerHandle {
                         state: WorkerState::Running,
-                        shutdown_tx: Some(shutdown_tx),
+                        shutdown: Some(cancel_token.clone()),
                         process: process.clone(),
                     },
                 );
 
-                spawn_supervisor(id, process, shutdown_rx, ctx.address());
+                spawn_supervisor(id, process, cancel_token, ctx.address());
 
                 Ok(())
             }),
@@ -156,14 +158,16 @@ impl Handler<WorkerExited> for WorkerManager {
 fn spawn_supervisor(
     id: WorkerId,
     mut process: Process,
-    shutdown_rx: oneshot::Receiver<()>,
+    cancel_token: CancellationToken,
     manager: Addr<WorkerManager>,
 ) {
     actix_rt::spawn(async move {
-        let result = process.run(shutdown_rx).await;
+        let stream_id = process.stream_id.clone();
+        let result = process.run(cancel_token).await;
 
         match result {
             Ok(reason) => {
+                log::info!("worker {} for stream={}, finished: {}", id.0, stream_id, reason);
                 let _ = manager
                     .send(WorkerExited {
                         id,
@@ -173,6 +177,7 @@ fn spawn_supervisor(
                     .await;
             }
             Err(err) => {
+                log::error!("worker {} for stream={}, failed: {}", id.0, stream_id, err);
                 let _ = manager
                     .send(WorkerExited {
                         id,
@@ -191,8 +196,10 @@ impl Handler<ShutdownWorkers> for WorkerManager {
     fn handle(&mut self, _msg: ShutdownWorkers, ctx: &mut Context<Self>) {
         log::info!("stopping all workers");
 
-        for (_id, child) in self.workers.drain() {
-            let _ = child.start_kill();
+        for (id, mut child) in self.workers.drain() {
+            if let Err(error) = child.start_shutdown(id.clone()) {
+                log::error!("failed to stop worker {}: {}", id.0, error);
+            }
         }
 
         ctx.stop();

@@ -12,8 +12,8 @@ use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures_util::future::join_all;
-use std::collections::HashMap;
 use moq_relay::AuthToken;
+use std::collections::HashMap;
 
 pub mod config;
 pub mod db;
@@ -34,7 +34,11 @@ pub struct Sfu {
 }
 
 impl Sfu {
-    pub fn new(config: SfuConfig, pool: Pool<ConnectionManager<PgConnection>>, relay_state: RelayState) -> Sfu {
+    pub fn new(
+        config: SfuConfig,
+        pool: Pool<ConnectionManager<PgConnection>>,
+        relay_state: RelayState,
+    ) -> Sfu {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
         let worker_manager = WorkerManager::new().start();
@@ -256,7 +260,12 @@ impl Handler<PublishLobbyStream> for Sfu {
         };
 
         let fut = async move {
-            log::info!("publish lobby stream, lobby_id={}", lobby_uuid.clone(),);
+            let is_publishing = msg.publishing;
+            log::info!(
+                "handle lobby streaming: publishing: {}, lobby_id={}",
+                is_publishing,
+                lobby_uuid.clone()
+            );
 
             let result = lobby_addr
                 .send(PublishStream {

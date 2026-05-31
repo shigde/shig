@@ -411,16 +411,24 @@ impl Handler<PublishStream> for Lobby {
                 auth_token,
             };
 
+            let stream_id = self.stream_uuid.clone();
             Box::pin(
                 async move {
+                    log::info!("start relay media stream: stream_uuid={:?} ", stream_id);
                     relay_addr
                         .send(stream_start)
                         .await
                         .map_err(|e| {
-                            LobbyError::StreamingError(format!("relay mailbox error: {e}"))
+                            LobbyError::StreamingError(format!(
+                                "relay mailbox, stream_id={:?},error: {}",
+                                stream_id, e
+                            ))
                         })?
                         .map_err(|e| {
-                            LobbyError::StreamingError(format!("relay start error: {e}"))
+                            LobbyError::StreamingError(format!(
+                                "relay start, stream_id={:?}, error: {}",
+                                stream_id, e
+                            ))
                         })?;
 
                     Ok(())
@@ -428,16 +436,24 @@ impl Handler<PublishStream> for Lobby {
                 .into_actor(self),
             )
         } else {
+            let stream_id = self.stream_uuid.clone();
             Box::pin(
                 async move {
+                    log::info!("stop relay media stream: stream_uuid={:?} ", stream_id);
                     relay_addr
                         .send(StopRelayMediaStream {})
                         .await
                         .map_err(|e| {
-                            LobbyError::StreamingError(format!("relay mailbox error: {e}"))
+                            LobbyError::StreamingError(format!(
+                                "relay mailbox, stream_id={:?}, error: {}",
+                                stream_id, e
+                            ))
                         })?
                         .map_err(|e| {
-                            LobbyError::StreamingError(format!("relay stop error: {e}"))
+                            LobbyError::StreamingError(format!(
+                                "relay stop,  stream_id={:?}, error: {}",
+                                stream_id, e
+                            ))
                         })?;
 
                     Ok(())

@@ -7,6 +7,7 @@ use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
 use crate::models::mail::config::MailConfig;
 use crate::relay::config::RelayConfig;
+use crate::relay::state::RelayState;
 use crate::server::error::ServerResult;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::Sfu;
@@ -19,7 +20,6 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
-use crate::relay::state::RelayState;
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> impl Responder {
@@ -44,16 +44,25 @@ pub struct ConfigFile {
 // Config struct holds to data from the `[config]` section.
 #[derive(Deserialize, Clone, Debug)]
 pub struct ServerConfig {
-    host: String,
-    port: u16,
-    tls: TlsConfig,
+    pub host: String,
+    pub port: u16,
+    pub tls: TlsConfig,
 }
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct TlsConfig {
-    enabled: bool,
+    pub enabled: bool,
     cert: String,
     key: String,
+}
+
+impl ServerConfig {
+    fn url(self) -> String {
+        format!(
+            "{}://localhost:8080",
+            if self.tls.enabled { "https" } else { "http" }
+        )
+    }
 }
 
 pub fn start(
@@ -88,25 +97,18 @@ pub fn start(
             .configure(api::config_services)
     });
 
+    let url = cfg.server.clone().url();
     let server = if cfg.server.tls.enabled {
-        log::info!(
-            "web server start listening on: https://{}:{}/",
-            cfg.server.host,
-            cfg.server.port
-        );
         let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
         builder.set_private_key_file(cfg.server.tls.key, SslFiletype::PEM)?;
         builder.set_certificate_chain_file(cfg.server.tls.cert)?;
         svs.bind_openssl((cfg.server.host, cfg.server.port), builder)?
             .run()
     } else {
-        log::info!(
-            "web server start listening on: http://{}:{}/",
-            cfg.server.host,
-            cfg.server.port
-        );
         svs.bind((cfg.server.host.clone(), cfg.server.port))?.run()
     };
+
+    log::info!("web server start listening on: {}", url);
 
     Ok(server)
 }
