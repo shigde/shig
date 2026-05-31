@@ -9,7 +9,7 @@ use crate::worker::manager::WorkerManager;
 use crate::worker::message::StartWorker;
 use crate::worker::process::{Process, OUTPUT_BUFFER_SIZE};
 use actix::{
-    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture,
+    Actor, ActorFutureExt, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture,
 };
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -251,10 +251,8 @@ impl Handler<StopRelayMediaStream> for RelayActor {
                 Ok(())
             }
             .into_actor(self)
-            .map(|result, actor, ctx| {
+            .map(|result, actor, _ctx| {
                 actor.supervisor = None;
-                ctx.stop();
-
                 log::info!(
                     "relay media stream is stopped, stream_id={}",
                     actor.stream_uuid
