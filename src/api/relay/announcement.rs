@@ -29,7 +29,6 @@ async fn get_announced_inner(
     let params = AuthParams {
         path: prefix,
         jwt: query.jwt,
-        register: query.register,
     };
 
     let token = state

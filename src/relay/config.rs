@@ -1,5 +1,5 @@
 use clap::Parser;
-use moq_relay::{AuthConfig, ClusterConfig, WebConfig};
+use moq_relay::{AuthConfig, ClusterConfig, WebConfig, StatsConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Clone, Debug, Deserialize, Serialize, Default)]
@@ -44,4 +44,8 @@ pub struct RelayConfig {
     #[command(flatten)]
     #[serde(default)]
     pub iroh: moq_native::IrohEndpointConfig,
+
+    #[command(flatten)]
+    #[serde(default)]
+    pub stats: StatsConfig
 }

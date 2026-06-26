@@ -4,6 +4,7 @@ use crate::worker::message::StopWorker;
 use crate::worker::WorkerId;
 use actix::Addr;
 use tokio_util::sync::CancellationToken;
+use crate::util::stop_guard::StopGuard;
 
 // Actor ------------------------
 // -[channel,rtp]-> rtp-forwarder
@@ -67,7 +68,7 @@ impl RelayActorSupervisor {
     }
 
     async fn shutdown_sequence(&self, worker_id: WorkerId) {
-        let _guard = DownGuard(self.is_down.clone());
+        let _guard = StopGuard(self.is_down.clone());
 
         log::info!("shutting down relay actor: stream_id= {}, worker_id={}", self.stream_id, worker_id.0);
         self.shutdown.cancelled().await;
@@ -126,13 +127,5 @@ impl RelayActorSupervisor {
             .map_err(|e| RelayError::WorkerError(e))?;
 
         Ok(())
-    }
-}
-
-struct DownGuard(CancellationToken);
-
-impl Drop for DownGuard {
-    fn drop(&mut self) {
-        self.0.cancel();
     }
 }

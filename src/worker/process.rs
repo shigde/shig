@@ -1,8 +1,7 @@
 use crate::worker::error::{WorkerError, WorkerResult};
-use crate::worker::filo::read_fifo_to_channel;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -17,14 +16,9 @@ pub struct Process {
     pub args: Vec<String>,
     pub stdin: Option<String>,
 
-    video_fifo: String,
-    audio_fifo: String,
-    video_tx: mpsc::Sender<Bytes>,
-    audio_tx: mpsc::Sender<Bytes>,
+    pkg_tx: mpsc::Sender<Bytes>,
 
     ffmpeg_ready_tx: watch::Sender<bool>,
-    #[allow(dead_code)]
-    publisher_ready_rx: watch::Receiver<bool>,
     stopped: CancellationToken,
 }
 
@@ -54,122 +48,90 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
     pub fn build(
         sdp: &str,
         stream_id: &str,
-        video_tx: mpsc::Sender<Bytes>,
-        audio_tx: mpsc::Sender<Bytes>,
-        publisher_ready_rx: watch::Receiver<bool>,
+        pkg_tx: mpsc::Sender<Bytes>,
         ffmpeg_ready_tx: watch::Sender<bool>,
         stopped: CancellationToken,
     ) -> WorkerResult<Process> {
-        let video_fifo = format!("/tmp/relay-{stream_id}-video.fmp4");
-        let audio_fifo = format!("/tmp/relay-{stream_id}-audio.fmp4");
-
-        crate::worker::filo::cleanup_fifo(&video_fifo)
-            .map_err(|e| WorkerError::Filo(e.to_string()))?;
-        crate::worker::filo::cleanup_fifo(&audio_fifo)
-            .map_err(|e| WorkerError::Filo(e.to_string()))?;
-
-        crate::worker::filo::create_fifo(&video_fifo)
-            .map_err(|e| WorkerError::Filo(e.to_string()))?;
-        crate::worker::filo::create_fifo(&audio_fifo)
-            .map_err(|e| WorkerError::Filo(e.to_string()))?;
-
-        let video_fifo_arg = video_fifo.clone();
-        let audio_fifo_arg = audio_fifo.clone();
         Ok(Process {
             stream_id: stream_id.to_string(),
             program: "ffmpeg".into(),
             args: vec![
-                "-y".into(),
                 "-hide_banner".into(),
                 "-loglevel".into(),
                 "info".into(),
-                // --
+
                 "-protocol_whitelist".into(),
                 "file,pipe,udp,rtp".into(),
-                // --
-                // no buffer for low latency
-                //"-fflags".into(),
-                //"nobuffer".into(),
+
+                "-fflags".into(),
+                "+genpts+igndts".into(),
+
                 "-flags".into(),
                 "low_delay".into(),
-                // timestamp clock settings
-                "-fflags".into(),
-                "+genpts".into(),
-                "-use_wallclock_as_timestamps".into(),
-                "1".into(),
-                //--
-                // probe size set for H264 RTP
+
                 "-analyzeduration".into(),
                 "10000000".into(),
+
                 "-probesize".into(),
                 "10000000".into(),
-                // sdp Input
+
                 "-f".into(),
                 "sdp".into(),
+
                 "-i".into(),
                 "pipe:0".into(),
-                // ---
-                // VIDEO OUTPUT Video is already H.264 from WebRTC/RTP.
+
                 "-map".into(),
                 "0:v:0".into(),
-                "-an".into(),
-                // Video is already H.264 from WebRTC/RTP.
-                "-c:v".into(),
-                "copy".into(),
-                "-avoid_negative_ts".into(), // timestamp settings
-                "make_zero".into(),
-                "-f".into(),
-                "mp4".into(),
-                "-movflags".into(),
-                "frag_keyframe+empty_moov+default_base_moof+separate_moof+cmaf".into(),
-                video_fifo_arg.into(),
-                // ---
-                // AUDIO OUTPUT
+
                 "-map".into(),
                 "0:a:0".into(),
-                "-vn".into(),
-                // Audio: WebRTC Opus -> AAC for MP4/CMAF.
+
+                "-c:v".into(),
+                "copy".into(),
+
                 "-c:a".into(),
                 "aac".into(),
+
                 "-ar".into(),
                 "48000".into(),
+
                 "-ac".into(),
                 "2".into(),
+
                 "-b:a".into(),
                 "128k".into(),
-                // --
-                // Low-latency fragmented MP4 / CMAF-like output.
-                "-avoid_negative_ts".into(), // timestamp settings
-                "make_zero".into(),
-                // force audio pkg on every frame
+
+                "-af".into(),
+                "aresample=async=1:first_pts=0".into(),
+
+                "-map_metadata".into(),
+                "-1".into(),
+
                 "-frag_duration".into(),
-                "100000".into(),
+                "100000".into(), // 100ms
+
                 "-f".into(),
                 "mp4".into(),
+                
                 "-movflags".into(),
-                "frag_keyframe+empty_moov+default_base_moof+separate_moof+cmaf".into(),
-                audio_fifo_arg.into(),
+                "frag_keyframe+empty_moov+delay_moov+default_base_moof+separate_moof+cmaf".into(),
+
+                "pipe:1".into(),
             ],
             stdin: Some(sdp.into()),
-            video_tx,
-            audio_tx,
-            video_fifo: video_fifo.clone(),
-            audio_fifo: audio_fifo.clone(),
+            pkg_tx,
             ffmpeg_ready_tx,
-            publisher_ready_rx,
             stopped,
         })
     }
 
-    pub async fn run(
-        &mut self,
-        cancel_token: CancellationToken,
-    ) -> Result<String, WorkerError> {
+    pub async fn run(&mut self, cancel_token: CancellationToken) -> Result<String, WorkerError> {
         let mut cmd = Command::new(&self.program);
         cmd.kill_on_drop(true);
 
         cmd.args(&self.args)
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(if self.stdin.is_some() {
                 Stdio::piped()
@@ -195,40 +157,18 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             reader.lines()
         });
 
-        let video_reader = tokio::spawn(read_fifo_to_channel(
-            "video",
-            self.video_fifo.clone(),
-            self.video_tx.clone(),
-        ));
-
-        let audio_reader = tokio::spawn(read_fifo_to_channel(
-            "audio",
-            self.audio_fifo.clone(),
-            self.audio_tx.clone(),
-        ));
-
-        // wait for publisher ready
-        // while !*self.publisher_ready_rx.borrow() {
-        //     select! {
-        //         _ = &mut shutdown_rx => {
-        //             log::info!("shutdown while waiting for publisher ready");
-        //             return Ok("stopped".to_string());
-        //         }
-        //
-        //         changed = self.publisher_ready_rx.changed() => {
-        //             if changed.is_err() {
-        //                 return Err(WorkerError::ProcessFailed(
-        //                     "publisher ready channel closed".to_string()
-        //                 ));
-        //             }
-        //         }
-        //     }
-        // }
 
         // send ready signal
         let _ = self.ffmpeg_ready_tx.send(true).map_err(|e| {
             WorkerError::ProcessFailed(format!("send ffmpeg ready: {}", e.to_string()))
         })?;
+
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| WorkerError::ProcessFailed("missing ffmpeg stdout".into()))?;
+
+        let mut buffer = BytesMut::with_capacity(OUTPUT_BUFFER_SIZE);
 
         let stream_id = self.stream_id.clone();
         log::info!("ffmpeg Process Started: stream_id={}", stream_id);
@@ -246,18 +186,28 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                     let _ = child.kill().await;
                     let _ = child.wait().await;
 
-                    video_reader.abort();
-                    audio_reader.abort();
-
                     stopped.cancel();
                     return Ok("stopped".to_string());
+                }
+
+                read = stdout.read_buf(&mut buffer) => {
+                    let n = read.map_err(|e| WorkerError::ProcessFailed(e.to_string()))?;
+
+                    if n == 0 {
+                        return Ok("stopped".to_string());
+                    }
+
+                    let bytes = buffer.split().freeze();
+
+                    self.pkg_tx
+                        .send(bytes)
+                        .await
+                        .map_err(|e| WorkerError::ProcessFailed(format!("send ffmpeg pkg: {}", e)))?;
                 }
 
                 status = child.wait() => {
                     let status = status.map_err(|e| WorkerError::Spawn(e.to_string()))?;
 
-                    video_reader.abort();
-                    audio_reader.abort();
                     stopped.cancel();
 
                     return if status.success() {

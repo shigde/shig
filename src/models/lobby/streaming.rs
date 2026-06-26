@@ -7,7 +7,7 @@ use crate::models::error::ApiError;
 use crate::sfu::{PublishLobbyStream, Sfu};
 use actix::Addr;
 use actix_web::web;
-use moq_lite::{Path, PathPrefixes};
+use moq_lite::Path;
 use moq_relay::AuthToken;
 
 pub(crate) async fn publish(
@@ -76,15 +76,6 @@ pub(crate) async fn publish(
 
     Ok(())
 }
-fn internal_publish_token(channel_id: &str, stream_id: &str) -> AuthToken {
-    AuthToken {
-        root: Path::new(&format!("live/{}", channel_id)).to_owned(),
-
-        publish: PathPrefixes::from(vec![Path::new(stream_id).to_owned()]),
-
-        subscribe: PathPrefixes::from(vec![Path::new("").to_owned()]),
-
-        cluster: false,
-        register: None,
-    }
+fn internal_publish_token(channel_id: &str, _stream_id: &str) -> AuthToken {
+    AuthToken::unrestricted(Path::new(&format!("live/{}", channel_id)).to_owned())
 }

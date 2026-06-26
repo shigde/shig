@@ -59,8 +59,6 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     )
                     .service(
                         web::scope("/streaming")
-                            .service(relay::media::fetch)
-                            .service(relay::tls::get_fingerprint)
                             .service(relay::announcement::get_root)
                             .service(relay::announcement::get_prefix),
                     )

@@ -38,7 +38,7 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
 
 
     let server = config.server.init()?;
-    let client = config.client.init()?;
+    let client = config.client.clone().init()?;
 
     let (server, client) = {
         let iroh = config.iroh.bind().await?;
@@ -47,7 +47,15 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
 
     let auth = config.auth.init().await?;
 
-    let cluster = Cluster::new(config.cluster, client);
+    let cluster = Cluster::new(config.cluster)
+        .with_client(client)
+        .with_client_tls(config.client.tls.build()?);
+
+    let stats = config.stats.build(cluster.origin.clone());
+    let cluster = cluster.with_stats(stats);
+
+    // Spawn the health monitor before `config.web` is moved into the server.
+    let health = config.web.health.build();
 
     // Create a web server too. mTLS for HTTPS is opt-in via `--web-https-root`.
     let web = Web::new(
@@ -56,6 +64,7 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
             cluster: cluster.clone(),
             tls_info: server.tls_info(),
             conn_id: Default::default(),
+            health,
         },
         config.web,
     );

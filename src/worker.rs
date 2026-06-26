@@ -3,7 +3,6 @@ pub mod manager;
 pub mod error;
 pub mod process;
 pub mod message;
-pub mod filo;
 
 use uuid::Uuid;
 

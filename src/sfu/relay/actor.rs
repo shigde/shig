@@ -1,6 +1,5 @@
 use crate::relay::state::RelayState;
 use crate::sfu::relay::actor_supervisor::RelayActorSupervisor;
-use crate::sfu::relay::cmaf::publisher::HangAvPublisher;
 use crate::sfu::relay::error::{RelayError, RelayResult};
 use crate::sfu::relay::message::{RelayFailed, StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::relay::port_allocator::PortAllocator;
@@ -14,6 +13,7 @@ use actix::{
 use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use crate::sfu::relay::publisher::HangPublisher;
 
 pub struct RelayActor {
     stream_uuid: String,
@@ -98,15 +98,12 @@ impl Handler<StartRelayMediaStream> for RelayActor {
         // 3. forwarder start sending
         let (publisher_ready_tx, publisher_ready_rx) = watch::channel(false);
         let (ffmpeg_ready_tx, ffmpeg_ready_rx) = watch::channel(false);
-        let (video_tx, video_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
-        let (audio_tx, audio_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
+        let (pkg_tx, pkg_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
 
         let process = match Process::build(
             &sdp,
             self.stream_uuid.as_str(),
-            video_tx,
-            audio_tx,
-            publisher_ready_rx,
+            pkg_tx,
             ffmpeg_ready_tx,
             supervisor.process_stopped.clone(),
         ) {
@@ -130,11 +127,10 @@ impl Handler<StartRelayMediaStream> for RelayActor {
             );
         };
 
-        let publisher = HangAvPublisher::new(
+        let publisher = HangPublisher::new(
             origin,
             self.stream_uuid.clone(),
-            video_rx,
-            audio_rx,
+            pkg_rx,
             publisher_ready_tx,
         );
 
