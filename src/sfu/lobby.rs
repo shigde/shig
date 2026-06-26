@@ -12,7 +12,7 @@ use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
-    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
     WrapFuture,
 };
 use derive_more::Display;
@@ -30,6 +30,7 @@ pub struct Lobby {
     relay_addr: Addr<RelayActor>,
     router: Router,
     shutting_down: bool,
+    streaming: bool,
 }
 
 impl Lobby {
@@ -55,10 +56,21 @@ impl Lobby {
             relay_addr,
             router: Router::new(),
             shutting_down: false,
+            streaming: false,
         }
     }
 
     fn stop(&mut self, ctx: &mut Context<Self>) {
+        if self.streaming {
+            log::info!(
+                "stopping active relay media stream before lobby stop, lobby_id={}, stream_uuid={}",
+                self.id,
+                self.stream_uuid
+            );
+            self.relay_addr.do_send(StopRelayMediaStream {});
+            self.streaming = false;
+        }
+
         self.parent_addr.do_send(LobbyStopped {
             id: self.id.clone(),
         });
@@ -433,7 +445,13 @@ impl Handler<PublishStream> for Lobby {
 
                     Ok(())
                 }
-                .into_actor(self),
+                .into_actor(self)
+                .map(|result, actor, _ctx| {
+                    if result.is_ok() {
+                        actor.streaming = true;
+                    }
+                    result
+                }),
             )
         } else {
             let stream_id = self.stream_uuid.clone();
@@ -458,7 +476,13 @@ impl Handler<PublishStream> for Lobby {
 
                     Ok(())
                 }
-                .into_actor(self),
+                .into_actor(self)
+                .map(|result, actor, _ctx| {
+                    if result.is_ok() {
+                        actor.streaming = false;
+                    }
+                    result
+                }),
             )
         }
     }
