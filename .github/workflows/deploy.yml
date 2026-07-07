@@ -1,0 +1,89 @@
+name: Deploy Shig Server
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-shig-server
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_TARGET_DIR: ${{ secrets.SERVER_TARGET_DIR }}
+      SERVER_SERVICE: ${{ vars.SERVER_SERVICE || 'shig.service' }}
+      DB_BACKUP_COMMAND: ${{ secrets.DB_BACKUP_COMMAND }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev pkg-config rsync
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build server
+        run: cargo build --release --all-features --package shig_server --bin shig_server
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/server_deploy_key
+          chmod 600 ~/.ssh/server_deploy_key
+          ssh-keyscan -p "$SERVER_PORT" "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload server binary
+        shell: bash
+        run: |
+          rsync -az \
+            -e "ssh -i ~/.ssh/server_deploy_key -p $SERVER_PORT" \
+            target/release/shig_server \
+            "$SERVER_USER@$SERVER_HOST:/tmp/shig_server-${GITHUB_SHA}"
+
+      - name: Deploy and restart service
+        shell: bash
+        run: |
+          ssh \
+            -i ~/.ssh/server_deploy_key \
+            -p "$SERVER_PORT" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "SERVER_TARGET_DIR='$SERVER_TARGET_DIR' SERVER_SERVICE='$SERVER_SERVICE' DB_BACKUP_COMMAND='$DB_BACKUP_COMMAND' GITHUB_SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          mkdir -p "$SERVER_TARGET_DIR/bin"
+
+          if [ -n "${DB_BACKUP_COMMAND:-}" ]; then
+            echo "Running database backup before deployment..."
+            bash -lc "$DB_BACKUP_COMMAND"
+          else
+            echo "DB_BACKUP_COMMAND is not set; skipping database backup."
+          fi
+
+          install -m 0755 "/tmp/shig_server-${GITHUB_SHA}" "$SERVER_TARGET_DIR/bin/shig_server.new"
+          mv -f "$SERVER_TARGET_DIR/bin/shig_server.new" "$SERVER_TARGET_DIR/bin/shig_server"
+          rm -f "/tmp/shig_server-${GITHUB_SHA}"
+
+          echo "Restarting $SERVER_SERVICE. Diesel migrations run during server startup."
+          sudo systemctl restart "$SERVER_SERVICE"
+          sleep 3
+          sudo systemctl status "$SERVER_SERVICE" --no-pager
+          REMOTE
