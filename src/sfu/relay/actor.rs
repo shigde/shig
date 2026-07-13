@@ -96,7 +96,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
         // 1. av publisher
         // 2. ffmpeg worker
         // 3. forwarder start sending
-        let (publisher_ready_tx, publisher_ready_rx) = watch::channel(false);
+        let (publisher_ready_tx, _publisher_ready_rx) = watch::channel(false);
         let (ffmpeg_ready_tx, ffmpeg_ready_rx) = watch::channel(false);
         let (pkg_tx, pkg_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
 

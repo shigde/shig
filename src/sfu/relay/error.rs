@@ -27,12 +27,16 @@ pub enum RelayError {
     StartProcessFailed(String),
     #[display(fmt = "Unauthorized: {}", _0)]
     Unauthorized(String),
+    #[allow(dead_code)]
     #[display(fmt = "Cmaf split error: {}", _0)]
     CmafSplit(String),
+    #[allow(dead_code)]
     #[display(fmt = "Cmaf preparation error: {}", _0)]
     CmafPreparation(String),
+    #[allow(dead_code)]
     #[display(fmt = "Cmaf write error: {}", _0)]
     CmafWrite(String),
+    #[allow(dead_code)]
     #[display(fmt = "Cmaf publisher error: {}", _0)]
     CmafPublisher(String),
     #[display(fmt = "Rtp forwarder error: {}", _0)]

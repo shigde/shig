@@ -9,6 +9,7 @@ pub struct HangPublisher {
     origin: moq_net::OriginProducer,
     name: String,
     pkg_rx: mpsc::Receiver<Bytes>,
+    #[allow(dead_code)]
     publisher_ready_tx: watch::Sender<bool>,
 }
 

@@ -56,10 +56,10 @@ regex = "1.11.1"
 futures-util = "0.3.31"
 
 ## MoQ relay
-moq-lite = { version = "0.17"}
-hang = { version = "0.18"}
-moq-native = { version = "0.16"}
-moq-relay = { version = "0.12"}
+moq-lite = { version = "0.17.0"}
+hang = { version = "0.18.1"}
+moq-native = { version = "0.16.3"}
+moq-relay = { version = "0.12.8"}
 base64 = "0.22.1"
 rustls = "0.23.36"
 tracing = "0.1.44"

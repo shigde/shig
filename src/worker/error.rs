@@ -12,6 +12,4 @@ pub enum WorkerError {
     Spawn(String),
     #[display(fmt = "Process failed: {}", _0)]
     ProcessFailed(String),
-    #[display(fmt = "Filo error {}", _0)]
-    Filo(String),
 }
