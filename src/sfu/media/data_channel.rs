@@ -77,7 +77,7 @@ pub struct MuteMsgData {
     pub mute: bool,
 }
 
-pub trait DataChannel: Connector {
+pub(crate) trait DataChannel: Connector {
     async fn create_data_channel(
         &mut self,
         peer_addr: Addr<Peer>,

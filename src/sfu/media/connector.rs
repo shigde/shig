@@ -30,7 +30,7 @@ impl ConnectorType {
     }
 }
 
-pub trait Connector {
+pub(crate) trait Connector {
     async fn create_connection(
         id: PeerId,
         peer_addr: Addr<Peer>,
