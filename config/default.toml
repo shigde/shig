@@ -10,6 +10,8 @@ key = "config/certs/key.pem"
 [files]
 htdocs = 'htdocs'
 
+# These are the domian settings even for mail
+# If your server is behind an HTTP proxy, please apply these settings.
 [federation]
 enable = true
 domain = "localhost:8080"
@@ -32,5 +34,17 @@ smtp_user = "from@gmail.com"
 smtp_pass = ""
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
+
+[relay.server]
+listen = "[::]:4443"
+
+[relay.web.http]
+# Listen for HTTP and WebSocket (TCP) connections on the given address.
+# Defaults to disabled if not provided.
+listen = "[::]:4443"
+
+[relay.auth]
+subscribe = ["live"]
+publish = ["live"]
 
 [sfu]
