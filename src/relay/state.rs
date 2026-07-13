@@ -10,5 +10,5 @@ pub struct RelayState {
     pub cluster: Cluster,
     /// TLS certificate information served at `/certificate.sha256`.
     #[allow(dead_code)]
-    pub tls_info: Arc<std::sync::RwLock<moq_native::ServerTlsInfo>>,
+    pub tls_info: Arc<std::sync::RwLock<moq_native::tls::Info>>,
 }

@@ -33,7 +33,7 @@ impl HangPublisher {
         let _guard = StopGuard(stopped);
 
         let mut broadcast = moq_net::Broadcast::new().produce();
-        let catalog = moq_mux::catalog::hang::Producer::new(&mut broadcast)
+        let catalog = moq_mux::catalog::Producer::new(&mut broadcast)
             .map_err(|e| RelayError::PublisherError(e.to_string()))?;
 
 

@@ -43,7 +43,7 @@ pub struct RelayConfig {
     /// Iroh specific configuration, used for both a client and server.
     #[command(flatten)]
     #[serde(default)]
-    pub iroh: moq_native::IrohEndpointConfig,
+    pub iroh: moq_native::iroh::EndpointConfig,
 
     #[command(flatten)]
     #[serde(default)]

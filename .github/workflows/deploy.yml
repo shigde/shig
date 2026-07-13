@@ -5,20 +5,31 @@ on:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to deploy, for example v0.0.1
+        required: true
+      target:
+        description: Release target asset to deploy
+        required: false
+        default: x86_64-unknown-linux-gnu
 
 concurrency:
   group: deploy-shig-server
   cancel-in-progress: false
 
 env:
-  CARGO_TERM_COLOR: always
+  SERVER_TARGET: ${{ inputs.target || vars.SERVER_TARGET || 'x86_64-unknown-linux-gnu' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
 
     env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
       SERVER_HOST: ${{ secrets.SERVER_HOST }}
       SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
       SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -27,20 +38,37 @@ jobs:
       DB_BACKUP_COMMAND: ${{ secrets.DB_BACKUP_COMMAND }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev pkg-config rsync
+        run: sudo apt-get update && sudo apt-get install -y rsync
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Download release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
 
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+          if [ -z "${RELEASE_TAG:-}" ]; then
+            echo "RELEASE_TAG is required. For manual runs, provide workflow_dispatch input release_tag."
+            exit 1
+          fi
 
-      - name: Build server
-        run: cargo build --release --all-features --package shig_server --bin shig_server
+          asset_name="shig_server-${RELEASE_TAG}-${SERVER_TARGET}.tar.gz"
+          mkdir -p dist
+
+          for attempt in {1..60}; do
+            if gh release download "$RELEASE_TAG" --pattern "$asset_name" --dir dist --clobber; then
+              break
+            fi
+
+            echo "Release asset $asset_name is not available yet; waiting for build-and-release ($attempt/60)."
+            sleep 20
+          done
+
+          test -f "dist/$asset_name"
+          tar -xzf "dist/$asset_name" -C dist
+          test -x "dist/shig_server-${RELEASE_TAG}-${SERVER_TARGET}/shig_server"
+          echo "SERVER_BINARY=dist/shig_server-${RELEASE_TAG}-${SERVER_TARGET}/shig_server" >> "$GITHUB_ENV"
 
       - name: Configure SSH
         shell: bash
@@ -56,7 +84,7 @@ jobs:
         run: |
           rsync -az \
             -e "ssh -i ~/.ssh/server_deploy_key -p $SERVER_PORT" \
-            target/release/shig_server \
+            "$SERVER_BINARY" \
             "$SERVER_USER@$SERVER_HOST:/tmp/shig_server-${GITHUB_SHA}"
 
       - name: Deploy and restart service
