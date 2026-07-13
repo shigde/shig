@@ -60,4 +60,11 @@ jobs:
           asset_name: ${{ env.ASSET }}
           tag: ${{ github.ref }}
 
+  deploy:
+    name: Deploy release
+    needs: build
+    uses: ./.github/workflows/deploy.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit
 
