@@ -61,7 +61,7 @@ jobs:
           asset_name="shig_server-${RELEASE_TAG}-${SERVER_TARGET}.tar.gz"
           mkdir -p dist
 
-          gh release download "$RELEASE_TAG" --pattern "$asset_name" --dir dist --clobber
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset_name" --dir dist --clobber
           test -f "dist/$asset_name"
           tar -xzf "dist/$asset_name" -C dist
           test -x "dist/shig_server-${RELEASE_TAG}-${SERVER_TARGET}/shig_server"
