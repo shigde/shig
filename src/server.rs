@@ -19,7 +19,7 @@ use diesel::PgConnection;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::io;
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> impl Responder {
@@ -73,15 +73,10 @@ pub fn start(
 ) -> ServerResult<Server> {
     // create static file dir if not exists
     let htdocs = cfg.files.htdocs.as_str();
-    if !Path::new(htdocs).exists() {
-        let avatar = format!("{htdocs}/avatar");
-        let banner = format!("{htdocs}/banner");
-        let thumbnail = format!("{htdocs}/thumbnail");
-        fs::create_dir(htdocs)?;
-        fs::create_dir(avatar)?;
-        fs::create_dir(banner)?;
-        fs::create_dir(thumbnail)?;
-    }
+    ensure_static_dir(htdocs)?;
+    ensure_static_dir(&format!("{htdocs}/avatar"))?;
+    ensure_static_dir(&format!("{htdocs}/banner"))?;
+    ensure_static_dir(&format!("{htdocs}/thumbnail"))?;
 
     let svs = HttpServer::new(move || {
         App::new()
@@ -111,4 +106,13 @@ pub fn start(
     log::info!("web server start listening on: {}", url);
 
     Ok(server)
+}
+
+fn ensure_static_dir(path: &str) -> io::Result<()> {
+    fs::create_dir_all(path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("failed to create static directory `{path}`: {err}"),
+        )
+    })
 }
