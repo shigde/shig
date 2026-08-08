@@ -126,7 +126,7 @@ impl Receiver {
                         );
 
                         let cancel = CancellationToken::new();
-                        let (rtp_tx, _dummy_rx) = broadcast::channel(2048);
+                        let (rtp_tx, _dummy_rx) = broadcast::channel(8192);
 
                         let media = Media::new(
                             peer_id.clone(),

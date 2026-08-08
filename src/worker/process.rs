@@ -58,7 +58,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             args: vec![
                 "-hide_banner".into(),
                 "-loglevel".into(),
-                "info".into(),
+                "warning".into(),
 
                 "-protocol_whitelist".into(),
                 "file,pipe,udp,rtp".into(),
@@ -79,6 +79,9 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                 "1000000".into(),
 
                 "-reorder_queue_size".into(),
+                "1024".into(),
+
+                "-thread_queue_size".into(),
                 "1024".into(),
 
                 "-f".into(),
@@ -158,11 +161,27 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             }
         }
 
-        let mut stderr_lines = child.stderr.take().map(|stderr| {
-            let reader = BufReader::new(stderr);
-            reader.lines()
-        });
+        if let Some(stderr) = child.stderr.take() {
+            let stream_id = self.stream_id.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
 
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => log::warn!("[ffmpeg] stream_id={}, {}", stream_id, line),
+                        Ok(None) => break,
+                        Err(err) => {
+                            log::error!(
+                                "failed to read ffmpeg stderr: stream_id={}, {}",
+                                stream_id,
+                                err,
+                            );
+                            break;
+                        }
+                    }
+                }
+            });
+        }
 
         // send ready signal
         let _ = self.ffmpeg_ready_tx.send(true).map_err(|e| {
@@ -226,21 +245,6 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                     };
                 }
 
-                line = async {
-                    match stderr_lines.as_mut() {
-                        Some(lines) => lines.next_line().await,
-                        None => Ok(None),
-                    }
-                }, if stderr_lines.is_some() => {
-                    match line {
-                        Ok(Some(line)) => log::info!("[ffmpeg] {}", line),
-                        Ok(None) => stderr_lines = None,
-                        Err(err) => {
-                            log::error!("failed to read ffmpeg stderr: {}", err);
-                            stderr_lines = None;
-                        }
-                    }
-                }
             }
         }
     }
