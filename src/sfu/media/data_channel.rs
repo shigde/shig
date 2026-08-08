@@ -46,13 +46,6 @@ impl DataChannelMsg {
     pub fn from_data_channel_message_bin(
         dcm: &DataChannelMessage,
     ) -> anyhow::Result<DataChannelMsg> {
-        println!("######## RAW DATA: {:?}", &dcm.data);
-        println!(
-            "######## AS STRING: {:?}",
-            String::from_utf8_lossy(&dcm.data)
-        );
-        println!("#########is_string: {:?}", dcm.is_string);
-
         if !dcm.is_string {
             let msg: DataChannelMsg = match serde_json::from_slice(&dcm.data) {
                 Ok(msg) => msg,

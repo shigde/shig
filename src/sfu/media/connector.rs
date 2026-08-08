@@ -200,7 +200,7 @@ pub async fn receiver_index(
     receiver: &Arc<RTCRtpReceiver>,
 ) -> anyhow::Result<usize> {
     for (i, t) in pc.get_transceivers().await.iter().enumerate() {
-        log::warn!(" ### receiver_index: {:?} {:?}", i, t);
+        log::warn!("receiver_index: {:?} {:?}", i, t);
         let r = t.receiver().await;
         if Arc::ptr_eq(&r, receiver) {
             return Ok(i);
