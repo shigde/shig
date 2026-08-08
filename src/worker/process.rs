@@ -75,6 +75,12 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                 "-probesize".into(),
                 "10000000".into(),
 
+                "-max_delay".into(),
+                "1000000".into(),
+
+                "-reorder_queue_size".into(),
+                "1024".into(),
+
                 "-f".into(),
                 "sdp".into(),
 

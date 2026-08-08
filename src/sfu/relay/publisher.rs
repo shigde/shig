@@ -57,13 +57,13 @@ impl HangPublisher {
                 }
 
                 Some(bytes) = self.pkg_rx.recv() => {
-                    log::info!("received fmp4 bytes: {}", bytes.len());
+                    log::trace!("received fmp4 bytes: {}", bytes.len());
 
                     buffer.extend_from_slice(&bytes);
 
                     match import.decode(&mut buffer) {
                         Ok(_) => {
-                            log::info!("decoded fmp4 buffer, remaining={}", buffer.len());
+                            log::trace!("decoded fmp4 buffer, remaining={}", buffer.len());
                         }
                         Err(e) => {
                             log::error!("fmp4 import error: {:?}", e);
