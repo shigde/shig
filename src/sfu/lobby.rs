@@ -1,4 +1,5 @@
 use crate::relay::state::RelayState;
+use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
@@ -12,8 +13,8 @@ use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
-    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
-    WrapFuture,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message,
+    ResponseActFuture, WrapFuture,
 };
 use derive_more::Display;
 use moq_relay::AuthToken;
@@ -24,6 +25,7 @@ pub struct Lobby {
     stream_uuid: String,
     #[allow(dead_code)]
     host_uuid: String, // owner of this stream
+    sfu_config: SfuConfig,
     peers: Box<HashMap<PeerId, Addr<Peer>>>,
     parent_addr: Addr<Sfu>,
     db_actor_addr: Addr<DbActor>,
@@ -38,6 +40,7 @@ impl Lobby {
         uuid: String,
         stream_uuid: String,
         host_uuid: String,
+        sfu_config: SfuConfig,
         parent_addr: Addr<Sfu>,
         db_actor_addr: Addr<DbActor>,
         relay_state: RelayState,
@@ -50,6 +53,7 @@ impl Lobby {
             id: uuid,
             stream_uuid,
             host_uuid,
+            sfu_config,
             peers: Box::new(HashMap::new()),
             parent_addr,
             db_actor_addr,
@@ -126,7 +130,13 @@ impl Handler<Publish> for Lobby {
             );
         }
 
-        let peer_addr = Peer::new(peer_id.clone(), ctx.address(), msg.role).start();
+        let peer_addr = Peer::new(
+            peer_id.clone(),
+            ctx.address(),
+            msg.role,
+            self.sfu_config.clone(),
+        )
+        .start();
         self.peers.insert(peer_id, peer_addr.clone());
 
         self.db_actor_addr.do_send(AddParticipant {

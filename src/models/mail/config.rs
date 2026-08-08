@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
-#[allow(dead_code)]
 #[derive(Deserialize, Clone, Debug)]
 pub struct MailConfig {
+    #[allow(dead_code)]
     pub enable: bool,
     pub smtp_user: String,
     pub smtp_pass: String,

@@ -25,7 +25,7 @@ pub mod peer;
 mod relay;
 
 pub struct Sfu {
-    _config: SfuConfig,
+    config: SfuConfig,
     lobbies: Box<HashMap<String, Addr<Lobby>>>,
     shutting_down: bool,
     db_actor: Addr<DbActor>,
@@ -43,7 +43,7 @@ impl Sfu {
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
         let worker_manager = WorkerManager::new().start();
         Sfu {
-            _config: config,
+            config,
             lobbies,
             relay_state,
             shutting_down: false,
@@ -94,6 +94,7 @@ impl Handler<PublishLobby> for Sfu {
                     msg.lobby_uuid.clone(),
                     msg.stream_uuid.clone(),
                     msg.user_uuid.clone(),
+                    self.config.clone(),
                     ctx.address(),
                     self.db_actor.clone(),
                     self.relay_state.clone(),

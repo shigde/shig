@@ -48,3 +48,6 @@ subscribe = ["live"]
 publish = ["live"]
 
 [sfu]
+advertised_ip = ""
+port_min = 50000
+port_max = 51000

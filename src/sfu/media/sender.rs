@@ -1,3 +1,4 @@
+use crate::sfu::config::SfuConfig;
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::data_channel::{DataChannel, SdpMsgData};
 use crate::sfu::media::error::{MediaError, MediaResult};
@@ -46,9 +47,18 @@ impl DataChannel for Sender {
 }
 
 impl Sender {
-    pub(crate) async fn new(id: PeerId, peer_addr: Addr<Peer>) -> MediaResult<Self> {
-        let pc =
-            Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Sender).await?;
+    pub(crate) async fn new(
+        id: PeerId,
+        peer_addr: Addr<Peer>,
+        sfu_config: SfuConfig,
+    ) -> MediaResult<Self> {
+        let pc = Self::create_connection(
+            id.clone(),
+            peer_addr.clone(),
+            ConnectorType::Sender,
+            sfu_config,
+        )
+        .await?;
         // let signaler = Signaler::new(id.clone(), peer_addr.clone());
         Ok(Self {
             id,
@@ -111,7 +121,6 @@ impl Sender {
         media.subscribe(track).await;
         Ok(())
     }
-
 
     pub async fn remove_track(&mut self, media_id: MediaId) -> MediaResult<()> {
         let media_id_string = media_id.to_string();

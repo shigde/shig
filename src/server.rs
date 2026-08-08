@@ -30,12 +30,14 @@ async fn index(_req: HttpRequest) -> impl Responder {
 #[derive(Deserialize, Clone, Debug)]
 pub struct ConfigFile {
     pub server: ServerConfig,
-    pub sfu: SfuConfig,
     pub files: FilesConfig,
     pub federation: FederationConfig,
     pub database: DbConfig,
     pub jwt: JWTConfig,
     pub mail: MailConfig,
+
+    #[serde(default)]
+    pub sfu: SfuConfig,
 
     #[serde(default)]
     pub relay: RelayConfig,

@@ -17,6 +17,7 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 use webrtc::track::track_remote::TrackRemote;
+use crate::sfu::config::SfuConfig;
 
 #[derive(Clone)]
 pub struct Receiver {
@@ -52,9 +53,10 @@ impl Receiver {
         id: PeerId,
         peer_addr: Addr<Peer>,
         lobby_addr: Addr<Lobby>,
+        sfu_config: SfuConfig,
     ) -> MediaResult<Self> {
         let pc =
-            Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Receiver).await?;
+            Self::create_connection(id.clone(), peer_addr.clone(), ConnectorType::Receiver, sfu_config).await?;
 
         Ok(Self {
             id,

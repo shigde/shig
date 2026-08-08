@@ -200,9 +200,10 @@ The SFU handles the live WebRTC conference media between participants. The curre
 
 ```toml
 [sfu]
+advertised_ip = ""
+port_min = 50000
+port_max = 51000
 ```
-
-At the moment there are no production fields to set here.
 
 ## Relay
 

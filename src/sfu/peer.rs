@@ -12,11 +12,13 @@ use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::sfu::config::SfuConfig;
 
 pub struct Peer {
     pub id: PeerId,
     #[allow(dead_code)]
     pub role: PeerRole,
+    sfu_config: SfuConfig,
     parent_addr: Addr<Lobby>,
     receiver: Option<Arc<Mutex<Receiver>>>,
     sender: Option<Arc<Mutex<Sender>>>,
@@ -24,11 +26,12 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(id: PeerId, parent_addr: Addr<Lobby>, role: PeerRole) -> Self {
+    pub fn new(id: PeerId, parent_addr: Addr<Lobby>, role: PeerRole, sfu_config: SfuConfig) -> Self {
         Self {
             id: id.clone(),
             role,
             parent_addr,
+            sfu_config,
             receiver: None,
             sender: None,
             control_channel: Arc::new(Mutex::new(ControlDataChannel::new(id))),
@@ -65,9 +68,10 @@ impl Handler<PeerStartReceiving> for Peer {
         let sdp_offer = msg.offer;
 
         // Prepare the Future
+        let sfu_config = self.sfu_config.clone();
         Box::pin(
             async move {
-                let mut receiver = Receiver::new(id, addr, lobby_addr).await?;
+                let mut receiver = Receiver::new(id, addr, lobby_addr, sfu_config).await?;
                 let answer = receiver.connect(sdp_offer.as_str()).await?;
                 Ok((receiver, answer))
             }
@@ -99,9 +103,10 @@ impl Handler<PeerStartSending> for Peer {
         let addr = ctx.address();
 
         // Prepare the Future
+        let sfu_config = self.sfu_config.clone();
         Box::pin(
             async move {
-                let mut sender = Sender::new(id.clone(), addr).await?;
+                let mut sender = Sender::new(id.clone(), addr, sfu_config).await?;
                 for media in msg.medias {
                     match sender.add_media(media.clone()).await {
                         Ok(_) => {

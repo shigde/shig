@@ -1,12 +1,17 @@
+use crate::sfu::config::SfuConfig;
 use crate::sfu::media::error::{MediaError, MediaResult};
 use crate::sfu::media::message::MediaMessage;
+use crate::sfu::media::track_info::InboundTrackInfo;
 use crate::sfu::peer::{Peer, PeerId};
 use actix::Addr;
 use derive_more::Display;
 use std::sync::Arc;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::APIBuilder;
+use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
+use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
 use webrtc::interceptor::registry::Registry;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
@@ -14,7 +19,6 @@ use webrtc::peer_connection::policy::bundle_policy::RTCBundlePolicy;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_receiver::RTCRtpReceiver;
-use crate::sfu::media::track_info::InboundTrackInfo;
 
 #[derive(Clone, Copy, Display)]
 pub enum ConnectorType {
@@ -35,8 +39,23 @@ pub(crate) trait Connector {
         id: PeerId,
         peer_addr: Addr<Peer>,
         conn_type: ConnectorType,
+        sfu_config: SfuConfig,
     ) -> MediaResult<Arc<RTCPeerConnection>> {
         let mut m = MediaEngine::default();
+        let mut setting_engine = SettingEngine::default();
+
+        if !sfu_config.advertised_ip.is_empty() {
+            setting_engine.set_nat_1to1_ips(
+                vec![sfu_config.advertised_ip.clone()],
+                RTCIceCandidateType::Host,
+            )
+        }
+
+        let ephemeral = EphemeralUDP::new(sfu_config.port_min, sfu_config.port_max)
+            .expect("failed to define ephemeral UDP");
+
+        let udp_network = UDPNetwork::Ephemeral(ephemeral);
+        setting_engine.set_udp_network(udp_network);
 
         m.register_default_codecs()?;
 
@@ -45,6 +64,7 @@ pub(crate) trait Connector {
 
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
+            .with_setting_engine(setting_engine)
             .with_media_engine(m)
             .with_interceptor_registry(registry)
             .build();
