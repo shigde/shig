@@ -46,7 +46,7 @@ impl ControlDataChannel {
     pub async fn send_answer(&mut self, answer: String, number: u64) -> MediaResult<()> {
         log::info!("signaling (for Sender) answer, peer_id={}", self.id);
 
-        let msg = DataChannelMsg::OfferMsg(SdpMsgData {
+        let msg = DataChannelMsg::AnswerMsg(SdpMsgData {
             number,
             sdp: answer,
         });

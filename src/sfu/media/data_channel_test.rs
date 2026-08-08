@@ -34,6 +34,32 @@ mod tests {
     }
 
     #[test]
+    fn test_from_data_channel_message_bin_answer() {
+        let json = r#"{
+            "type": "2",
+            "data": {
+                "number": 43,
+                "sdp": "v=0 answer sdp"
+            }
+        }"#;
+
+        let dcm = DataChannelMessage {
+            data: Bytes::from(json.as_bytes().to_vec()),
+            is_string: false,
+        };
+
+        let msg = DataChannelMsg::from_data_channel_message_bin(&dcm).expect("should decode");
+
+        match msg {
+            DataChannelMsg::AnswerMsg(data) => {
+                assert_eq!(data.number, 43);
+                assert_eq!(data.sdp, "v=0 answer sdp");
+            }
+            other => panic!("expected AnswerMsg, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_from_data_channel_message_bin_wrong_type() {
         let dcm = DataChannelMessage {
             data: Bytes::from_static(b"{}"),
