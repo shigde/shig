@@ -76,13 +76,16 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                 "10000000".into(),
 
                 "-max_delay".into(),
-                "1000000".into(),
+                "2000000".into(),
 
                 "-reorder_queue_size".into(),
                 "1024".into(),
 
                 "-thread_queue_size".into(),
                 "1024".into(),
+
+                "-buffer_size".into(),
+                "10485760".into(),
 
                 "-f".into(),
                 "sdp".into(),
@@ -118,7 +121,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                 "-1".into(),
 
                 "-frag_duration".into(),
-                "100000".into(), // 100ms
+                "250000".into(), // 250ms
 
                 "-f".into(),
                 "mp4".into(),
