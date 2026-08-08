@@ -218,7 +218,9 @@ This is separate from the WebRTC SFU. The SFU handles the conference media, whil
 listen = "127.0.0.1:4443"
 ```
 
-With SNI routing, the relay listens locally because Nginx forwards public `relay.example.com:443` to `127.0.0.1:4443`.
+With Nginx stream routing, the relay can listen locally because Nginx forwards public relay traffic on `443` to `127.0.0.1:4443`.
+
+TCP `443` uses SNI routing, so `relay.example.com` can share the public HTTPS port with the web client domains. UDP `443` is forwarded completely to the relay for QUIC/WebTransport.
 
 `[relay.server.tls]` belongs only to the relay. It is separate from `[server.tls]`.
 

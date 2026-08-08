@@ -7,7 +7,7 @@ Public traffic:
 ```text
 https://example.com:443        -> nginx stream -> nginx https on 127.0.0.1:8443 -> Angular + /api proxy
 https://www.example.com:443    -> nginx stream -> nginx https on 127.0.0.1:8443 -> Angular + /api proxy
-https://relay.example.com:443  -> nginx stream -> shig relay on 127.0.0.1:4443
+https://relay.example.com:443  -> nginx stream TCP/UDP -> shig relay on 127.0.0.1:4443
 http://*:80                    -> nginx http, certbot challenge, redirect to https
 ```
 

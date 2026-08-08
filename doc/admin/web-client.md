@@ -19,7 +19,7 @@ SHIG_API_PREFIX=/api
 SHIG_RELAY_SERVICE=https://relay.example.com
 ```
 
-Because Nginx routes `relay.example.com:443` to Shig relay `127.0.0.1:4443`, the public relay URL should not include `:4443`.
+Because Nginx routes public relay traffic on `relay.example.com:443` to Shig relay `127.0.0.1:4443`, the public relay URL should not include `:4443`.
 
 Verify after deployment:
 
@@ -93,7 +93,7 @@ ls -lah /etc/nginx/sites-enabled/shig
 readlink -f /etc/nginx/sites-enabled/shig
 ```
 
-### Nginx SNI Stream Routing
+### Nginx Stream Routing
 
 The `stream` block must be on top level in `/etc/nginx/nginx.conf`, not inside `http {}` and not inside `sites-available/shig` if that file is included from `http`.
 
@@ -114,7 +114,7 @@ Add this outside of the `http {}` block:
 ```nginx
 stream {
     map $ssl_preread_server_name $stream_backend {
-        relay.example.com shig_relay;
+        relay.example.com shig_relay_tcp;
         default web_https;
     }
 
@@ -122,7 +122,11 @@ stream {
         server 127.0.0.1:8443;
     }
 
-    upstream shig_relay {
+    upstream shig_relay_tcp {
+        server 127.0.0.1:4443;
+    }
+
+    upstream shig_relay_udp {
         server 127.0.0.1:4443;
     }
 
@@ -131,21 +135,28 @@ stream {
         proxy_pass $stream_backend;
         ssl_preread on;
     }
+
+    server {
+        listen 443 udp;
+        proxy_pass shig_relay_udp;
+    }
 }
 ```
 
 How this works:
 
-- Nginx reads the TLS ClientHello SNI name.
-- `example.com` and `www.example.com` go to Nginx HTTPS on `127.0.0.1:8443`.
-- `relay.example.com` goes to Shig relay on `127.0.0.1:4443`.
+- For TCP `443`, Nginx reads the TLS ClientHello SNI name.
+- TCP `example.com` and `www.example.com` go to Nginx HTTPS on `127.0.0.1:8443`.
+- TCP `relay.example.com` goes to Shig relay on `127.0.0.1:4443` for WebSocket fallback.
+- UDP `443` goes to Shig relay on `127.0.0.1:4443` for QUIC/WebTransport.
 - The stream router does not terminate TLS and does not use certificates.
 - The backend target provides the certificate.
+- UDP routing is not domain based here. All UDP traffic on public `443` is forwarded to the relay.
 
 Certificate ownership:
 
 - `example.com` certificate is used by Nginx on `127.0.0.1:8443`.
-- `relay.example.com` certificate is used by Shig relay on `127.0.0.1:4443`.
+- `relay.example.com` certificate is used by Shig relay on `127.0.0.1:4443` for TCP and UDP relay traffic.
 
 Test and reload:
 
