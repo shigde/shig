@@ -5,6 +5,7 @@
 - [Configuration](config.md)
 
 ### Architecture
+- [MoQ Relay Architecture](architecture/relay.md)
 - [SFU Signaling](architecture/sfu/signaling.md)
 
 ### Admin
