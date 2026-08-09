@@ -5,9 +5,13 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
+use tokio::time::{timeout, Duration};
 use tokio_util::sync::CancellationToken;
 
-pub const OUTPUT_BUFFER_SIZE: usize = 64 * 1024;
+pub const FFMPEG_STDOUT_BUFFER_SIZE: usize = 64 * 1024;
+pub const FMP4_PACKAGE_QUEUE_SIZE: usize = 512;
+const FMP4_PACKAGE_QUEUE_WARN_REMAINING: usize = 32;
+const FMP4_PACKAGE_QUEUE_SEND_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -196,7 +200,7 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
             .take()
             .ok_or_else(|| WorkerError::ProcessFailed("missing ffmpeg stdout".into()))?;
 
-        let mut buffer = BytesMut::with_capacity(OUTPUT_BUFFER_SIZE);
+        let mut buffer = BytesMut::with_capacity(FFMPEG_STDOUT_BUFFER_SIZE);
 
         let stream_id = self.stream_id.clone();
         log::info!("ffmpeg Process Started: stream_id={}", stream_id);
@@ -227,10 +231,37 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
 
                     let bytes = buffer.split().freeze();
 
-                    self.pkg_tx
-                        .send(bytes)
-                        .await
-                        .map_err(|e| WorkerError::ProcessFailed(format!("send ffmpeg pkg: {}", e)))?;
+                    let remaining_capacity = self.pkg_tx.capacity();
+                    if remaining_capacity <= FMP4_PACKAGE_QUEUE_WARN_REMAINING {
+                        log::warn!(
+                            "ffmpeg package queue almost full: stream_id={}, remaining_capacity={}",
+                            stream_id,
+                            remaining_capacity,
+                        );
+                    }
+
+                    let send_result = timeout(FMP4_PACKAGE_QUEUE_SEND_TIMEOUT, self.pkg_tx.send(bytes)).await;
+                    match send_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            stopped.cancel();
+                            return Err(WorkerError::ProcessFailed(format!("send ffmpeg pkg: {}", err)));
+                        }
+                        Err(_) => {
+                            log::error!(
+                                "ffmpeg package queue blocked: stream_id={}, timeout={:?}",
+                                stream_id,
+                                FMP4_PACKAGE_QUEUE_SEND_TIMEOUT,
+                            );
+                            let _ = child.kill().await;
+                            let _ = child.wait().await;
+                            stopped.cancel();
+                            return Err(WorkerError::ProcessFailed(format!(
+                                "send ffmpeg pkg timed out after {:?}",
+                                FMP4_PACKAGE_QUEUE_SEND_TIMEOUT,
+                            )));
+                        }
+                    }
                 }
 
                 status = child.wait() => {

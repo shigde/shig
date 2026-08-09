@@ -6,7 +6,7 @@ use crate::sfu::relay::port_allocator::PortAllocator;
 use crate::sfu::relay::rtp_forwarder::{forward_rtp_sender_to_udp, RtpForwarderKind};
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::StartWorker;
-use crate::worker::process::{Process, OUTPUT_BUFFER_SIZE};
+use crate::worker::process::{Process, FMP4_PACKAGE_QUEUE_SIZE};
 use actix::{
     Actor, ActorFutureExt, Addr, AsyncContext, Handler, ResponseActFuture, WrapFuture,
 };
@@ -98,7 +98,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
         // 3. forwarder start sending
         let (publisher_ready_tx, _publisher_ready_rx) = watch::channel(false);
         let (ffmpeg_ready_tx, ffmpeg_ready_rx) = watch::channel(false);
-        let (pkg_tx, pkg_rx) = mpsc::channel::<Bytes>(OUTPUT_BUFFER_SIZE);
+        let (pkg_tx, pkg_rx) = mpsc::channel::<Bytes>(FMP4_PACKAGE_QUEUE_SIZE);
 
         let process = match Process::build(
             &sdp,
