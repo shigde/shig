@@ -66,26 +66,26 @@ a=fmtp:{video_pt} {video_sdp_fmtp_line}\r\n"
                 "-fflags".into(),
                 "+genpts+igndts".into(),
 
-                "-flags".into(),
-                "low_delay".into(),
-
                 "-analyzeduration".into(),
                 "10000000".into(),
 
                 "-probesize".into(),
                 "10000000".into(),
 
+                "-rtbufsize".into(),
+                "67108864".into(),
+
                 "-max_delay".into(),
                 "1000000".into(),
 
                 "-reorder_queue_size".into(),
-                "1024".into(),
+                "4096".into(),
 
                 "-thread_queue_size".into(),
-                "1024".into(),
+                "4096".into(),
 
                 "-buffer_size".into(),
-                "10485760".into(),
+                "33554432".into(),
 
                 "-f".into(),
                 "sdp".into(),
