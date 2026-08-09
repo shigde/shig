@@ -2,7 +2,7 @@
 
 Certbot renews files under `/etc/letsencrypt`. Because Shig uses copied certificates under `/opt/shig/certs/relay`, copy them after renewal and restart Shig.
 
-See [config](config.md#relay) for the relay TLS paths expected by Shig.
+See [config](../config.md#relay) for the relay TLS paths expected by Shig.
 
 Create a deploy hook:
 

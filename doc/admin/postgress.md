@@ -61,7 +61,7 @@ psql "postgres://shig:change-this-password@127.0.0.1:5432/shig"
 
 If the password contains special URL characters, encode it in the database URL.
 
-See [config](config.md#database) for the matching `/opt/shig/config.toml` database settings.
+See [config](../config.md#database) for the matching `/opt/shig/config.toml` database settings.
 
 Examples:
 

@@ -14,7 +14,7 @@ Replace domains, usernames, passwords, tokens, and paths where needed. The examp
 ## Sections
 
 - [shig-server](shig-server.md)
-- [config](config.md)
+- [config](../config.md)
 - [web-client](web-client.md)
 - [firewall](firewall.md)
 - [mail](mail.md)

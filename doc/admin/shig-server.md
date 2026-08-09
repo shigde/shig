@@ -94,13 +94,13 @@ Install the binary:
 sudo install -m 755 "shig_server-${RELEASE_TAG}-x86_64-unknown-linux-gnu/shig_server" /opt/shig/bin/shig_server
 ```
 
-Then continue with [config](config.md), certificates, and systemd setup below.
+Then continue with [config](../config.md), certificates, and systemd setup below.
 
 ### Config
 
 Create `/opt/shig/config.toml`.
 
-See [config](config.md) for the full production example and field notes.
+See [config](../config.md) for the full production example and field notes.
 
 ### Certificates
 
@@ -129,7 +129,7 @@ sudo chmod 640 /opt/shig/certs/relay/*.pem
 
 Do not change permissions on `/etc/letsencrypt` if Nginx already uses those files.
 
-See [config](config.md#relay) for the relay certificate paths used by `/opt/shig/config.toml`.
+See [config](../config.md#relay) for the relay certificate paths used by `/opt/shig/config.toml`.
 
 ### systemd
 
@@ -226,7 +226,7 @@ It does not overwrite:
 /opt/shig/htdocs
 ```
 
-See [config](config.md) for all values that stay server-local.
+See [config](../config.md) for all values that stay server-local.
 
 The deployment user needs passwordless permission to restart and inspect the service:
 

@@ -29,7 +29,7 @@ sudo -u shig test -r /opt/shig/certs/relay/fullchain.pem && echo cert-ok
 sudo -u shig test -r /opt/shig/certs/relay/privkey.pem && echo key-ok
 ```
 
-See [config](config.md#relay) for the expected relay TLS paths.
+See [config](../config.md#relay) for the expected relay TLS paths.
 
 ### `Permission denied (os error 13)` during startup
 
@@ -45,7 +45,7 @@ If the app should create `htdocs`, `/opt/shig` must be writable by `shig`.
 
 The database URL contains an unescaped `%` or another special character. URL-encode the password.
 
-See [config](config.md#database) for the database URL format.
+See [config](../config.md#database) for the database URL format.
 
 ### Signup takes 60 seconds and returns 500
 
@@ -58,7 +58,7 @@ enable = false
 
 or fix SMTP and test it with `openssl`, `nc`, or `swaks`.
 
-See [config](config.md#mail) for the mail options.
+See [config](../config.md#mail) for the mail options.
 
 ### `gh release download` says `not a git repository`
 

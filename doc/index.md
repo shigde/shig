@@ -2,7 +2,18 @@
 
 ## Table of Contents
 
-- [Install](admin/install.md)
+- [Configuration](config.md)
+
+### Architecture
+- [SFU Signaling](architecture/sfu/signaling.md)
 
 ### Admin
-- [Shig Server Deployment](admin/deployment.md)
+- [Production](admin/production.md)
+- [Shig Server](admin/shig-server.md)
+- [Web Client](admin/web-client.md)
+- [Postgres](admin/postgress.md)
+- [Mail](admin/mail.md)
+- [Firewall](admin/firewall.md)
+- [Certificate Renewal](admin/certificate-renewal.md)
+- [Verification](admin/verification.md)
+- [Troubleshooting](admin/trouble-shouting.md)

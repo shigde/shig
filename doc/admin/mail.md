@@ -3,7 +3,7 @@
 ## Configuration
 Mail is optional. Configure it in `/opt/shig/config.toml`.
 
-See [config](config.md#mail) for the full mail configuration.
+See [config](../config.md#mail) for the full mail configuration.
 
 If mail is disabled:
 
@@ -85,7 +85,7 @@ smtp_host = "127.0.0.1"
 smtp_port = 25
 ```
 
-See [config](config.md#mail) for the matching `/opt/shig/config.toml` values.
+See [config](../config.md#mail) for the matching `/opt/shig/config.toml` values.
 
 Important: direct mail delivery needs correct DNS records, otherwise many providers will reject or classify messages as spam:
 
