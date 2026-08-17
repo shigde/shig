@@ -4,8 +4,10 @@ use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
-    LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
+    LeavePeer, Lobby, LobbyId, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
+use crate::sfu::rtc::media_command::{RtcError, StopRtcPool};
+use crate::sfu::rtc::pool_actor::RtcPoolActor;
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::ShutdownWorkers;
 use actix::prelude::*;
@@ -17,20 +19,21 @@ use std::collections::HashMap;
 
 pub mod config;
 pub mod db;
+pub mod endpoint;
 pub mod error;
 pub mod lobby;
-mod media;
 mod message;
 pub mod peer;
 mod relay;
+pub mod rtc;
 
 pub struct Sfu {
-    config: SfuConfig,
     lobbies: Box<HashMap<String, Addr<Lobby>>>,
     shutting_down: bool,
     db_actor: Addr<DbActor>,
     relay_state: RelayState,
     worker_manager: Addr<WorkerManager>,
+    rtc_pool: Addr<RtcPoolActor>,
 }
 
 impl Sfu {
@@ -38,18 +41,19 @@ impl Sfu {
         config: SfuConfig,
         pool: Pool<ConnectionManager<PgConnection>>,
         relay_state: RelayState,
-    ) -> Sfu {
+    ) -> Result<Sfu, RtcError> {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
         let worker_manager = WorkerManager::new().start();
-        Sfu {
-            config,
+        let rtc_pool = RtcPoolActor::launch(&config)?;
+        Ok(Sfu {
             lobbies,
-            relay_state,
             shutting_down: false,
             db_actor,
+            relay_state,
             worker_manager,
-        }
+            rtc_pool,
+        })
     }
 }
 
@@ -62,6 +66,7 @@ impl Actor for Sfu {
     }
 
     fn stopping(&mut self, _ctx: &mut Context<Self>) -> Running {
+        self.rtc_pool.do_send(StopRtcPool);
         log::info!("Sfu actor is stopping");
         Running::Stop
     }
@@ -91,12 +96,12 @@ impl Handler<PublishLobby> for Sfu {
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
                 let lobby_addr = Lobby::new(
-                    msg.lobby_uuid.clone(),
+                    LobbyId::new(msg.lobby_uuid.clone()),
                     msg.stream_uuid.clone(),
                     msg.user_uuid.clone(),
-                    self.config.clone(),
                     ctx.address(),
                     self.db_actor.clone(),
+                    self.rtc_pool.clone(),
                     self.relay_state.clone(),
                     self.worker_manager.clone(),
                 )
@@ -156,8 +161,6 @@ impl Handler<SubscribeLobby> for Sfu {
 
     fn handle(&mut self, msg: SubscribeLobby, _ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
-        let kind = msg.kind;
-
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
                 return Box::pin(fut::err(SfuError::LobbyNotExists()));
@@ -166,18 +169,18 @@ impl Handler<SubscribeLobby> for Sfu {
         };
 
         let user_uuid = msg.user_uuid.clone();
-        let answer = msg.answer.clone();
+        let kind = msg.kind;
+        let answer = msg.answer;
         let fut = async move {
             log::info!(
-                "peer subscribing lobby,  peer_id={}, lobby_id={}, kind={}",
+                "peer subscribing lobby, peer_id={}, lobby_id={}",
                 user_uuid.clone(),
                 lobby_uuid.clone(),
-                kind,
             );
             let result = lobby_addr
                 .send(Subscribe {
-                    kind,
                     user_uuid,
+                    kind,
                     answer,
                 })
                 .await;
@@ -301,6 +304,7 @@ impl Handler<Shutdown> for Sfu {
 
         let lobbies: Vec<_> = self.lobbies.values().cloned().collect();
         let worker = self.worker_manager.clone();
+        let rtc_pool = self.rtc_pool.clone();
 
         Box::pin(
             async move {
@@ -311,6 +315,7 @@ impl Handler<Shutdown> for Sfu {
                 let _ = join_all(lobby_shutdowns).await;
 
                 let _ = worker.send(ShutdownWorkers).await;
+                let _ = rtc_pool.send(StopRtcPool).await;
             }
             .into_actor(self)
             .map(|_, _act, ctx| {

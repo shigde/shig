@@ -1,5 +1,4 @@
 # Config
-
 This file describes the production `/opt/shig/config.toml`.
 
 Use it together with:
@@ -50,9 +49,12 @@ smtp_host = ""
 smtp_port = 587
 
 [sfu]
+bind_ip = "0.0.0.0"
 advertised_ip = ""
-port_min = 50000
-port_max = 51000
+cores = 0
+base_port = 50000
+dedicated_threads = true
+assignment = "least_loaded"
 
 [relay.server]
 listen = "127.0.0.1:4443"
@@ -203,10 +205,27 @@ The SFU handles the live WebRTC conference media between participants. The curre
 
 ```toml
 [sfu]
-advertised_ip = ""
-port_min = 50000
-port_max = 51000
+bind_ip = "0.0.0.0"
+advertised_ip = "203.0.113.10"
+cores = 4
+base_port = 50000
+dedicated_threads = true
+assignment = "least_loaded"
 ```
+
+The Sans-I/O media plane creates one SFU core and one UDP port per configured core. Each
+lobby is assigned to one core for its full lifetime. With `dedicated_threads = true`, every
+core runs on an independent Actix Arbiter and OS thread.
+
+`cores = 0` automatically uses the operating system's available parallelism. Core 0 uses
+`base_port`, and every following core uses the next consecutive UDP port. Supported assignment
+strategies are `least_loaded` and `round_robin`. If `advertised_ip` is empty, Shig uses
+`bind_ip`; when binding the unspecified address, it falls back to `127.0.0.1` for local
+development.
+
+For Kubernetes, expose the resulting contiguous UDP block from `base_port` through
+`base_port + resolved_core_count - 1` on the Pod and Service. In production, an explicit
+`cores` value makes that Service declaration deterministic.
 
 ## Relay
 

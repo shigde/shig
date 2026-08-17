@@ -1,113 +1,131 @@
 use crate::relay::state::RelayState;
-use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
+use crate::sfu::endpoint::EndpointId;
 use crate::sfu::error::{LobbyError, LobbyResult};
-use crate::sfu::media::router::Router;
-use crate::sfu::media::{AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::peer::{
-    Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerStartReceiving, PeerStartSending,
+    Peer, PeerFinishSubscribing, PeerId, PeerRole, PeerShutdown, PeerStartPublishing,
+    PeerStartSubscribing,
 };
-use crate::sfu::relay::actor::RelayActor;
-use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
+use crate::sfu::relay::actor::{
+    AttachRelaySource, DetachRelaySource, RelayActor, RelayShutdown, StartRelayMediaStream,
+    StopRelayMediaStream,
+};
+use crate::sfu::rtc::core_actor::RtcCoreActor;
+use crate::sfu::rtc::media_command::{AssignLobby, ReleaseLobby};
+use crate::sfu::rtc::pool_actor::RtcPoolActor;
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
     Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message,
     ResponseActFuture, WrapFuture,
 };
-use derive_more::Display;
 use moq_relay::AuthToken;
 use std::collections::HashMap;
 
+/// Identity of a lobby in the SFU domain.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
+pub struct LobbyId(String);
+
+impl LobbyId {
+    pub fn new<S: Into<String>>(value: S) -> Self {
+        Self(value.into())
+    }
+}
+
+/// Owns the logical peers and maps their two RTC endpoints back to a participant.
 pub struct Lobby {
-    id: String,
+    id: LobbyId,
     stream_uuid: String,
     #[allow(dead_code)]
-    host_uuid: String, // owner of this stream
-    sfu_config: SfuConfig,
-    peers: Box<HashMap<PeerId, Addr<Peer>>>,
+    host_uuid: String,
+    peers: HashMap<PeerId, Addr<Peer>>,
     parent_addr: Addr<Sfu>,
     db_actor_addr: Addr<DbActor>,
+    rtc_pool: Addr<RtcPoolActor>,
+    rtc_core: Option<Addr<RtcCoreActor>>,
     relay_addr: Addr<RelayActor>,
-    router: Router,
     shutting_down: bool,
-    streaming: bool,
 }
 
 impl Lobby {
     pub fn new(
-        uuid: String,
+        id: LobbyId,
         stream_uuid: String,
         host_uuid: String,
-        sfu_config: SfuConfig,
         parent_addr: Addr<Sfu>,
         db_actor_addr: Addr<DbActor>,
+        rtc_pool: Addr<RtcPoolActor>,
         relay_state: RelayState,
         worker_manager: Addr<WorkerManager>,
     ) -> Self {
-        let relay_addr =
-            RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
-
+        let relay_addr = RelayActor::new(relay_state, worker_manager, stream_uuid.clone()).start();
         Self {
-            id: uuid,
+            id,
             stream_uuid,
             host_uuid,
-            sfu_config,
-            peers: Box::new(HashMap::new()),
+            peers: HashMap::new(),
             parent_addr,
             db_actor_addr,
+            rtc_pool,
+            rtc_core: None,
             relay_addr,
-            router: Router::new(),
             shutting_down: false,
-            streaming: false,
         }
     }
 
     fn stop(&mut self, ctx: &mut Context<Self>) {
-        if self.streaming {
-            log::info!(
-                "stopping active relay media stream before lobby stop, lobby_id={}, stream_uuid={}",
-                self.id,
-                self.stream_uuid
-            );
-            self.relay_addr.do_send(StopRelayMediaStream {});
-            self.streaming = false;
-        }
-
+        self.rtc_pool.do_send(ReleaseLobby(self.id.clone()));
+        self.relay_addr.do_send(RelayShutdown);
         self.parent_addr.do_send(LobbyStopped {
-            id: self.id.clone(),
+            id: self.id.to_string(),
         });
         ctx.stop();
-    }
-
-    fn remove_media(&mut self, media_id: MediaId) {
-        if let Some(media) = self.router.medias.remove(&media_id) {
-            for (peer_id, peer_addr) in self.peers.iter() {
-                if peer_id != &media.peer_id {
-                    peer_addr.do_send(RemoveMedia {
-                        media_id: media_id.clone(),
-                    });
-                }
-            }
-        }
     }
 }
 
 impl Actor for Lobby {
     type Context = Context<Self>;
-
-    fn started(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("Lobby actor lobby_id={} is alive", self.id);
-    }
-
-    fn stopped(&mut self, _ctx: &mut Context<Self>) {
-        log::info!("Lobby actor lobby_id={} is stopped", self.id);
+    fn started(&mut self, ctx: &mut Self::Context) {
+        log::info!("lobby actor lobby_id={} is alive", self.id);
+        let pool = self.rtc_pool.clone();
+        let lobby_id = self.id.clone();
+        ctx.wait(
+            async move { pool.send(AssignLobby(lobby_id)).await }
+                .into_actor(self)
+                .map(|result, actor, ctx| match result {
+                    Ok(Ok(assignment)) => {
+                        log::info!(
+                            "lobby_id={} assigned to RTC core {} at {}",
+                            actor.id,
+                            assignment.core_id,
+                            assignment.media_addr
+                        );
+                        actor.rtc_core = Some(assignment.core);
+                    }
+                    Ok(Err(error)) => {
+                        log::error!(
+                            "RTC core assignment failed for lobby_id={}: {}",
+                            actor.id,
+                            error
+                        );
+                        ctx.stop();
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "RTC pool mailbox failed for lobby_id={}: {}",
+                            actor.id,
+                            error
+                        );
+                        ctx.stop();
+                    }
+                }),
+        );
     }
 }
 
 #[derive(Message)]
-#[rtype(result = " LobbyResult<String>")]
+#[rtype(result = "LobbyResult<String>")]
 pub struct Publish {
     pub user_uuid: String,
     pub offer: String,
@@ -116,62 +134,55 @@ pub struct Publish {
 
 impl Handler<Publish> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
-
     fn handle(&mut self, msg: Publish, ctx: &mut Self::Context) -> Self::Result {
-        let peer_id = PeerId::new(msg.user_uuid.clone());
-        let user_uuid = msg.user_uuid.clone();
-        let lobby_uuid = self.id.clone();
-        let stream_uuid = self.stream_uuid.clone();
-
-        // If the peer already exists, directly return a completed Future with error
+        let peer_id = PeerId::new(&msg.user_uuid);
         if self.peers.contains_key(&peer_id) {
-            return Box::pin(
-                async move { Err(LobbyError::PeerAlreadyExists(peer_id)) }.into_actor(self),
-            );
+            return Box::pin(actix::fut::err(LobbyError::PeerAlreadyExists(peer_id)));
         }
-
-        let peer_addr = Peer::new(
+        let publish_endpoint = EndpointId::publish(self.id.clone(), peer_id.clone());
+        let subscribe_endpoint = EndpointId::subscribe(self.id.clone(), peer_id.clone());
+        let Some(rtc_core) = self.rtc_core.clone() else {
+            return Box::pin(actix::fut::err(LobbyError::RtcCoreUnavailable(
+                "lobby has no RTC core assignment".to_owned(),
+            )));
+        };
+        let peer = Peer::new(
             peer_id.clone(),
             ctx.address(),
             msg.role,
-            self.sfu_config.clone(),
+            publish_endpoint.clone(),
+            subscribe_endpoint.clone(),
+            rtc_core,
         )
         .start();
-        self.peers.insert(peer_id, peer_addr.clone());
-
+        self.peers.insert(peer_id.clone(), peer.clone());
         self.db_actor_addr.do_send(AddParticipant {
-            lobby_uuid,
-            stream_uuid,
-            user_uuid,
+            lobby_uuid: self.id.to_string(),
+            stream_uuid: self.stream_uuid.clone(),
+            user_uuid: msg.user_uuid,
         });
 
-        let offer = msg.offer.clone();
-        let fut = async move {
-            let result = peer_addr.send(PeerStartReceiving { offer }).await;
-
-            match result {
-                Ok(val) => match val {
-                    Ok(answer) => Ok(answer),
-                    Err(e) => Err(LobbyError::PeerInternalError(e)),
-                },
-                Err(e) => Err(LobbyError::MailboxError(e)),
+        Box::pin(
+            async move {
+                peer.send(PeerStartPublishing { offer: msg.offer })
+                    .await
+                    .map_err(LobbyError::MailboxError)?
+                    .map_err(LobbyError::PeerInternalError)
             }
-        }
-        .into_actor(self);
-
-        Box::pin(fut)
+            .into_actor(self),
+        )
     }
 }
 
 #[derive(Message)]
-#[rtype(result = " LobbyResult<String>")]
+#[rtype(result = "LobbyResult<String>")]
 pub struct Subscribe {
-    pub kind: SubscribeKind,
     pub user_uuid: String,
+    pub kind: SubscribeKind,
     pub answer: Option<String>,
 }
 
-#[derive(Display)]
+#[derive(Debug, derive_more::Display)]
 pub enum SubscribeKind {
     Offer,
     Answer,
@@ -179,112 +190,75 @@ pub enum SubscribeKind {
 
 impl Handler<Subscribe> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
-
     fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) -> Self::Result {
-        let peer_id = PeerId::new(msg.user_uuid.clone());
-
-        let peer_addr = match self.peers.get(&peer_id) {
-            Some(addr) => addr.clone(),
-            None => {
-                return Box::pin(
-                    async move { Err(LobbyError::PeerNotExists(peer_id)) }.into_actor(self),
-                );
-            }
+        let peer_id = PeerId::new(msg.user_uuid);
+        let Some(peer) = self.peers.get(&peer_id).cloned() else {
+            return Box::pin(actix::fut::err(LobbyError::PeerNotExists(peer_id)));
         };
-
-        let answer_option = msg.answer.clone();
-        let kind = msg.kind;
-        let medias = match kind {
-            SubscribeKind::Offer => self.router.get_medias_without_peer(&peer_id),
-            SubscribeKind::Answer => vec![],
-        };
-
-        log::info!(
-            "subscribing Peer peer_id={} has medias medias_len={}",
-            peer_id,
-            medias.len()
-        );
-
-        let fut = async move {
-            let result = match kind {
-                SubscribeKind::Offer => peer_addr.send(PeerStartSending { medias }).await,
-                SubscribeKind::Answer => {
-                    let answer = answer_option.unwrap();
-                    peer_addr.send(PeerSending { answer }).await
-                }
-            };
-
-            match result {
-                Ok(val) => match val {
-                    Ok(answer) => Ok(answer),
-                    Err(e) => Err(LobbyError::PeerInternalError(e)),
-                },
-                Err(e) => Err(LobbyError::MailboxError(e)),
+        Box::pin(
+            async move {
+                let result = match msg.kind {
+                    SubscribeKind::Offer => peer.send(PeerStartSubscribing {}).await,
+                    SubscribeKind::Answer => {
+                        let answer = msg.answer.ok_or_else(|| {
+                            LobbyError::StreamingError("missing WHEP answer".to_owned())
+                        })?;
+                        peer.send(PeerFinishSubscribing { answer }).await
+                    }
+                };
+                result
+                    .map_err(LobbyError::MailboxError)?
+                    .map_err(LobbyError::PeerInternalError)
             }
-        }
-        .into_actor(self);
-
-        Box::pin(fut)
+            .into_actor(self),
+        )
     }
 }
 
 #[derive(Message)]
-#[rtype(result = " LobbyResult<()>")]
+#[rtype(result = "LobbyResult<()>")]
 pub struct LeavePeer {
     pub user_uuid: String,
 }
 
 impl Handler<LeavePeer> for Lobby {
     type Result = LobbyResult<()>;
-
-    fn handle(&mut self, msg: LeavePeer, _: &mut Self::Context) -> Self::Result {
-        let peer_id = PeerId::new(msg.user_uuid.clone());
-
-        let Some(peer_add) = self.peers.get(&peer_id).cloned() else {
-            return Err(LobbyError::PeerNotExists(peer_id));
-        };
-
-        // remove all medias
-        let medias = self.router.get_medias_of_peer(&peer_id);
-        for media in medias {
-            self.remove_media(media.id);
-        }
-
-        log::info!("send shutdown because peer_id={} is leaving lobby", peer_id);
-        peer_add.do_send(PeerShutdown {});
+    fn handle(&mut self, msg: LeavePeer, _ctx: &mut Self::Context) -> Self::Result {
+        let peer_id = PeerId::new(msg.user_uuid);
+        let peer = self
+            .peers
+            .get(&peer_id)
+            .ok_or_else(|| LobbyError::PeerNotExists(peer_id.clone()))?;
+        peer.do_send(PeerShutdown);
         Ok(())
     }
 }
 
 #[derive(Message)]
-#[rtype(result = " LobbyResult<()>")]
+#[rtype(result = "LobbyResult<()>")]
 pub struct TimeoutPeer {
     #[allow(dead_code)]
-    user_uuid: String,
+    pub user_uuid: String,
 }
 
 impl Handler<TimeoutPeer> for Lobby {
     type Result = LobbyResult<()>;
-
-    fn handle(&mut self, _msg: TimeoutPeer, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: TimeoutPeer, _ctx: &mut Self::Context) -> Self::Result {
         Ok(())
     }
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct LobbyShutdown {}
+pub struct LobbyShutdown;
 
 impl Handler<LobbyShutdown> for Lobby {
     type Result = ();
-
-    fn handle(&mut self, _msg: LobbyShutdown, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: LobbyShutdown, ctx: &mut Self::Context) {
         self.shutting_down = true;
-
-        for (_, addr) in self.peers.iter() {
-            addr.do_send(PeerShutdown {});
+        for peer in self.peers.values() {
+            peer.do_send(PeerShutdown);
         }
-
         if self.peers.is_empty() {
             self.stop(ctx);
         }
@@ -295,108 +269,52 @@ impl Handler<LobbyShutdown> for Lobby {
 #[rtype(result = "()")]
 pub struct PeerStopped {
     pub id: PeerId,
+    pub publish_endpoint: EndpointId,
 }
 
 impl Handler<PeerStopped> for Lobby {
     type Result = ();
-
-    fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) {
         self.peers.remove(&msg.id);
+        self.relay_addr.do_send(DetachRelaySource {
+            endpoint_id: msg.publish_endpoint,
+        });
         self.db_actor_addr.do_send(RemoveParticipant {
-            lobby_uuid: self.id.clone(),
+            lobby_uuid: self.id.to_string(),
             stream_uuid: self.stream_uuid.clone(),
             user_uuid: msg.id.as_user_uuid(),
         });
-
         if self.peers.is_empty() {
             self.stop(ctx);
         }
     }
 }
 
-impl Handler<AddMedia> for Lobby {
+/// Emitted by a peer after its publish endpoint has completed negotiation.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerStartedSending {
+    pub peer_id: PeerId,
+    pub endpoint_id: EndpointId,
+}
+
+impl Handler<PeerStartedSending> for Lobby {
     type Result = ();
 
-    fn handle(&mut self, msg: AddMedia, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, message: PeerStartedSending, _ctx: &mut Self::Context) {
         log::info!(
-            "Handle add Media: peer_id={}, media_id={}, kind={}",
-            msg.media.peer_id,
-            msg.media.id,
-            msg.media.kind
+            "peer started sending, lobby_id={}, peer_id={}",
+            self.id,
+            message.peer_id
         );
-        if self.router.medias.contains_key(&msg.media.id) {
-            log::warn!(
-                "media already exists, peer_id={}, media_id={}, kind={}",
-                msg.media.peer_id,
-                msg.media.id,
-                msg.media.kind
-            );
-            return;
-        }
-
-        match self
-            .router
-            .medias
-            .insert(msg.media.id.clone(), msg.media.clone())
-        {
-            Some(_) => log::warn!(
-                "media already exists, peer_id={}, media_id={}, kind={}",
-                msg.media.peer_id,
-                msg.media.id,
-                msg.media.kind
-            ),
-            None => {
-                log::info!(
-                    "add media, peer_id={}, media_id={}, kind={}",
-                    msg.media.peer_id,
-                    msg.media.id,
-                    msg.media.kind
-                );
-                for (peer_id, peer_addr) in self.peers.iter() {
-                    if peer_id != &msg.media.peer_id {
-                        peer_addr.do_send(AddMedia {
-                            media: msg.media.clone(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl Handler<RemoveMedia> for Lobby {
-    type Result = ();
-
-    fn handle(&mut self, msg: RemoveMedia, _ctx: &mut Self::Context) -> Self::Result {
-        self.remove_media(msg.media_id);
-    }
-}
-
-impl Handler<MuteMedia> for Lobby {
-    type Result = ();
-
-    fn handle(&mut self, msg: MuteMedia, _ctx: &mut Self::Context) -> Self::Result {
-        let Some(media) = self
-            .router
-            .get_media_of_peer_by_mid(&msg.peer_id, msg.mid.as_str())
-        else {
-            return;
-        };
-        media.set_mut(msg.mute);
-
-        for (peer_id, peer_addr) in self.peers.iter() {
-            if peer_id != &media.peer_id {
-                peer_addr.do_send(MuteRemoteMedia {
-                    media_id: media.id.clone(),
-                    mute: msg.mute,
-                });
-            }
-        }
+        self.relay_addr.do_send(AttachRelaySource {
+            endpoint_id: message.endpoint_id,
+        });
     }
 }
 
 #[derive(Message)]
-#[rtype(result = " LobbyResult<()>")]
+#[rtype(result = "LobbyResult<()>")]
 pub struct PublishStream {
     pub publishing: bool,
     pub auth_token: Option<AuthToken>,
@@ -404,96 +322,28 @@ pub struct PublishStream {
 
 impl Handler<PublishStream> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<()>>;
-
     fn handle(&mut self, msg: PublishStream, _ctx: &mut Self::Context) -> Self::Result {
-        let relay_addr = self.relay_addr.clone();
-        if msg.publishing {
-            let Some(auth_token) = msg.auth_token else {
-                return Box::pin(
-                    async { Err(LobbyError::StreamingError("missing auth_token".to_string())) }
-                        .into_actor(self),
-                );
-            };
-
-            let media_stream = self.router.get_media_stream();
-
-            if media_stream.audio.is_none() && media_stream.video.is_none() {
-                return Box::pin(
-                    async {
-                        Err(LobbyError::StreamingError(
-                            "no audio and video stream exists".to_string(),
-                        ))
-                    }
-                    .into_actor(self),
-                );
+        let relay = self.relay_addr.clone();
+        Box::pin(
+            async move {
+                if msg.publishing {
+                    let auth_token = msg.auth_token.ok_or_else(|| {
+                        LobbyError::StreamingError("missing auth_token".to_owned())
+                    })?;
+                    relay
+                        .send(StartRelayMediaStream { auth_token })
+                        .await
+                        .map_err(|error| LobbyError::StreamingError(error.to_string()))?
+                        .map_err(LobbyError::StreamingError)
+                } else {
+                    relay
+                        .send(StopRelayMediaStream)
+                        .await
+                        .map_err(|error| LobbyError::StreamingError(error.to_string()))?
+                        .map_err(LobbyError::StreamingError)
+                }
             }
-
-            let stream_start = StartRelayMediaStream {
-                media_stream,
-                auth_token,
-            };
-
-            let stream_id = self.stream_uuid.clone();
-            Box::pin(
-                async move {
-                    log::info!("start relay media stream: stream_uuid={:?} ", stream_id);
-                    relay_addr
-                        .send(stream_start)
-                        .await
-                        .map_err(|e| {
-                            LobbyError::StreamingError(format!(
-                                "relay mailbox, stream_id={:?},error: {}",
-                                stream_id, e
-                            ))
-                        })?
-                        .map_err(|e| {
-                            LobbyError::StreamingError(format!(
-                                "relay start, stream_id={:?}, error: {}",
-                                stream_id, e
-                            ))
-                        })?;
-
-                    Ok(())
-                }
-                .into_actor(self)
-                .map(|result, actor, _ctx| {
-                    if result.is_ok() {
-                        actor.streaming = true;
-                    }
-                    result
-                }),
-            )
-        } else {
-            let stream_id = self.stream_uuid.clone();
-            Box::pin(
-                async move {
-                    log::info!("stop relay media stream: stream_uuid={:?} ", stream_id);
-                    relay_addr
-                        .send(StopRelayMediaStream {})
-                        .await
-                        .map_err(|e| {
-                            LobbyError::StreamingError(format!(
-                                "relay mailbox, stream_id={:?}, error: {}",
-                                stream_id, e
-                            ))
-                        })?
-                        .map_err(|e| {
-                            LobbyError::StreamingError(format!(
-                                "relay stop,  stream_id={:?}, error: {}",
-                                stream_id, e
-                            ))
-                        })?;
-
-                    Ok(())
-                }
-                .into_actor(self)
-                .map(|result, actor, _ctx| {
-                    if result.is_ok() {
-                        actor.streaming = false;
-                    }
-                    result
-                }),
-            )
-        }
+            .into_actor(self),
+        )
     }
 }

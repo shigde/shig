@@ -94,7 +94,11 @@ fn main() {
             server_cfg.sfu.clone(),
             pool.clone(),
             relay_server.state.clone(),
-        );
+        )
+        .unwrap_or_else(|error| {
+            log::error!("failed to initialize RTC shard pool: {error}");
+            exit(1);
+        });
         let sfu_addr = sfu.start();
 
         // Shutdown-Signal
