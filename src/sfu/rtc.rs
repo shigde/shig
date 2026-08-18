@@ -4,6 +4,7 @@
 //! module. UDP packets, protocol timers, RTP forwarding, and RTCP forwarding are
 //! driven by [`core_actor::RtcCoreActor`] and do not travel through the lobby/peer mailboxes.
 
+pub mod core_actor;
 pub mod media_command;
 pub mod pool_actor;
-pub mod core_actor;
+pub mod media;

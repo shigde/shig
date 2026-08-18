@@ -2,13 +2,13 @@ use crate::sfu::rtc::media_command::{
     ApplyEndpointAnswer, ApplySfuEvent, CloseEndpoint, CreateEndpointOffer, NegotiateEndpoint,
     RtcError, RtcEvent, SetRtcEventSink, StopRtcCore,
 };
+use crate::sfu::rtc::media::{MediaEngine, SFUEvent};
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, Recipient, Running,
 };
 use bytes::BytesMut;
 use rtc::shared::{TaggedBytesMut, TransportContext, TransportProtocol};
 use sansio::Protocol;
-use sansio_sfu::{SFUEvent, Sfu as SansIoSfu};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ const IDLE_TIMEOUT_POLL: Duration = Duration::from_millis(100);
 /// Owns one RTC engine and drives it on a single Actix Arbiter.
 pub struct RtcCoreActor {
     id: RtcCoreId,
-    engine: SansIoSfu,
+    engine: MediaEngine,
     socket: Arc<UdpSocket>,
     advertised_addr: SocketAddr,
     event_sink: Option<Recipient<RtcEvent>>,
@@ -45,7 +45,7 @@ impl RtcCoreActor {
     pub fn from_socket(id: RtcCoreId, socket: Arc<UdpSocket>, advertised_addr: SocketAddr) -> Self {
         Self {
             id,
-            engine: SansIoSfu::new(id, advertised_addr),
+            engine: MediaEngine::new(id, advertised_addr),
             socket,
             advertised_addr,
             event_sink: None,

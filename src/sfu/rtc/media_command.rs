@@ -1,10 +1,10 @@
 use actix::{Message, Recipient};
-use sansio_sfu::SFUEvent;
 use std::fmt::{Display, Formatter};
 
 use crate::sfu::endpoint::EndpointId;
 use crate::sfu::lobby::LobbyId;
 use crate::sfu::rtc::core_actor::{RtcCoreActor, RtcCoreId};
+use crate::sfu::rtc::media::SFUEvent;
 use actix::Addr;
 
 /// Error returned at the actor boundary.
