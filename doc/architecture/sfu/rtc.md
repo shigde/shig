@@ -53,8 +53,8 @@ The existing actors remain the control plane:
 - `Lobby` represents a channel and owns its subscription policy.
 - Every `Lobby` owns one `RelayActor` and controls its lifecycle. The relay's future media-input
   interface is intentionally left open until the endpoint-based RTC output is defined.
-- After publish negotiation, `Peer` emits `PeerStartedSending`. The `Lobby` forwards the publish
-  `EndpointId` to its `RelayActor` as a relay source; leaving peers detach that source again.
+- After publish negotiation, `Peer` emits `PublishEndpointSucceeded`. Relay endpoint creation is
+  not part of the publish setup; it is triggered by a separate request.
 - `Peer` represents one logical participant.
 - `DbActor` persists lobby and participant state.
 - `RtcPoolActor` assigns each lobby to one media core for its entire lifetime.
@@ -99,7 +99,7 @@ sequenceDiagram
     RP-->>L: RtcCoreAssignment(Core Addr)
     S->>L: Publish
     L->>P: construct with Core Addr
-    L->>P: PeerStartPublishing(offer)
+    L->>P: CreatePublishEndpoint(offer)
     P->>RS: NegotiateEndpoint directly
     RS->>RS: Apply session description
     RS-->>P: SFUEvent::SessionDescription(answer)

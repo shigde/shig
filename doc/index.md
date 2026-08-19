@@ -7,9 +7,11 @@
 ### Architecture
 - [MoQ Relay Architecture](architecture/relay.md)
 - [SFU Signaling](architecture/sfu/signaling.md)
+- [SFU Signaling Metadata](architecture/sfu/signaling-metadata.md)
 - [RTC Architecture](architecture/sfu/rtc.md)
 - [SFU Performance Model](architecture/sfu/performance.md)
 - [SFU Implementation Plan](architecture/sfu/migration.md)
+- [Architecture Use Cases](architecture/use-cases/index.md)
 
 ### Admin
 - [Production](admin/production.md)

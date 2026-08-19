@@ -4,8 +4,8 @@ use crate::sfu::db::DbActor;
 use crate::sfu::endpoint::EndpointId;
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::peer::{
-    Peer, PeerFinishSubscribing, PeerId, PeerRole, PeerShutdown, PeerStartPublishing,
-    PeerStartSubscribing,
+    CompleteSubscriptionEndpoint, CreatePublishEndpoint, CreateSubscriptionEndpoint, Peer, PeerId,
+    PeerRole, PeerShutdown,
 };
 use crate::sfu::relay::actor::{
     AttachRelaySource, DetachRelaySource, RelayActor, RelayShutdown, StartRelayMediaStream,
@@ -164,7 +164,7 @@ impl Handler<Publish> for Lobby {
 
         Box::pin(
             async move {
-                peer.send(PeerStartPublishing { offer: msg.offer })
+                peer.send(CreatePublishEndpoint { offer: msg.offer })
                     .await
                     .map_err(LobbyError::MailboxError)?
                     .map_err(LobbyError::PeerInternalError)
@@ -198,12 +198,12 @@ impl Handler<Subscribe> for Lobby {
         Box::pin(
             async move {
                 let result = match msg.kind {
-                    SubscribeKind::Offer => peer.send(PeerStartSubscribing {}).await,
+                    SubscribeKind::Offer => peer.send(CreateSubscriptionEndpoint {}).await,
                     SubscribeKind::Answer => {
                         let answer = msg.answer.ok_or_else(|| {
                             LobbyError::StreamingError("missing WHEP answer".to_owned())
                         })?;
-                        peer.send(PeerFinishSubscribing { answer }).await
+                        peer.send(CompleteSubscriptionEndpoint { answer }).await
                     }
                 };
                 result
@@ -293,23 +293,44 @@ impl Handler<PeerStopped> for Lobby {
 /// Emitted by a peer after its publish endpoint has completed negotiation.
 #[derive(Message)]
 #[rtype(result = "()")]
-pub struct PeerStartedSending {
+pub struct PublishEndpointSucceeded {
     pub peer_id: PeerId,
     pub endpoint_id: EndpointId,
 }
 
-impl Handler<PeerStartedSending> for Lobby {
+impl Handler<PublishEndpointSucceeded> for Lobby {
     type Result = ();
 
-    fn handle(&mut self, message: PeerStartedSending, _ctx: &mut Self::Context) {
+    fn handle(&mut self, message: PublishEndpointSucceeded, _ctx: &mut Self::Context) {
         log::info!(
-            "peer started sending, lobby_id={}, peer_id={}",
+            "publish endpoint succeeded, lobby_id={}, peer_id={}",
             self.id,
             message.peer_id
         );
         self.relay_addr.do_send(AttachRelaySource {
             endpoint_id: message.endpoint_id,
         });
+    }
+}
+
+/// Emitted by a peer after its subscribe endpoint has completed negotiation.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SubscriptionEndpointSucceeded {
+    pub peer_id: PeerId,
+    pub endpoint_id: EndpointId,
+}
+
+impl Handler<SubscriptionEndpointSucceeded> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, message: SubscriptionEndpointSucceeded, _ctx: &mut Self::Context) {
+        log::info!(
+            "subscription endpoint succeeded, lobby_id={}, peer_id={}, endpoint={:?}",
+            self.id,
+            message.peer_id,
+            message.endpoint_id
+        );
     }
 }
 

@@ -1,6 +1,8 @@
 use crate::sfu::endpoint::EndpointId;
 use crate::sfu::error::{PeerError, PeerResult};
-use crate::sfu::lobby::{Lobby, PeerStartedSending, PeerStopped};
+use crate::sfu::lobby::{
+    Lobby, PeerStopped, PublishEndpointSucceeded, SubscriptionEndpointSucceeded,
+};
 use crate::sfu::rtc::core_actor::RtcCoreActor;
 use crate::sfu::rtc::media_command::{
     ApplyEndpointAnswer, CloseEndpoint, CreateEndpointOffer, NegotiateEndpoint,
@@ -69,19 +71,19 @@ impl Actor for Peer {
 
 #[derive(Message)]
 #[rtype(result = "PeerResult<String>")]
-pub struct PeerStartPublishing {
+pub struct CreatePublishEndpoint {
     pub offer: String,
 }
 
-impl Handler<PeerStartPublishing> for Peer {
+impl Handler<CreatePublishEndpoint> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
-    fn handle(&mut self, msg: PeerStartPublishing, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: CreatePublishEndpoint, _ctx: &mut Self::Context) -> Self::Result {
         let endpoint_id = self.publish_endpoint.clone();
         Box::pin(
             self.negotiate(endpoint_id.clone(), msg.offer)
                 .map(move |result, actor, _ctx| {
                     if result.is_ok() {
-                        actor.parent_addr.do_send(PeerStartedSending {
+                        actor.parent_addr.do_send(PublishEndpointSucceeded {
                             peer_id: actor.id.clone(),
                             endpoint_id,
                         });
@@ -94,11 +96,15 @@ impl Handler<PeerStartPublishing> for Peer {
 
 #[derive(Message)]
 #[rtype(result = "PeerResult<String>")]
-pub struct PeerStartSubscribing {}
+pub struct CreateSubscriptionEndpoint {}
 
-impl Handler<PeerStartSubscribing> for Peer {
+impl Handler<CreateSubscriptionEndpoint> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
-    fn handle(&mut self, _msg: PeerStartSubscribing, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        _msg: CreateSubscriptionEndpoint,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         let rtc_core = self.rtc_core.clone();
         let endpoint_id = self.subscribe_endpoint.clone();
         Box::pin(
@@ -116,16 +122,21 @@ impl Handler<PeerStartSubscribing> for Peer {
 
 #[derive(Message)]
 #[rtype(result = "PeerResult<String>")]
-pub struct PeerFinishSubscribing {
+pub struct CompleteSubscriptionEndpoint {
     pub answer: String,
 }
 
-impl Handler<PeerFinishSubscribing> for Peer {
+impl Handler<CompleteSubscriptionEndpoint> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
-    fn handle(&mut self, msg: PeerFinishSubscribing, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        msg: CompleteSubscriptionEndpoint,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         let rtc_core = self.rtc_core.clone();
         let endpoint_id = self.subscribe_endpoint.clone();
+        let succeeded_endpoint_id = endpoint_id.clone();
         Box::pin(
             async move {
                 rtc_core
@@ -138,7 +149,16 @@ impl Handler<PeerFinishSubscribing> for Peer {
                     .map_err(PeerError::from)?;
                 Ok(String::new())
             }
-            .into_actor(self),
+            .into_actor(self)
+            .map(move |result, actor, _ctx| {
+                if result.is_ok() {
+                    actor.parent_addr.do_send(SubscriptionEndpointSucceeded {
+                        peer_id: actor.id.clone(),
+                        endpoint_id: succeeded_endpoint_id.clone(),
+                    });
+                }
+                result
+            }),
         )
     }
 }

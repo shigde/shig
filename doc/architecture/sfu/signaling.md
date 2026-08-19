@@ -5,6 +5,8 @@ This document describes how a Shig client negotiates WebRTC sessions with the SF
 In this document, `client` means any Shig client implementation: browser, native app, bot, or another WebRTC-capable integration.
 
 The initial connection uses WHIP and WHEP over HTTP. Later media changes are signaled over the Control DataChannel.
+The SDP metadata contract used by these flows is documented in
+[Signaling Metadata](signaling-metadata.md).
 
 ## Roles
 
