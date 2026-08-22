@@ -250,7 +250,7 @@ impl RtcLobby {
                         continue;
                     }
                     if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
-                        match endpoint.add_forward_track(track.track.clone()) {
+                        match endpoint.add_forward_track(track.track.clone(), track.info.clone()) {
                             Ok(sender) => self.forward.insert(key.clone(), subscriber, sender),
                             Err(err) => warn!(
                                 "{}: failed to add forwarding {}->{} for mid {}: {}",
@@ -798,6 +798,12 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     endpoint.close()?;
                     remove_endpoint = true;
                     needs_reconcile = true;
+                } else if let SFUEvent::CreateOffer { request_id, .. } = &evt {
+                    self.reconcile();
+                    if let Some(endpoint) = self.endpoints.get_mut(&rtc_endpoint_id) {
+                        endpoint.create_offer(*request_id)?;
+                    }
+                    needs_reconcile = false;
                 } else {
                     needs_reconcile = matches!(evt, SFUEvent::SessionDescription { .. });
                     endpoint.handle_event(RtcEndpointEvent::SFUEvent(evt))?;

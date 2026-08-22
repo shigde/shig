@@ -2,6 +2,7 @@ use super::event::RequestId;
 use super::lobby::RtcLobbyId;
 use super::SFUEvent;
 use crate::sfu::endpoint::EndpointId;
+use crate::util::id::random_id;
 use log::{trace, warn};
 use rtc::data_channel::{RTCDataChannelId, RTCDataChannelMessage};
 use rtc::ice::candidate::CandidateConfig;
@@ -103,6 +104,7 @@ impl RtcEndpointBuilder {
             reads: Default::default(),
             writes: Default::default(),
             events: Default::default(),
+            outbound_track_info: Default::default(),
         })
     }
 }
@@ -169,6 +171,7 @@ pub(crate) struct RtcEndpoint {
     reads: VecDeque<RTCMessage>,
     writes: VecDeque<TaggedBytesMut>,
     events: VecDeque<RtcEndpointEvent>,
+    outbound_track_info: HashMap<RTCRtpSenderId, PublishedTrackInfo>,
 }
 
 impl Deref for RtcEndpoint {
@@ -506,9 +509,8 @@ impl RtcEndpoint {
     /// primary SSRC (`a=ssrc`) from the remote description when it is known.
     ///
     /// The forwarded track id ends with the publishing participant id, so the msid the SFU
-    /// forwards carries the publisher's identity to every subscriber. The prefix uses the
-    /// publishing endpoint id plus the publisher's original track id to keep multiple tracks from
-    /// the same participant unique.
+    /// forwards carries the publisher's identity to every subscriber. A short random prefix keeps
+    /// multiple tracks from the same participant unique while matching the legacy SDK contract.
     ///
     /// This keeps only codecs the SFU side already matched as supported instead of copying
     /// every raw offered codec from the browser m-line, which can include codecs the
@@ -548,8 +550,8 @@ impl RtcEndpoint {
             .collect();
 
         MediaStreamTrack::new(
-            format!("peer-{}-{}", self.id.rtc_id(), track.stream_id()),
-            format!("{}-{}-{}", self.id.rtc_id(), track.track_id(), self.id.peer_id()),
+            track.stream_id().clone(),
+            format!("{}-{}", random_id(5), self.id.peer_id()),
             format!("peer-{}-{}", self.id.rtc_id(), track.label()),
             track.kind(),
             codings,
@@ -607,7 +609,11 @@ impl RtcEndpoint {
     /// `Sendonly` transceiver (a new m-line per forwarded source, mirroring the old SFU)
     /// rather than `add_track`, which would recycle the endpoint's own receive transceiver.
     /// Adding it triggers `OnNegotiationNeededEvent` → a subscribe offer.
-    pub(crate) fn add_forward_track(&mut self, track: MediaStreamTrack) -> Result<RTCRtpSenderId> {
+    pub(crate) fn add_forward_track(
+        &mut self,
+        track: MediaStreamTrack,
+        info: PublishedTrackInfo,
+    ) -> Result<RTCRtpSenderId> {
         let transceiver_id = self.peer_connection.add_transceiver_from_track(
             track,
             Some(RTCRtpTransceiverInit {
@@ -616,12 +622,15 @@ impl RtcEndpoint {
                 send_encodings: Vec::new(),
             }),
         )?;
-        Ok(RTCRtpSenderId::from(transceiver_id))
+        let sender_id = RTCRtpSenderId::from(transceiver_id);
+        self.outbound_track_info.insert(sender_id, info);
+        Ok(sender_id)
     }
 
     /// Tear down a forwarding sender (publisher gone / track no longer published). Also
     /// triggers renegotiation.
     pub(crate) fn remove_forward_track(&mut self, sender_id: RTCRtpSenderId) -> Result<()> {
+        self.outbound_track_info.remove(&sender_id);
         self.peer_connection.remove_track(sender_id)
     }
 
@@ -667,6 +676,16 @@ impl RtcEndpoint {
         Ok(())
     }
 
+    pub(crate) fn create_offer(&mut self, request_id: RequestId) -> Result<()> {
+        if self.curr_request_id.is_some() {
+            return Err(Error::ErrTransactionExists);
+        }
+        if self.signaling_state != RTCSignalingState::Stable {
+            return Ok(());
+        }
+        self.create_local_offer(request_id)
+    }
+
     /// A renegotiation transaction (an offer of ours, or an answer we sent to the subscriber's
     /// publish) just finished. Re-drive any renegotiation that was deferred while it was in
     /// flight.
@@ -705,11 +724,14 @@ impl RtcEndpoint {
         {
             return Ok(());
         }
-        self.renegotiation_pending = false;
-
         self.next_request_id = self.next_request_id.wrapping_add(1);
+        self.renegotiation_pending = false;
+        self.create_local_offer(self.next_request_id)
+    }
+
+    fn create_local_offer(&mut self, request_id: RequestId) -> Result<()> {
         self.curr_request_id = Some((
-            self.next_request_id,
+            request_id,
             Instant::now() + ONGOING_NEGOTIATION_TIMEOUT_IN_SECOND,
         ));
 
@@ -719,10 +741,11 @@ impl RtcEndpoint {
             .peer_connection
             .local_description()
             .ok_or(Error::ErrPeerConnLocalDescriptionNil)?;
+        let sdp = self.with_outbound_media_titles(sdp)?;
 
         trace!(
             "{}:[{}/{}] creates SDP {}:\n{}",
-            self.next_request_id,
+            request_id,
             self.rtc_lobby_id,
             self.id,
             sdp.sdp_type,
@@ -731,12 +754,51 @@ impl RtcEndpoint {
 
         self.events
             .push_back(RtcEndpointEvent::SFUEvent(SFUEvent::SessionDescription {
-                request_id: self.next_request_id,
+                request_id,
                 rtc_lobby_id: self.rtc_lobby_id,
                 endpoint_id: self.id.clone(),
                 sdp,
             }));
         Ok(())
+    }
+
+    fn with_outbound_media_titles(
+        &mut self,
+        sdp: RTCSessionDescription,
+    ) -> Result<RTCSessionDescription> {
+        let mut parsed = sdp.unmarshal()?;
+        let titles: Vec<(String, String)> = self
+            .outbound_track_info
+            .clone()
+            .into_iter()
+            .filter_map(|(sender_id, info)| {
+                self.transceiver_mid(sender_id)
+                    .map(|mid| (mid, RtcEndpoint::media_title(&info)))
+            })
+            .collect();
+
+        for (mid, title) in titles {
+            if let Some(media) = parsed
+                .media_descriptions
+                .iter_mut()
+                .find(|media| media.attribute("mid").flatten() == Some(mid.as_str()))
+            {
+                media.media_title = Some(title);
+            }
+        }
+
+        RTCSessionDescription::offer(parsed.to_string())
+    }
+
+    fn media_title(info: &PublishedTrackInfo) -> String {
+        let purpose = match info.purpose {
+            TrackPurpose::Participant => 1,
+            TrackPurpose::Stream => 2,
+        };
+        let muted = if info.muted { 1 } else { 2 };
+        let display_info = info.info.replace(['\r', '\n'], " ").trim().to_owned();
+
+        format!("{purpose} {muted} {display_info}")
     }
 
     fn handle_session_description(
@@ -876,6 +938,9 @@ impl RtcEndpoint {
                     sdp.sdp
                 );
                 self.handle_session_description(request_id, sdp)?;
+            }
+            SFUEvent::CreateOffer { request_id, .. } => {
+                self.create_offer(request_id)?;
             }
             SFUEvent::IceCandidate {
                 request_id,
@@ -1060,10 +1125,15 @@ mod tests {
         );
         // The forwarded track id contains the publishing participant id so subscribers can
         // recover the publisher from the msid.
-        assert_eq!(rebuilt.stream_id(), "peer-42-stream");
+        assert_eq!(rebuilt.stream_id(), "stream");
+        assert!(
+            rebuilt
+                .track_id()
+                .ends_with("-3c734426-bc94-4a38-8ffd-dd2a46c056de")
+        );
         assert_eq!(
-            rebuilt.track_id(),
-            "42-track-3c734426-bc94-4a38-8ffd-dd2a46c056de"
+            rebuilt.track_id().len(),
+            "abcde-3c734426-bc94-4a38-8ffd-dd2a46c056de".len()
         );
         assert_eq!(rebuilt.label(), "peer-42-label");
     }

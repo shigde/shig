@@ -31,6 +31,11 @@ pub enum SFUEvent {
         endpoint_id: EndpointId,
         sdp: RTCSessionDescription,
     },
+    CreateOffer {
+        request_id: RequestId,
+        rtc_lobby_id: RtcLobbyId,
+        endpoint_id: EndpointId,
+    },
     IceCandidate {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
@@ -52,6 +57,7 @@ impl SFUEvent {
             SFUEvent::Err { request_id, .. } => *request_id,
             SFUEvent::Join { request_id, .. } => *request_id,
             SFUEvent::SessionDescription { request_id, .. } => *request_id,
+            SFUEvent::CreateOffer { request_id, .. } => *request_id,
             SFUEvent::IceCandidate { request_id, .. } => *request_id,
             SFUEvent::Leave { request_id, .. } => *request_id,
         }
@@ -62,6 +68,7 @@ impl SFUEvent {
             SFUEvent::Err { rtc_lobby_id, .. } => *rtc_lobby_id,
             SFUEvent::Join { rtc_lobby_id, .. } => Some(*rtc_lobby_id),
             SFUEvent::SessionDescription { rtc_lobby_id, .. } => Some(*rtc_lobby_id),
+            SFUEvent::CreateOffer { rtc_lobby_id, .. } => Some(*rtc_lobby_id),
             SFUEvent::IceCandidate { rtc_lobby_id, .. } => Some(*rtc_lobby_id),
             SFUEvent::Leave { rtc_lobby_id, .. } => Some(*rtc_lobby_id),
         }
@@ -73,6 +80,7 @@ impl SFUEvent {
             SFUEvent::Err { endpoint_id, .. } => endpoint_id.as_ref(),
             SFUEvent::Join { endpoint_id, .. } => Some(endpoint_id),
             SFUEvent::SessionDescription { endpoint_id, .. } => Some(endpoint_id),
+            SFUEvent::CreateOffer { endpoint_id, .. } => Some(endpoint_id),
             SFUEvent::IceCandidate { endpoint_id, .. } => Some(endpoint_id),
             SFUEvent::Leave { endpoint_id, .. } => Some(endpoint_id),
         }

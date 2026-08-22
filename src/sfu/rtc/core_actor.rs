@@ -7,8 +7,10 @@ use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, Recipient, Running,
 };
 use bytes::BytesMut;
+use rtc::peer_connection::sdp::{RTCSdpType, RTCSessionDescription};
 use rtc::shared::{TaggedBytesMut, TransportContext, TransportProtocol};
 use sansio::Protocol;
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,6 +31,8 @@ pub struct RtcCoreActor {
     advertised_addr: SocketAddr,
     event_sink: Option<Recipient<RtcEvent>>,
     timeout_generation: u64,
+    next_request_id: u64,
+    endpoint_request_ids: HashMap<crate::sfu::endpoint::EndpointId, u64>,
     udp_receiver: Option<JoinHandle<()>>,
 }
 
@@ -50,6 +54,8 @@ impl RtcCoreActor {
             advertised_addr,
             event_sink: None,
             timeout_generation: 0,
+            next_request_id: 0,
+            endpoint_request_ids: HashMap::new(),
             udp_receiver: None,
         }
     }
@@ -60,6 +66,32 @@ impl RtcCoreActor {
 
     pub fn media_addr(&self) -> SocketAddr {
         self.advertised_addr
+    }
+
+    fn next_request_id(&mut self) -> u64 {
+        self.next_request_id = self.next_request_id.wrapping_add(1);
+        self.next_request_id
+    }
+
+    fn rtc_lobby_id(endpoint_id: &crate::sfu::endpoint::EndpointId) -> Result<uuid::Uuid, RtcError> {
+        endpoint_id
+            .lobby_id()
+            .to_string()
+            .parse()
+            .map_err(|error| RtcError(format!("invalid RTC lobby id: {error}")))
+    }
+
+    fn apply_event(
+        &mut self,
+        event: SFUEvent,
+        ctx: &mut Context<Self>,
+    ) -> Result<Vec<SFUEvent>, RtcError> {
+        self.engine
+            .handle_event(event)
+            .map_err(|error| RtcError(error.to_string()))?;
+        let mut events = self.drain(ctx, true);
+        events.extend(self.drain(ctx, true));
+        Ok(events)
     }
 
     fn start_udp_receiver(&self, actor: Addr<Self>) -> JoinHandle<()> {
@@ -164,10 +196,7 @@ impl Handler<ApplySfuEvent> for RtcCoreActor {
     type Result = Result<Vec<SFUEvent>, RtcError>;
 
     fn handle(&mut self, message: ApplySfuEvent, ctx: &mut Self::Context) -> Self::Result {
-        self.engine
-            .handle_event(message.0)
-            .map_err(|error| RtcError(error.to_string()))?;
-        Ok(self.drain(ctx, true))
+        self.apply_event(message.0, ctx)
     }
 }
 
@@ -182,48 +211,137 @@ impl Handler<SetRtcEventSink> for RtcCoreActor {
 impl Handler<NegotiateEndpoint> for RtcCoreActor {
     type Result = Result<String, RtcError>;
 
-    fn handle(&mut self, message: NegotiateEndpoint, _ctx: &mut Self::Context) -> Self::Result {
-        Err(RtcError(format!(
-            "endpoint-based RTC negotiation is not implemented yet: {:?} (offer bytes: {})",
-            message.endpoint_id,
-            message.offer.len()
-        )))
+    fn handle(&mut self, message: NegotiateEndpoint, ctx: &mut Self::Context) -> Self::Result {
+        let join_request_id = self.next_request_id();
+        self.apply_event(
+            SFUEvent::Join {
+                request_id: join_request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id.clone(),
+            },
+            ctx,
+        )?;
+
+        let request_id = self.next_request_id();
+        let offer = RTCSessionDescription::offer(message.offer)
+            .map_err(|error| RtcError(error.to_string()))?;
+        let events = self.apply_event(
+            SFUEvent::SessionDescription {
+                request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id.clone(),
+                sdp: offer,
+            },
+            ctx,
+        )?;
+
+        events
+            .into_iter()
+            .find_map(|event| match event {
+                SFUEvent::SessionDescription {
+                    endpoint_id, sdp, ..
+                } if endpoint_id == message.endpoint_id && sdp.sdp_type == RTCSdpType::Answer => {
+                    Some(sdp.sdp)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                RtcError(format!(
+                    "RTC negotiation did not produce an answer for {:?}",
+                    message.endpoint_id
+                ))
+            })
     }
 }
 
 impl Handler<CreateEndpointOffer> for RtcCoreActor {
     type Result = Result<String, RtcError>;
 
-    fn handle(&mut self, message: CreateEndpointOffer, _ctx: &mut Self::Context) -> Self::Result {
-        Err(RtcError(format!(
-            "endpoint-based RTC offer creation is not implemented yet: {:?}",
-            message.endpoint_id
-        )))
+    fn handle(&mut self, message: CreateEndpointOffer, ctx: &mut Self::Context) -> Self::Result {
+        let join_request_id = self.next_request_id();
+        self.apply_event(
+            SFUEvent::Join {
+                request_id: join_request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id.clone(),
+            },
+            ctx,
+        )?;
+
+        let request_id = self.next_request_id();
+        let events = self.apply_event(
+            SFUEvent::CreateOffer {
+                request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id.clone(),
+            },
+            ctx,
+        )?;
+
+        let offer = events.into_iter().find_map(|event| match event {
+            SFUEvent::SessionDescription {
+                request_id,
+                endpoint_id,
+                sdp,
+                ..
+            } if endpoint_id == message.endpoint_id && sdp.sdp_type == RTCSdpType::Offer => {
+                Some((request_id, sdp.sdp))
+            }
+            _ => None,
+        });
+
+        let Some((request_id, sdp)) = offer else {
+            return Err(RtcError(format!(
+                "RTC offer creation did not produce an offer for {:?}",
+                message.endpoint_id
+            )));
+        };
+        self.endpoint_request_ids
+            .insert(message.endpoint_id, request_id);
+        Ok(sdp)
     }
 }
 
 impl Handler<ApplyEndpointAnswer> for RtcCoreActor {
     type Result = Result<(), RtcError>;
 
-    fn handle(&mut self, message: ApplyEndpointAnswer, _ctx: &mut Self::Context) -> Self::Result {
-        Err(RtcError(format!(
-            "endpoint-based RTC answer handling is not implemented yet: {:?} (answer bytes: {})",
-            message.endpoint_id,
-            message.answer.len()
-        )))
+    fn handle(&mut self, message: ApplyEndpointAnswer, ctx: &mut Self::Context) -> Self::Result {
+        let Some(request_id) = self.endpoint_request_ids.remove(&message.endpoint_id) else {
+            return Err(RtcError(format!(
+                "no in-flight RTC offer for {:?}",
+                message.endpoint_id
+            )));
+        };
+        let answer = RTCSessionDescription::answer(message.answer)
+            .map_err(|error| RtcError(error.to_string()))?;
+        self.apply_event(
+            SFUEvent::SessionDescription {
+                request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id,
+                sdp: answer,
+            },
+            ctx,
+        )?;
+        Ok(())
     }
 }
 
 impl Handler<CloseEndpoint> for RtcCoreActor {
     type Result = Result<(), RtcError>;
 
-    fn handle(&mut self, message: CloseEndpoint, _ctx: &mut Self::Context) -> Self::Result {
-        log::debug!(
-            "ignoring close for endpoint not yet attached to RTC core {}: {:?}, reason={}",
-            self.id,
-            message.endpoint_id,
-            message.reason
-        );
+    fn handle(&mut self, message: CloseEndpoint, ctx: &mut Self::Context) -> Self::Result {
+        let request_id = self.next_request_id();
+        self.endpoint_request_ids.remove(&message.endpoint_id);
+        self.apply_event(
+            SFUEvent::Leave {
+                request_id,
+                rtc_lobby_id: Self::rtc_lobby_id(&message.endpoint_id)?,
+                endpoint_id: message.endpoint_id,
+                reason: message.reason,
+            },
+            ctx,
+        )?;
         Ok(())
     }
 }
