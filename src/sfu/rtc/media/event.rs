@@ -1,7 +1,7 @@
 use rtc::peer_connection::sdp::RTCSessionDescription;
 use rtc::peer_connection::transport::RTCIceCandidateInit;
 
-use super::endpoint::RtcEndpointId;
+use crate::sfu::endpoint::EndpointId;
 use super::lobby::RtcLobbyId;
 
 pub type RequestId = u64;
@@ -12,36 +12,35 @@ pub enum SFUEvent {
     Ok {
         request_id: RequestId,
         rtc_lobby_id: Option<RtcLobbyId>,
-        endpoint_id: Option<RtcEndpointId>,
+        endpoint_id: Option<EndpointId>,
     },
     Err {
         request_id: RequestId,
         rtc_lobby_id: Option<RtcLobbyId>,
-        endpoint_id: Option<RtcEndpointId>,
+        endpoint_id: Option<EndpointId>,
         reason: String,
     },
     Join {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
-        endpoint_id: RtcEndpointId,
-        participant_id: String,
+        endpoint_id: EndpointId,
     },
     SessionDescription {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
-        endpoint_id: RtcEndpointId,
+        endpoint_id: EndpointId,
         sdp: RTCSessionDescription,
     },
     IceCandidate {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
-        endpoint_id: RtcEndpointId,
+        endpoint_id: EndpointId,
         candidate: RTCIceCandidateInit,
     },
     Leave {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
-        endpoint_id: RtcEndpointId,
+        endpoint_id: EndpointId,
         reason: String,
     },
 }
@@ -68,14 +67,14 @@ impl SFUEvent {
         }
     }
 
-    pub fn endpoint_id(&self) -> Option<RtcEndpointId> {
+    pub fn endpoint_id(&self) -> Option<&EndpointId> {
         match self {
-            SFUEvent::Ok { endpoint_id, .. } => *endpoint_id,
-            SFUEvent::Err { endpoint_id, .. } => *endpoint_id,
-            SFUEvent::Join { endpoint_id, .. } => Some(*endpoint_id),
-            SFUEvent::SessionDescription { endpoint_id, .. } => Some(*endpoint_id),
-            SFUEvent::IceCandidate { endpoint_id, .. } => Some(*endpoint_id),
-            SFUEvent::Leave { endpoint_id, .. } => Some(*endpoint_id),
+            SFUEvent::Ok { endpoint_id, .. } => endpoint_id.as_ref(),
+            SFUEvent::Err { endpoint_id, .. } => endpoint_id.as_ref(),
+            SFUEvent::Join { endpoint_id, .. } => Some(endpoint_id),
+            SFUEvent::SessionDescription { endpoint_id, .. } => Some(endpoint_id),
+            SFUEvent::IceCandidate { endpoint_id, .. } => Some(endpoint_id),
+            SFUEvent::Leave { endpoint_id, .. } => Some(endpoint_id),
         }
     }
 }

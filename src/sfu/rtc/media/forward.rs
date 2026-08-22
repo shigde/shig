@@ -1,4 +1,4 @@
-use super::endpoint::RtcEndpointId;
+use crate::sfu::endpoint::RtcEndpointId;
 use rtc::rtp_transceiver::{RTCRtpSenderId, SSRC};
 use std::collections::{HashMap, HashSet};
 

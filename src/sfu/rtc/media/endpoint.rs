@@ -1,6 +1,7 @@
 use super::event::RequestId;
 use super::lobby::RtcLobbyId;
 use super::SFUEvent;
+use crate::sfu::endpoint::EndpointId;
 use log::{trace, warn};
 use rtc::ice::candidate::CandidateConfig;
 use rtc::interceptor::{BoxedInterceptor, Interceptor, Registry};
@@ -38,28 +39,21 @@ use std::time::{Duration, Instant};
 /// [`RTCPeerConnection<BoxedInterceptor>`], and neither this builder nor [`RtcEndpoint`] has to
 /// be generic over the chain.
 pub(crate) struct RtcEndpointBuilder {
-    id: RtcEndpointId,
+    id: EndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
-    participant_id: String,
     peer_connection_builder: RTCPeerConnectionBuilder<BoxedInterceptor>,
 }
 
 impl RtcEndpointBuilder {
-    pub(crate) fn new(id: RtcEndpointId, rtc_lobby_id: RtcLobbyId, local_addr: SocketAddr) -> Self {
+    pub(crate) fn new(id: EndpointId, rtc_lobby_id: RtcLobbyId, local_addr: SocketAddr) -> Self {
         Self {
             id,
             rtc_lobby_id,
             local_addr,
-            participant_id: id.to_string(),
             peer_connection_builder: RTCPeerConnectionBuilder::new()
                 .with_interceptor_registry(Registry::new().boxed()),
         }
-    }
-
-    pub(crate) fn with_participant_id<S: Into<String>>(mut self, participant_id: S) -> Self {
-        self.participant_id = participant_id.into();
-        self
     }
 
     pub(crate) fn with_configuration(mut self, configuration: RTCConfiguration) -> Self {
@@ -96,7 +90,6 @@ impl RtcEndpointBuilder {
             id: self.id,
             rtc_lobby_id: self.rtc_lobby_id,
             local_addr: self.local_addr,
-            participant_id: self.participant_id,
             peer_connection: self.peer_connection_builder.build()?,
 
             next_request_id: 0,
@@ -113,8 +106,6 @@ impl RtcEndpointBuilder {
     }
 }
 
-pub type RtcEndpointId = u64;
-
 /// SDP media identification tag (`a=mid`) of one m-line — the stable key for a publish
 /// track across renegotiations.
 pub(crate) type Mid = String;
@@ -123,10 +114,9 @@ pub(crate) type Mid = String;
 const ONGOING_NEGOTIATION_TIMEOUT_IN_SECOND: Duration = Duration::from_secs(5);
 
 pub(crate) struct RtcEndpoint {
-    id: RtcEndpointId,
+    id: EndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
-    participant_id: String,
     peer_connection: RTCPeerConnection<BoxedInterceptor>,
 
     next_request_id: RequestId,
@@ -479,9 +469,9 @@ impl RtcEndpoint {
             .collect();
 
         MediaStreamTrack::new(
-            format!("peer-{}-{}", self.id, track.stream_id()),
-            format!("{}-{}-{}", self.id, track.track_id(), self.participant_id),
-            format!("peer-{}-{}", self.id, track.label()),
+            format!("peer-{}-{}", self.id.rtc_id(), track.stream_id()),
+            format!("{}-{}-{}", self.id.rtc_id(), track.track_id(), self.id.peer_id()),
+            format!("peer-{}-{}", self.id.rtc_id(), track.label()),
             track.kind(),
             codings,
         )
@@ -664,7 +654,7 @@ impl RtcEndpoint {
             .push_back(RtcEndpointEvent::SFUEvent(SFUEvent::SessionDescription {
                 request_id: self.next_request_id,
                 rtc_lobby_id: self.rtc_lobby_id,
-                endpoint_id: self.id,
+                endpoint_id: self.id.clone(),
                 sdp,
             }));
         Ok(())
@@ -728,7 +718,7 @@ impl RtcEndpoint {
                 .push_back(RtcEndpointEvent::SFUEvent(SFUEvent::SessionDescription {
                     request_id,
                     rtc_lobby_id: self.rtc_lobby_id,
-                    endpoint_id: self.id,
+                    endpoint_id: self.id.clone(),
                     sdp: sdp_answer,
                 }));
 
@@ -756,7 +746,7 @@ impl RtcEndpoint {
         };
 
         if let Some(endpoint_id) = evt.endpoint_id() {
-            if endpoint_id != self.id {
+            if endpoint_id != &self.id {
                 return Err(Error::Other(format!(
                     "invalid endpoint id: {}",
                     endpoint_id
@@ -842,11 +832,23 @@ impl RtcEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sfu::endpoint::{EndpointKind, RtcEndpointId};
+    use crate::sfu::lobby::LobbyId;
+    use crate::sfu::peer::PeerId;
     use rtc::peer_connection::configuration::RTCConfigurationBuilder;
     use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
     use rtc::rtp_transceiver::rtp_sender::{
         RTCRtpCodec, RTCRtpCodecParameters, RTCRtpParameters, RTCRtpSendParameters,
     };
+
+    fn endpoint_id(rtc_id: RtcEndpointId) -> EndpointId {
+        EndpointId::new(
+            rtc_id,
+            LobbyId::new("00000000-0000-0000-0000-000000000014"),
+            PeerId::new("3c734426-bc94-4a38-8ffd-dd2a46c056de"),
+            EndpointKind::Publish,
+        )
+    }
 
     #[test]
     fn builds_default_rtc_endpoint() {
@@ -855,16 +857,21 @@ mod tests {
             .register_default_codecs()
             .expect("default codecs should register");
 
-        let endpoint =
-            RtcEndpointBuilder::new(10, RtcLobbyId::from_u128(20), "0.0.0.0:0".parse().unwrap())
-                .with_participant_id("participant-10")
-                .with_media_engine(media_engine)
-                .build()
-                .expect("default endpoint should build");
+        let endpoint = RtcEndpointBuilder::new(
+            endpoint_id(10),
+            RtcLobbyId::from_u128(20),
+            "0.0.0.0:0".parse().unwrap(),
+        )
+        .with_media_engine(media_engine)
+        .build()
+        .expect("default endpoint should build");
 
-        assert_eq!(endpoint.id, 10);
+        assert_eq!(endpoint.id.rtc_id(), 10);
         assert_eq!(endpoint.rtc_lobby_id, RtcLobbyId::from_u128(20));
-        assert_eq!(endpoint.participant_id, "participant-10");
+        assert_eq!(
+            endpoint.id.peer_id().as_user_uuid(),
+            "3c734426-bc94-4a38-8ffd-dd2a46c056de"
+        );
     }
 
     #[test]
@@ -874,10 +881,14 @@ mod tests {
             .register_default_codecs()
             .expect("default codecs should register");
 
-        let _ = RtcEndpointBuilder::new(1, RtcLobbyId::from_u128(2), "0.0.0.0:0".parse().unwrap())
-            .with_media_engine(media_engine)
-            .build()
-            .expect("endpoint should build");
+        let _ = RtcEndpointBuilder::new(
+            endpoint_id(1),
+            RtcLobbyId::from_u128(2),
+            "0.0.0.0:0".parse().unwrap(),
+        )
+        .with_media_engine(media_engine)
+        .build()
+        .expect("endpoint should build");
     }
 
     #[test]
@@ -887,11 +898,15 @@ mod tests {
             .register_default_codecs()
             .expect("default codecs should register");
 
-        let _ = RtcEndpointBuilder::new(3, RtcLobbyId::from_u128(4), "0.0.0.0:0".parse().unwrap())
-            .with_media_engine(media_engine)
-            .with_setting_engine(SettingEngine::default())
-            .build()
-            .expect("endpoint should build");
+        let _ = RtcEndpointBuilder::new(
+            endpoint_id(3),
+            RtcLobbyId::from_u128(4),
+            "0.0.0.0:0".parse().unwrap(),
+        )
+        .with_media_engine(media_engine)
+        .with_setting_engine(SettingEngine::default())
+        .build()
+        .expect("endpoint should build");
     }
 
     #[test]
@@ -902,13 +917,17 @@ mod tests {
             .register_default_codecs()
             .expect("default codecs should register");
 
-        let _ = RtcEndpointBuilder::new(5, RtcLobbyId::from_u128(6), "0.0.0.0:0".parse().unwrap())
-            .with_configuration(configuration)
-            .with_media_engine(media_engine)
-            .with_setting_engine(SettingEngine::default())
-            .with_interceptor_registry(Registry::new())
-            .build()
-            .expect("endpoint should build");
+        let _ = RtcEndpointBuilder::new(
+            endpoint_id(5),
+            RtcLobbyId::from_u128(6),
+            "0.0.0.0:0".parse().unwrap(),
+        )
+        .with_configuration(configuration)
+        .with_media_engine(media_engine)
+        .with_setting_engine(SettingEngine::default())
+        .with_interceptor_registry(Registry::new())
+        .build()
+        .expect("endpoint should build");
     }
 
     #[test]
@@ -942,12 +961,14 @@ mod tests {
         media_engine
             .register_default_codecs()
             .expect("default codecs should register");
-        let endpoint =
-            RtcEndpointBuilder::new(42, RtcLobbyId::from_u128(20), "0.0.0.0:0".parse().unwrap())
-                .with_participant_id("3c734426-bc94-4a38-8ffd-dd2a46c056de")
-                .with_media_engine(media_engine)
-                .build()
-                .expect("endpoint should build");
+        let endpoint = RtcEndpointBuilder::new(
+            endpoint_id(42),
+            RtcLobbyId::from_u128(20),
+            "0.0.0.0:0".parse().unwrap(),
+        )
+        .with_media_engine(media_engine)
+        .build()
+        .expect("endpoint should build");
 
         let rebuilt =
             endpoint.track_with_codings_from_media_description(track, &parameters, &media);

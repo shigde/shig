@@ -152,7 +152,9 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for MediaEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sfu::rtc::media::endpoint::RtcEndpointId;
+    use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
+    use crate::sfu::lobby::LobbyId;
+    use crate::sfu::peer::PeerId;
     use crate::sfu::rtc::media::event::{RequestId, SFUEvent};
     use crate::sfu::rtc::media::lobby::RtcLobbyId;
     use rtc::peer_connection::configuration::media_engine::MediaEngine as RtcMediaEngine;
@@ -165,6 +167,20 @@ mod tests {
 
     const LOBBY: RtcLobbyId = RtcLobbyId::from_u128(100);
     const ENDPOINT: RtcEndpointId = 200;
+
+    fn test_endpoint_id(rtc_id: RtcEndpointId) -> EndpointId {
+        let kind = if rtc_id == ENDPOINT {
+            EndpointKind::Publish
+        } else {
+            EndpointKind::Subscribe
+        };
+        EndpointId::new(
+            rtc_id,
+            LobbyId::new(LOBBY.to_string()),
+            PeerId::new(format!("00000000-0000-4000-8000-{rtc_id:012}")),
+            kind,
+        )
+    }
 
     /// A browser-side peer connection that publishes one video track, used only to
     /// produce a valid SDP offer to feed into the SFU.
@@ -224,7 +240,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id,
                 rtc_lobby_id: LOBBY,
-                endpoint_id,
+                endpoint_id: test_endpoint_id(endpoint_id),
                 sdp: build_bootstrap_offer(),
             })
             .expect("endpoint bootstrap offer should be handled");
@@ -286,8 +302,7 @@ mod tests {
             .handle_event(SFUEvent::Join {
                 request_id,
                 rtc_lobby_id: LOBBY,
-                endpoint_id,
-                participant_id: format!("00000000-0000-4000-8000-{endpoint_id:012}"),
+                endpoint_id: test_endpoint_id(endpoint_id),
             })
             .expect("join should succeed");
     }
@@ -328,7 +343,7 @@ mod tests {
             .handle_event(SFUEvent::Leave {
                 request_id: 2,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 reason: "bye".to_string(),
             })
             .expect("leave should succeed");
@@ -350,7 +365,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: build_offer(),
             })
             .expect("handling the offer should succeed");
@@ -368,7 +383,7 @@ mod tests {
             } => {
                 assert_eq!(got_request_id, request_id);
                 assert_eq!(rtc_lobby_id, LOBBY);
-                assert_eq!(endpoint_id, ENDPOINT);
+                assert_eq!(endpoint_id.rtc_id(), ENDPOINT);
                 assert_eq!(
                     sdp.sdp_type,
                     RTCSdpType::Answer,
@@ -402,7 +417,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 4,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: build_offer(),
             })
             .expect("handling the publisher offer should succeed");
@@ -413,7 +428,7 @@ mod tests {
             .find_map(|event| match event {
                 SFUEvent::SessionDescription {
                     endpoint_id, sdp, ..
-                } if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer => {
+                } if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer => {
                     Some(&sdp.sdp)
                 }
                 _ => None,
@@ -446,7 +461,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 4,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: build_offer(),
             })
             .expect("handling the publisher offer should succeed");
@@ -458,7 +473,7 @@ mod tests {
             events.iter().any(|e| matches!(
                 e,
                 SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                    if *endpoint_id == ENDPOINT && sdp.sdp_type == RTCSdpType::Answer
+                    if endpoint_id.rtc_id() == ENDPOINT && sdp.sdp_type == RTCSdpType::Answer
             )),
             "publisher should receive an answer, got {events:?}"
         );
@@ -469,7 +484,7 @@ mod tests {
             events.iter().any(|e| matches!(
                 e,
                 SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                    if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
+                    if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
             )),
             "subscriber should receive a server-initiated offer, got {events:?}"
         );
@@ -491,7 +506,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 4,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: build_offer_with_extra_video_codec(UNSUPPORTED_PT, "UNSUPPORTED"),
             })
             .expect("handling the publisher offer should succeed");
@@ -502,7 +517,7 @@ mod tests {
             .find_map(|event| match event {
                 SFUEvent::SessionDescription {
                     endpoint_id, sdp, ..
-                } if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer => {
+                } if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer => {
                     Some(&sdp.sdp)
                 }
                 _ => None,
@@ -531,7 +546,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 4,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: offer.clone(),
             })
             .expect("first publish should succeed");
@@ -542,7 +557,7 @@ mod tests {
                 matches!(
                     e,
                     SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                        if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
+                        if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
                 )
             })
             .count();
@@ -554,7 +569,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 5,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: offer,
             })
             .expect("re-publish should succeed");
@@ -565,7 +580,7 @@ mod tests {
                 matches!(
                     e,
                     SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                        if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
+                        if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
                 )
             })
             .count();
@@ -587,7 +602,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 2,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: ENDPOINT,
+                endpoint_id: test_endpoint_id(ENDPOINT),
                 sdp: build_offer(),
             })
             .expect("handling the publisher offer should succeed");
@@ -601,7 +616,7 @@ mod tests {
             matches!(
                 e,
                 SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                    if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
+                    if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
             )
         });
         assert!(
@@ -627,7 +642,7 @@ mod tests {
             .handle_event(SFUEvent::SessionDescription {
                 request_id: 4,
                 rtc_lobby_id: LOBBY,
-                endpoint_id: SUBSCRIBER_ENDPOINT,
+                endpoint_id: test_endpoint_id(SUBSCRIBER_ENDPOINT),
                 sdp: subscriber_offer,
             })
             .expect("handling subscriber bootstrap offer should succeed");
@@ -638,7 +653,7 @@ mod tests {
             events_after_bootstrap.iter().any(|e| matches!(
                 e,
                 SFUEvent::SessionDescription { endpoint_id, sdp, .. }
-                    if *endpoint_id == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
+                    if endpoint_id.rtc_id() == SUBSCRIBER_ENDPOINT && sdp.sdp_type == RTCSdpType::Offer
             )),
             "subscriber should receive a server-initiated offer, got {events_after_bootstrap:?}"
         );

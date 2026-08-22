@@ -1,8 +1,9 @@
 use super::demuxer::Demuxer;
-use super::endpoint::{Mid, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent, RtcEndpointId};
+use super::endpoint::{Mid, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent};
 use super::event::SFUEvent;
 use super::forward::{ForwardKey, ForwardTable};
 use super::rtcp_forwarder::RtcpForwarderBuilder;
+use crate::sfu::endpoint::{EndpointId, RtcEndpointId};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
 use log::{trace, warn};
@@ -120,13 +121,12 @@ impl RtcLobby {
     /// interceptor chain, and default setting engine.
     fn build_endpoint(
         &self,
-        endpoint_id: RtcEndpointId,
+        endpoint_id: EndpointId,
         rtc_lobby_id: RtcLobbyId,
-        participant_id: String,
     ) -> Result<RtcEndpoint, Error> {
         let mut setting_engine = SettingEngine::default();
         setting_engine.set_ice_credentials(
-            encode_local_ufrag(&rtc_lobby_id, endpoint_id),
+            encode_local_ufrag(&rtc_lobby_id, endpoint_id.rtc_id()),
             generate_pwd(),
         );
         setting_engine.set_lite(true);
@@ -143,7 +143,6 @@ impl RtcLobby {
         // chain would otherwise consume RTCP before the application sees it.
         let registry = registry.with(RtcpForwarderBuilder::new().build());
         RtcEndpointBuilder::new(endpoint_id, rtc_lobby_id, self.local_addr)
-            .with_participant_id(participant_id)
             .with_setting_engine(setting_engine)
             .with_media_engine(media_engine)
             .with_interceptor_registry(registry)
@@ -599,12 +598,13 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
             return Err(Error::Other("empty lobby id".to_string()));
         };
 
-        if let Some(endpoint_id) = evt.endpoint_id() {
+        if let Some(endpoint_id) = evt.endpoint_id().cloned() {
+            let rtc_endpoint_id = endpoint_id.rtc_id();
             // Join, Leave, and applying remote description can all
             // change the lobby's publish state, so reconcile the forwarding graph after.
             let mut needs_reconcile = false;
             let mut remove_endpoint = false;
-            if let Some(endpoint) = self.endpoints.get_mut(&endpoint_id) {
+            if let Some(endpoint) = self.endpoints.get_mut(&rtc_endpoint_id) {
                 if let SFUEvent::Leave { .. } = &evt {
                     endpoint.close()?;
                     remove_endpoint = true;
@@ -613,15 +613,14 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     needs_reconcile = matches!(evt, SFUEvent::SessionDescription { .. });
                     endpoint.handle_event(RtcEndpointEvent::SFUEvent(evt))?;
                 }
-            } else if let SFUEvent::Join { participant_id, .. } = &evt {
-                let endpoint =
-                    self.build_endpoint(endpoint_id, rtc_lobby_id, participant_id.clone())?;
-                self.endpoints.insert(endpoint_id, endpoint);
+            } else if let SFUEvent::Join { .. } = &evt {
+                let endpoint = self.build_endpoint(endpoint_id, rtc_lobby_id)?;
+                self.endpoints.insert(rtc_endpoint_id, endpoint);
                 needs_reconcile = false;
             }
 
             if remove_endpoint {
-                self.endpoints.remove(&endpoint_id);
+                self.endpoints.remove(&rtc_endpoint_id);
             }
 
             if needs_reconcile {

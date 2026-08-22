@@ -68,6 +68,7 @@ lobby to another core is intentionally not supported.
 
 The theoretical CPU, packet-rate and multi-core scaling model is documented in
 [SFU Performance Model](performance.md).
+Packet routing inside one RTC core is documented in [SFU Demuxing](demuxing.md).
 
 A logical peer continues to use two WebRTC connections. The publish endpoint receives the
 participant's media, while the subscribe endpoint sends selected remote media back to that

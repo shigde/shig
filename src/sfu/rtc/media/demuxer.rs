@@ -1,5 +1,5 @@
-use super::endpoint::RtcEndpointId;
 use super::lobby::{decode_local_ufrag, RtcLobbyId};
+use crate::sfu::endpoint::RtcEndpointId;
 use rtc::shared::FourTuple;
 use rtc::shared::TaggedBytesMut;
 use rtc::stun::attributes::ATTR_USERNAME;
