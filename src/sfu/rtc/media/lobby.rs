@@ -1,3 +1,7 @@
+use super::control::{
+    parse_control_message, serialize_metadata_message, serialize_offer_message, ControlMessage,
+    ControlMetadata, ControlRouter,
+};
 use super::demuxer::Demuxer;
 use super::endpoint::{
     Mid, PublishedTrack, PublishedTrackInfo, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent,
@@ -14,8 +18,9 @@ use rtc::interceptor::Registry;
 use rtc::peer_connection::configuration::interceptor_registry::register_default_interceptors;
 use rtc::peer_connection::configuration::media_engine::MediaEngine;
 use rtc::peer_connection::configuration::setting_engine::SettingEngine;
-use rtc::peer_connection::event::{RTCPeerConnectionEvent, RTCTrackEvent};
+use rtc::peer_connection::event::{RTCDataChannelEvent, RTCPeerConnectionEvent, RTCTrackEvent};
 use rtc::peer_connection::message::RTCMessage;
+use rtc::peer_connection::sdp::{RTCSdpType, RTCSessionDescription};
 use rtc::peer_connection::transport::RTCDtlsRole;
 use rtc::rtcp::payload_feedbacks::full_intra_request::FullIntraRequest;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
@@ -94,6 +99,7 @@ pub(crate) struct RtcLobby {
     subscribers: HashSet<RtcEndpointId>,
     published_tracks: HashMap<ForwardKey, PublishedTrackInfo>,
     forward: ForwardTable,
+    control: ControlRouter,
 
     writes: VecDeque<TaggedBytesMut>,
     events: VecDeque<SFUEvent>,
@@ -111,6 +117,7 @@ impl RtcLobby {
             subscribers: Default::default(),
             published_tracks: Default::default(),
             forward: Default::default(),
+            control: Default::default(),
             writes: Default::default(),
             events: Default::default(),
         }
@@ -540,6 +547,148 @@ impl RtcLobby {
             );
         }
     }
+
+    fn handle_data_channel_message(
+        &mut self,
+        endpoint_id: RtcEndpointId,
+        channel_id: rtc::data_channel::RTCDataChannelId,
+        data: rtc::data_channel::RTCDataChannelMessage,
+    ) -> Result<(), Error> {
+        let source_endpoint = match self.endpoints.get(&endpoint_id) {
+            Some(endpoint) => endpoint.id().clone(),
+            None => {
+                warn!(
+                    "{}: data channel message from unknown endpoint {}",
+                    self.id, endpoint_id
+                );
+                return Ok(());
+            }
+        };
+        self.control
+            .register_data_channel(&source_endpoint, channel_id);
+
+        let message = parse_control_message(data.data.as_ref())?;
+        match message {
+            ControlMessage::Answer { request_id, sdp } => {
+                self.handle_control_answer(&source_endpoint, request_id, sdp)
+            }
+            ControlMessage::Metadata(metadata) => {
+                self.handle_control_metadata(&source_endpoint, metadata)
+            }
+        }
+    }
+
+    fn handle_control_answer(
+        &mut self,
+        source_endpoint: &EndpointId,
+        request_id: u64,
+        sdp: RTCSessionDescription,
+    ) -> Result<(), Error> {
+        let Some(subscription_id) = self
+            .control
+            .subscription_endpoint_for_peer(source_endpoint.peer_id())
+        else {
+            warn!(
+                "{}: answer from {} has no subscription endpoint",
+                self.id, source_endpoint
+            );
+            return Ok(());
+        };
+        let Some(subscription_endpoint) = self.endpoints.get(&subscription_id) else {
+            warn!(
+                "{}: answer from {} targets missing subscription endpoint {}",
+                self.id, source_endpoint, subscription_id
+            );
+            return Ok(());
+        };
+
+        self.handle_event(SFUEvent::SessionDescription {
+            request_id,
+            rtc_lobby_id: self.id,
+            endpoint_id: subscription_endpoint.id().clone(),
+            sdp,
+        })
+    }
+
+    fn handle_control_metadata(
+        &mut self,
+        source_endpoint: &EndpointId,
+        metadata: ControlMetadata,
+    ) -> Result<(), Error> {
+        match &metadata {
+            ControlMetadata::Mute { mid, mute } => {
+                let key = ForwardKey {
+                    publisher: source_endpoint.rtc_id(),
+                    mid: mid.clone(),
+                };
+                if let Some(track) = self.published_tracks.get_mut(&key) {
+                    track.muted = *mute;
+                } else {
+                    trace!(
+                        "{}: metadata for unknown published track {}:{}",
+                        self.id,
+                        source_endpoint.rtc_id(),
+                        mid
+                    );
+                }
+            }
+        }
+        self.broadcast_metadata(source_endpoint, &metadata)
+    }
+
+    fn broadcast_metadata(
+        &mut self,
+        source_endpoint: &EndpointId,
+        metadata: &ControlMetadata,
+    ) -> Result<(), Error> {
+        let payload = serialize_metadata_message(metadata)?;
+        let subscribers: Vec<EndpointId> = self
+            .subscribers
+            .iter()
+            .filter_map(|id| self.endpoints.get(id).map(|endpoint| endpoint.id().clone()))
+            .filter(|endpoint| endpoint.peer_id() != source_endpoint.peer_id())
+            .collect();
+
+        for subscriber in subscribers {
+            self.send_control_payload_to_peer(subscriber.peer_id(), payload.clone())?;
+        }
+        Ok(())
+    }
+
+    fn send_subscription_offer(
+        &mut self,
+        request_id: u64,
+        endpoint_id: &EndpointId,
+        sdp: &RTCSessionDescription,
+    ) -> Result<(), Error> {
+        if endpoint_id.kind() != EndpointKind::Subscribe || sdp.sdp_type != RTCSdpType::Offer {
+            return Ok(());
+        }
+
+        let payload = serialize_offer_message(request_id, sdp)?;
+        self.send_control_payload_to_peer(endpoint_id.peer_id(), payload)
+    }
+
+    fn send_control_payload_to_peer(
+        &mut self,
+        peer_id: &crate::sfu::peer::PeerId,
+        payload: bytes::BytesMut,
+    ) -> Result<(), Error> {
+        let Some((control_endpoint_id, channel_id)) = self.control.control_channel_for_peer(peer_id)
+        else {
+            trace!("{}: no control channel registered for peer {}", self.id, peer_id);
+            return Ok(());
+        };
+        let Some(endpoint) = self.endpoints.get_mut(&control_endpoint_id) else {
+            warn!(
+                "{}: control channel endpoint {} for peer {} is missing",
+                self.id, control_endpoint_id, peer_id
+            );
+            return Ok(());
+        };
+
+        endpoint.send_data_channel_message(channel_id, payload)
+    }
 }
 
 impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
@@ -580,14 +729,7 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
         let mut forwardings: HashMap<RtcEndpointId, VecDeque<RTCMessage>> = HashMap::new();
         for (endpoint_id, endpoint) in &mut self.endpoints {
             while let Some(msg) = endpoint.poll_read() {
-                if let RTCMessage::DataChannelMessage(data_channel_id, _) = &msg {
-                    warn!(
-                        "Drop data channel message for data channel id {}",
-                        data_channel_id
-                    );
-                } else {
-                    forwardings.entry(*endpoint_id).or_default().push_back(msg);
-                }
+                forwardings.entry(*endpoint_id).or_default().push_back(msg);
             }
         }
 
@@ -597,14 +739,23 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
         // quietly — the binding lands in this same drive iteration via poll_event.
         for (endpoint_id, mut reads) in forwardings.drain() {
             while let Some(msg) = reads.pop_front() {
-                match &msg {
+                match msg {
+                    RTCMessage::DataChannelMessage(data_channel_id, data) => {
+                        if let Err(err) =
+                            self.handle_data_channel_message(endpoint_id, data_channel_id, data)
+                        {
+                            warn!(
+                                "{}: failed to handle data channel message from {}: {}",
+                                self.id, endpoint_id, err
+                            );
+                        }
+                    }
                     RTCMessage::RtpPacket(_, rtp_packet) => {
-                        self.forward_rtp(endpoint_id, rtp_packet)
+                        self.forward_rtp(endpoint_id, &rtp_packet)
                     }
                     RTCMessage::RtcpPacket(_, rtcp_packets) => {
-                        self.forward_rtcp(endpoint_id, rtcp_packets)
+                        self.forward_rtcp(endpoint_id, &rtcp_packets)
                     }
-                    _ => {}
                 }
             }
         }
@@ -653,7 +804,8 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                 }
             } else if let SFUEvent::Join { .. } = &evt {
                 let endpoint_kind = endpoint_id.kind();
-                let endpoint = self.build_endpoint(endpoint_id, rtc_lobby_id)?;
+                self.control.register_endpoint(&endpoint_id);
+                let endpoint = self.build_endpoint(endpoint_id.clone(), rtc_lobby_id)?;
                 match endpoint_kind {
                     EndpointKind::Publish => {
                         self.publishers.insert(rtc_endpoint_id);
@@ -670,6 +822,7 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                 self.endpoints.remove(&rtc_endpoint_id);
                 self.publishers.remove(&rtc_endpoint_id);
                 self.subscribers.remove(&rtc_endpoint_id);
+                self.control.unregister_endpoint(&endpoint_id);
             }
 
             if needs_reconcile {
@@ -691,11 +844,39 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
     }
 
     fn poll_event(&mut self) -> Option<Self::Eout> {
+        let mut subscription_offers = Vec::new();
         for (endpoint_id, endpoint) in &mut self.endpoints {
             while let Some(event) = endpoint.poll_event() {
                 match event {
                     RtcEndpointEvent::SFUEvent(evt) => {
+                        if let SFUEvent::SessionDescription {
+                            request_id,
+                            endpoint_id,
+                            sdp,
+                            ..
+                        } = &evt
+                        {
+                            if endpoint_id.kind() == EndpointKind::Subscribe
+                                && sdp.sdp_type == RTCSdpType::Offer
+                            {
+                                subscription_offers.push((
+                                    *request_id,
+                                    endpoint_id.clone(),
+                                    sdp.clone(),
+                                ));
+                            }
+                        }
                         self.events.push_back(evt);
+                    }
+                    RtcEndpointEvent::PeerConnectionEvent(RTCPeerConnectionEvent::OnDataChannel(
+                        RTCDataChannelEvent::OnOpen(channel_id),
+                    )) => {
+                        let endpoint_identity = endpoint.id().clone();
+                        let label = endpoint.data_channel_label(channel_id);
+                        if label.as_deref() == Some("whip") {
+                            self.control
+                                .register_data_channel(&endpoint_identity, channel_id);
+                        }
                     }
                     RtcEndpointEvent::PeerConnectionEvent(RTCPeerConnectionEvent::OnTrack(
                         RTCTrackEvent::OnOpen(init),
@@ -725,6 +906,14 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                         //TODO: remaining peer connection events
                     }
                 }
+            }
+        }
+        for (request_id, endpoint_id, sdp) in subscription_offers {
+            if let Err(err) = self.send_subscription_offer(request_id, &endpoint_id, &sdp) {
+                warn!(
+                    "{}: failed to send subscription offer over control channel to {}: {}",
+                    self.id, endpoint_id, err
+                );
             }
         }
         self.events.pop_front()

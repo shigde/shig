@@ -3,6 +3,7 @@ use super::lobby::RtcLobbyId;
 use super::SFUEvent;
 use crate::sfu::endpoint::EndpointId;
 use log::{trace, warn};
+use rtc::data_channel::{RTCDataChannelId, RTCDataChannelMessage};
 use rtc::ice::candidate::CandidateConfig;
 use rtc::interceptor::{BoxedInterceptor, Interceptor, Registry};
 use rtc::media_stream::MediaStreamTrack;
@@ -312,6 +313,30 @@ impl Protocol<TaggedBytesMut, RTCMessage, RtcEndpointEvent> for RtcEndpoint {
 }
 
 impl RtcEndpoint {
+    pub(crate) fn id(&self) -> &EndpointId {
+        &self.id
+    }
+
+    pub(crate) fn data_channel_label(&mut self, channel_id: RTCDataChannelId) -> Option<String> {
+        self.peer_connection
+            .data_channel(channel_id)
+            .map(|channel| channel.label().to_owned())
+    }
+
+    pub(crate) fn send_data_channel_message(
+        &mut self,
+        channel_id: RTCDataChannelId,
+        data: bytes::BytesMut,
+    ) -> Result<()> {
+        self.peer_connection.handle_write(RTCMessage::DataChannelMessage(
+            channel_id,
+            RTCDataChannelMessage {
+                is_string: false,
+                data,
+            },
+        ))
+    }
+
     /// Whether this endpoint's transport is fully connected (ICE + DTLS/SRTP established). The
     /// lobby only forwards media to a subscriber once this is true; forwarding earlier would just
     /// be dropped by the SRTP layer (`local_srtp_context is not set yet`).
