@@ -63,14 +63,14 @@ pub(crate) async fn whep_offer(
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
+        Ok(result) => result.map_err(|e| {
             let error_message = format!(
                 "SFU error on offer, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            ApiError::InternalServerError { error_message }
+        })?,
         Err(e) => {
             let error_message = format!(
                 "internal message error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
@@ -137,14 +137,14 @@ pub(crate) async fn whep_answer(
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
+        Ok(result) => result.map_err(|e| {
             let error_message = format!(
                 "SFU error on answer, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            ApiError::InternalServerError { error_message }
+        })?,
         Err(e) => {
             let error_message = format!(
                 "internal message error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",

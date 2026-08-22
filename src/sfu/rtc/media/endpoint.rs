@@ -105,6 +105,7 @@ impl RtcEndpointBuilder {
             writes: Default::default(),
             events: Default::default(),
             outbound_track_info: Default::default(),
+            bootstrap_data_channel_id: None,
         })
     }
 }
@@ -172,6 +173,7 @@ pub(crate) struct RtcEndpoint {
     writes: VecDeque<TaggedBytesMut>,
     events: VecDeque<RtcEndpointEvent>,
     outbound_track_info: HashMap<RTCRtpSenderId, PublishedTrackInfo>,
+    bootstrap_data_channel_id: Option<RTCDataChannelId>,
 }
 
 impl Deref for RtcEndpoint {
@@ -338,6 +340,16 @@ impl RtcEndpoint {
                 data,
             },
         ))
+    }
+
+    pub(crate) fn ensure_bootstrap_data_channel(&mut self, label: &str) -> Result<()> {
+        if self.bootstrap_data_channel_id.is_some() {
+            return Ok(());
+        }
+
+        let channel = self.peer_connection.create_data_channel(label, None)?;
+        self.bootstrap_data_channel_id = Some(channel.id());
+        Ok(())
     }
 
     /// Whether this endpoint's transport is fully connected (ICE + DTLS/SRTP established). The
@@ -735,6 +747,7 @@ impl RtcEndpoint {
             Instant::now() + ONGOING_NEGOTIATION_TIMEOUT_IN_SECOND,
         ));
 
+        self.add_local_host_candidate()?;
         let offer = self.peer_connection.create_offer(None)?;
         self.peer_connection.set_local_description(offer)?;
         let sdp = self
@@ -801,6 +814,23 @@ impl RtcEndpoint {
         format!("{purpose} {muted} {display_info}")
     }
 
+    fn add_local_host_candidate(&mut self) -> Result<()> {
+        let candidate = CandidateHostConfig {
+            base_config: CandidateConfig {
+                network: "udp".to_owned(),
+                address: self.local_addr.ip().to_string(),
+                port: self.local_addr.port(),
+                component: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+        .new_candidate_host()?;
+        let local_candidate_init = RTCIceCandidate::from(&candidate).to_json()?;
+        self.peer_connection
+            .add_local_candidate(local_candidate_init)
+    }
+
     fn handle_session_description(
         &mut self,
         request_id: RequestId,
@@ -823,21 +853,7 @@ impl RtcEndpoint {
         self.peer_connection.set_remote_description(sdp)?;
 
         if sdp_type == RTCSdpType::Offer {
-            let candidate = CandidateHostConfig {
-                base_config: CandidateConfig {
-                    network: "udp".to_owned(),
-                    address: self.local_addr.ip().to_string(),
-                    port: self.local_addr.port(),
-                    component: 1,
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-            .new_candidate_host()?;
-            let local_candidate_init = RTCIceCandidate::from(&candidate).to_json()?;
-            self.peer_connection
-                .add_local_candidate(local_candidate_init)?;
-
+            self.add_local_host_candidate()?;
             let answer = self.peer_connection.create_answer(None)?;
 
             self.peer_connection.set_local_description(answer)?;

@@ -61,14 +61,14 @@ pub(crate) async fn whip(
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
+        Ok(result) => result.map_err(|e| {
             let error_message = format!(
                 "SFU error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            ApiError::InternalServerError { error_message }
+        })?,
 
         Err(e) => {
             let error_message = format!(

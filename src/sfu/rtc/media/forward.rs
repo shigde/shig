@@ -1,4 +1,5 @@
 use crate::sfu::endpoint::RtcEndpointId;
+use crate::sfu::peer::PeerId;
 use rtc::rtp_transceiver::{RTCRtpSenderId, SSRC};
 use std::collections::{HashMap, HashSet};
 
@@ -85,12 +86,14 @@ impl ForwardTable {
         desired: &HashSet<ForwardKey>,
         live_publishers: &HashSet<RtcEndpointId>,
         live_subscribers: &HashSet<RtcEndpointId>,
+        endpoint_peers: &HashMap<RtcEndpointId, PeerId>,
         removed: &mut Vec<(RtcEndpointId, RTCRtpSenderId)>,
     ) {
         self.entries.retain(|key, subs| {
             let key_alive = desired.contains(key) && live_publishers.contains(&key.publisher);
             subs.retain(|subscriber, sender| {
-                let keep = key_alive && live_subscribers.contains(subscriber);
+                let same_peer = endpoint_peers.get(&key.publisher) == endpoint_peers.get(subscriber);
+                let keep = key_alive && live_subscribers.contains(subscriber) && !same_peer;
                 if !keep {
                     removed.push((*subscriber, *sender));
                 }
@@ -164,7 +167,45 @@ mod tests {
         let desired = HashSet::from([k]);
         let live_publishers = HashSet::new();
         let live_subscribers = HashSet::from([2]);
-        table.retain(&desired, &live_publishers, &live_subscribers, &mut removed);
+        let endpoint_peers = HashMap::from([
+            (1, PeerId::new("publisher")),
+            (2, PeerId::new("subscriber")),
+        ]);
+        table.retain(
+            &desired,
+            &live_publishers,
+            &live_subscribers,
+            &endpoint_peers,
+            &mut removed,
+        );
+
+        assert_eq!(removed, vec![(2, RTCRtpSenderId::from(7))]);
+        assert!(table.route_by_ssrc(1111).is_none());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn retain_prunes_self_forwardings() {
+        let mut table = ForwardTable::default();
+        let k = key(1, "0");
+        table.insert(k.clone(), 2, RTCRtpSenderId::from(7));
+        table.bind_ssrc(1111, k.clone());
+
+        let mut removed = Vec::new();
+        let desired = HashSet::from([k]);
+        let live_publishers = HashSet::from([1]);
+        let live_subscribers = HashSet::from([2]);
+        let endpoint_peers = HashMap::from([
+            (1, PeerId::new("same-peer")),
+            (2, PeerId::new("same-peer")),
+        ]);
+        table.retain(
+            &desired,
+            &live_publishers,
+            &live_subscribers,
+            &endpoint_peers,
+            &mut removed,
+        );
 
         assert_eq!(removed, vec![(2, RTCRtpSenderId::from(7))]);
         assert!(table.route_by_ssrc(1111).is_none());

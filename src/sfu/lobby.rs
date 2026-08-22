@@ -15,7 +15,7 @@ use crate::sfu::rtc::core_actor::RtcCoreActor;
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
-    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
     WrapFuture,
 };
 use moq_relay::AuthToken;
@@ -118,6 +118,8 @@ impl Handler<Publish> for Lobby {
             stream_uuid: self.stream_uuid.clone(),
             user_uuid: msg.user_uuid,
         });
+        let cleanup_peer = peer.clone();
+        let cleanup_peer_id = peer_id.clone();
 
         Box::pin(
             async move {
@@ -126,7 +128,14 @@ impl Handler<Publish> for Lobby {
                     .map_err(LobbyError::MailboxError)?
                     .map_err(LobbyError::PeerInternalError)
             }
-            .into_actor(self),
+            .into_actor(self)
+            .map(move |result, actor, _ctx| {
+                if result.is_err() {
+                    actor.peers.remove(&cleanup_peer_id);
+                    cleanup_peer.do_send(PeerShutdown);
+                }
+                result
+            }),
         )
     }
 }

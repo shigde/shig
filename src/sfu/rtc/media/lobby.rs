@@ -191,6 +191,11 @@ impl RtcLobby {
             .copied()
             .filter(|id| self.endpoints.contains_key(id))
             .collect();
+        let endpoint_peers: HashMap<RtcEndpointId, crate::sfu::peer::PeerId> = self
+            .endpoints
+            .iter()
+            .map(|(id, endpoint)| (*id, endpoint.id().peer_id().clone()))
+            .collect();
         let publishers: Vec<(RtcEndpointId, HashMap<Mid, PublishedTrack>)> = live_publishers
             .iter()
             .filter_map(|id| {
@@ -218,6 +223,7 @@ impl RtcLobby {
             &desired,
             &live_publishers,
             &live_subscribers,
+            &endpoint_peers,
             &mut removed,
         );
         for (subscriber, sender) in removed {
@@ -246,6 +252,9 @@ impl RtcLobby {
                 }
 
                 for &subscriber in &live_subscribers {
+                    if endpoint_peers.get(publisher) == endpoint_peers.get(&subscriber) {
+                        continue;
+                    }
                     if self.forward.has_subscriber(&key, &subscriber) {
                         continue;
                     }
@@ -799,6 +808,9 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     remove_endpoint = true;
                     needs_reconcile = true;
                 } else if let SFUEvent::CreateOffer { request_id, .. } = &evt {
+                    if let Some(endpoint) = self.endpoints.get_mut(&rtc_endpoint_id) {
+                        endpoint.ensure_bootstrap_data_channel("whep")?;
+                    }
                     self.reconcile();
                     if let Some(endpoint) = self.endpoints.get_mut(&rtc_endpoint_id) {
                         endpoint.create_offer(*request_id)?;
