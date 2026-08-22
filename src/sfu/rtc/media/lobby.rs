@@ -122,6 +122,7 @@ impl RtcLobby {
         &self,
         endpoint_id: RtcEndpointId,
         rtc_lobby_id: RtcLobbyId,
+        participant_id: String,
     ) -> Result<RtcEndpoint, Error> {
         let mut setting_engine = SettingEngine::default();
         setting_engine.set_ice_credentials(
@@ -142,6 +143,7 @@ impl RtcLobby {
         // chain would otherwise consume RTCP before the application sees it.
         let registry = registry.with(RtcpForwarderBuilder::new().build());
         RtcEndpointBuilder::new(endpoint_id, rtc_lobby_id, self.local_addr)
+            .with_participant_id(participant_id)
             .with_setting_engine(setting_engine)
             .with_media_engine(media_engine)
             .with_interceptor_registry(registry)
@@ -611,8 +613,9 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     needs_reconcile = matches!(evt, SFUEvent::SessionDescription { .. });
                     endpoint.handle_event(RtcEndpointEvent::SFUEvent(evt))?;
                 }
-            } else if let SFUEvent::Join { .. } = &evt {
-                let endpoint = self.build_endpoint(endpoint_id, rtc_lobby_id)?;
+            } else if let SFUEvent::Join { participant_id, .. } = &evt {
+                let endpoint =
+                    self.build_endpoint(endpoint_id, rtc_lobby_id, participant_id.clone())?;
                 self.endpoints.insert(endpoint_id, endpoint);
                 needs_reconcile = false;
             }

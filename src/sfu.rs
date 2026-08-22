@@ -6,7 +6,7 @@ use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
     LeavePeer, Lobby, LobbyId, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
-use crate::sfu::rtc::media_command::{RtcError, StopRtcPool};
+use crate::sfu::rtc::media_command::{AssignLobby, ReleaseLobby, RtcError, StopRtcPool};
 use crate::sfu::rtc::pool_actor::RtcPoolActor;
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::ShutdownWorkers;
@@ -92,58 +92,112 @@ impl Handler<PublishLobby> for Sfu {
     fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
         let stream_uuid = msg.stream_uuid.clone();
-
-        let lobby_addr = match self.lobbies.get(&lobby_uuid) {
-            None => {
-                let lobby_addr = Lobby::new(
-                    LobbyId::new(msg.lobby_uuid.clone()),
-                    msg.stream_uuid.clone(),
-                    msg.user_uuid.clone(),
-                    ctx.address(),
-                    self.db_actor.clone(),
-                    self.rtc_pool.clone(),
-                    self.relay_state.clone(),
-                    self.worker_manager.clone(),
-                )
-                .start();
-                self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
-                self.db_actor.do_send(SetLobbyOnline {
-                    lobby_uuid: lobby_uuid.clone(),
-                    stream_uuid: stream_uuid.clone(),
-                });
-                lobby_addr.clone()
-            }
-            Some(lobby_addr) => lobby_addr.clone(),
-        };
-
         let user_uuid = msg.user_uuid.clone();
         let offer = msg.offer.clone();
+        let role = msg.role;
 
-        let fut = async move {
-            log::info!(
-                "peer joining lobby,  peer_id={}, lobby_id={}",
-                user_uuid.clone(),
-                lobby_uuid.clone()
+        if let Some(lobby_addr) = self.lobbies.get(&lobby_uuid).cloned() {
+            return Box::pin(
+                publish_to_lobby(lobby_addr, lobby_uuid, user_uuid, offer, role).into_actor(self),
             );
-            let result = lobby_addr
-                .send(Publish {
-                    user_uuid,
-                    offer,
-                    role: msg.role,
-                })
-                .await;
-
-            match result {
-                Ok(val) => match val {
-                    Ok(answer) => Ok(answer),
-                    Err(e) => Err(SfuError::LobbyError(e)),
-                },
-                Err(e) => Err(SfuError::LobbyMailboxError(e)),
-            }
         }
-        .into_actor(self);
 
-        Box::pin(fut)
+        let lobby_id = LobbyId::new(lobby_uuid.clone());
+        let pool = self.rtc_pool.clone();
+        let db_actor = self.db_actor.clone();
+        let relay_state = self.relay_state.clone();
+        let worker_manager = self.worker_manager.clone();
+        let parent_addr = ctx.address();
+
+        Box::pin(
+            async move {
+                let assignment = pool
+                    .send(AssignLobby(lobby_id.clone()))
+                    .await
+                    .map_err(SfuError::RtcMailboxError)?
+                    .map_err(SfuError::RtcError)?;
+
+                Ok((assignment, lobby_id))
+            }
+            .into_actor(self)
+            .then(move |result, actor, _ctx| {
+                let lobby_uuid = lobby_uuid.clone();
+                let stream_uuid = stream_uuid.clone();
+                let user_uuid = user_uuid.clone();
+                let offer = offer.clone();
+                let db_actor = db_actor.clone();
+                let relay_state = relay_state.clone();
+                let worker_manager = worker_manager.clone();
+                let parent_addr = parent_addr.clone();
+
+                let publish = match result {
+                    Ok((assignment, lobby_id)) => {
+                        log::info!(
+                            "lobby_id={} assigned to RTC core {} at {}",
+                            lobby_id,
+                            assignment.core_id,
+                            assignment.media_addr
+                        );
+
+                        let lobby_addr = Lobby::new(
+                            lobby_id.clone(),
+                            stream_uuid.clone(),
+                            user_uuid.clone(),
+                            parent_addr,
+                            db_actor.clone(),
+                            assignment.core,
+                            relay_state,
+                            worker_manager,
+                        )
+                        .start();
+
+                        actor.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
+                        db_actor.do_send(SetLobbyOnline {
+                            lobby_uuid: lobby_uuid.clone(),
+                            stream_uuid,
+                        });
+
+                        Ok((lobby_addr, lobby_uuid, user_uuid, offer, role))
+                    }
+                    Err(error) => Err(error),
+                };
+
+                async move {
+                    let (lobby_addr, lobby_uuid, user_uuid, offer, role) = publish?;
+                    publish_to_lobby(lobby_addr, lobby_uuid, user_uuid, offer, role).await
+                }
+                .into_actor(actor)
+            }),
+        )
+    }
+}
+
+async fn publish_to_lobby(
+    lobby_addr: Addr<Lobby>,
+    lobby_uuid: String,
+    user_uuid: String,
+    offer: String,
+    role: peer::PeerRole,
+) -> SfuResult<String> {
+    log::info!(
+        "peer joining lobby,  peer_id={}, lobby_id={}",
+        user_uuid.clone(),
+        lobby_uuid
+    );
+    let result = lobby_addr
+        .send(Publish {
+            user_uuid,
+            offer,
+            role,
+        })
+        .await;
+
+    match result {
+        Ok(val) => match val {
+            Ok(answer) => Ok(answer),
+            Err(e) => Err(SfuError::LobbyError(e)),
+        },
+        Err(e) => Err(SfuError::LobbyMailboxError(e)),
     }
 }
 
@@ -328,17 +382,19 @@ impl Handler<Shutdown> for Sfu {
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct LobbyStopped {
-    id: String,
+    id: LobbyId,
 }
 
 impl Handler<LobbyStopped> for Sfu {
     type Result = ();
 
     fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
-        self.lobbies.remove(&msg.id);
+        self.lobbies.remove(&msg.id.clone().to_string());
         self.db_actor.do_send(SetLobbyOffline {
             lobby_uuid: msg.id.to_string(),
         });
+
+        self.rtc_pool.do_send(ReleaseLobby(msg.id.clone()));
 
         if self.shutting_down && self.lobbies.is_empty() {
             ctx.stop();

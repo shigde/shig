@@ -24,6 +24,7 @@ pub enum SFUEvent {
         request_id: RequestId,
         rtc_lobby_id: RtcLobbyId,
         endpoint_id: RtcEndpointId,
+        participant_id: String,
     },
     SessionDescription {
         request_id: RequestId,

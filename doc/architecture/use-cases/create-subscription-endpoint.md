@@ -96,7 +96,7 @@ sequenceDiagram
     Lobby->>Peer: "CreateSubscriptionEndpoint"
     Peer->>Core: "CreateEndpointOffer subscribe endpoint"
 
-    Core->>Engine: "SFUEvent Join"
+    Core->>Engine: "SFUEvent Join with participant id"
     Engine->>RtcLobby: "route by rtc lobby id"
     RtcLobby->>Endpoint: "build subscription endpoint"
     Endpoint->>Endpoint: "create RTCPeerConnection"
@@ -182,7 +182,7 @@ operations:
 
 | Event | Direction | Effect |
 | --- | --- | --- |
-| `SFUEvent::Join` | control plane to `MediaEngine` | Add the subscribe `RtcEndpoint` to the existing `RtcLobby`. |
+| `SFUEvent::Join` | control plane to `MediaEngine` | Add the subscribe `RtcEndpoint` with its participant ID to the existing `RtcLobby`. |
 | collect publisher tracks | lobby internal | Find all existing publish tracks from other peers in the same RTC lobby. |
 | add forwarding tracks | lobby to endpoint | Add those tracks to the subscriber endpoint before the initial offer is created. |
 | `create_offer` | endpoint internal | Create the SFU offer for the subscription endpoint. |

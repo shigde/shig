@@ -287,6 +287,7 @@ mod tests {
                 request_id,
                 rtc_lobby_id: LOBBY,
                 endpoint_id,
+                participant_id: format!("00000000-0000-4000-8000-{endpoint_id:012}"),
             })
             .expect("join should succeed");
     }

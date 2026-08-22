@@ -32,6 +32,8 @@ from the subscribed track.
 Current implementation notes:
 
 - The legacy SFU implementation generates the prefix with `random_id(6)`.
+- The endpoint-based MediaEngine implementation uses an endpoint-derived prefix
+  and stores the participant ID on the `RtcEndpoint`.
 - The SDK does not depend on the prefix length. It extracts the participant ID
   by finding the UUID inside the track ID.
 - If the intended public contract is a five-character prefix, the SFU

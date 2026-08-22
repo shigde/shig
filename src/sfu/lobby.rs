@@ -12,13 +12,11 @@ use crate::sfu::relay::actor::{
     StopRelayMediaStream,
 };
 use crate::sfu::rtc::core_actor::RtcCoreActor;
-use crate::sfu::rtc::media_command::{AssignLobby, ReleaseLobby};
-use crate::sfu::rtc::pool_actor::RtcPoolActor;
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
-    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message,
-    ResponseActFuture, WrapFuture,
+    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
+    WrapFuture,
 };
 use moq_relay::AuthToken;
 use std::collections::HashMap;
@@ -42,8 +40,7 @@ pub struct Lobby {
     peers: HashMap<PeerId, Addr<Peer>>,
     parent_addr: Addr<Sfu>,
     db_actor_addr: Addr<DbActor>,
-    rtc_pool: Addr<RtcPoolActor>,
-    rtc_core: Option<Addr<RtcCoreActor>>,
+    rtc_core_addr: Addr<RtcCoreActor>,
     relay_addr: Addr<RelayActor>,
     shutting_down: bool,
 }
@@ -55,7 +52,7 @@ impl Lobby {
         host_uuid: String,
         parent_addr: Addr<Sfu>,
         db_actor_addr: Addr<DbActor>,
-        rtc_pool: Addr<RtcPoolActor>,
+        rtc_core_addr: Addr<RtcCoreActor>,
         relay_state: RelayState,
         worker_manager: Addr<WorkerManager>,
     ) -> Self {
@@ -67,18 +64,16 @@ impl Lobby {
             peers: HashMap::new(),
             parent_addr,
             db_actor_addr,
-            rtc_pool,
-            rtc_core: None,
+            rtc_core_addr,
             relay_addr,
             shutting_down: false,
         }
     }
 
     fn stop(&mut self, ctx: &mut Context<Self>) {
-        self.rtc_pool.do_send(ReleaseLobby(self.id.clone()));
         self.relay_addr.do_send(RelayShutdown);
         self.parent_addr.do_send(LobbyStopped {
-            id: self.id.to_string(),
+            id: self.id.clone(),
         });
         ctx.stop();
     }
@@ -86,41 +81,8 @@ impl Lobby {
 
 impl Actor for Lobby {
     type Context = Context<Self>;
-    fn started(&mut self, ctx: &mut Self::Context) {
+    fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!("lobby actor lobby_id={} is alive", self.id);
-        let pool = self.rtc_pool.clone();
-        let lobby_id = self.id.clone();
-        ctx.wait(
-            async move { pool.send(AssignLobby(lobby_id)).await }
-                .into_actor(self)
-                .map(|result, actor, ctx| match result {
-                    Ok(Ok(assignment)) => {
-                        log::info!(
-                            "lobby_id={} assigned to RTC core {} at {}",
-                            actor.id,
-                            assignment.core_id,
-                            assignment.media_addr
-                        );
-                        actor.rtc_core = Some(assignment.core);
-                    }
-                    Ok(Err(error)) => {
-                        log::error!(
-                            "RTC core assignment failed for lobby_id={}: {}",
-                            actor.id,
-                            error
-                        );
-                        ctx.stop();
-                    }
-                    Err(error) => {
-                        log::error!(
-                            "RTC pool mailbox failed for lobby_id={}: {}",
-                            actor.id,
-                            error
-                        );
-                        ctx.stop();
-                    }
-                }),
-        );
     }
 }
 
@@ -141,18 +103,13 @@ impl Handler<Publish> for Lobby {
         }
         let publish_endpoint = EndpointId::publish(self.id.clone(), peer_id.clone());
         let subscribe_endpoint = EndpointId::subscribe(self.id.clone(), peer_id.clone());
-        let Some(rtc_core) = self.rtc_core.clone() else {
-            return Box::pin(actix::fut::err(LobbyError::RtcCoreUnavailable(
-                "lobby has no RTC core assignment".to_owned(),
-            )));
-        };
         let peer = Peer::new(
             peer_id.clone(),
             ctx.address(),
             msg.role,
             publish_endpoint.clone(),
             subscribe_endpoint.clone(),
-            rtc_core,
+            self.rtc_core_addr.clone(),
         )
         .start();
         self.peers.insert(peer_id.clone(), peer.clone());

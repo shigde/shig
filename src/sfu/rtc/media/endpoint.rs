@@ -41,6 +41,7 @@ pub(crate) struct RtcEndpointBuilder {
     id: RtcEndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
+    participant_id: String,
     peer_connection_builder: RTCPeerConnectionBuilder<BoxedInterceptor>,
 }
 
@@ -50,9 +51,15 @@ impl RtcEndpointBuilder {
             id,
             rtc_lobby_id,
             local_addr,
+            participant_id: id.to_string(),
             peer_connection_builder: RTCPeerConnectionBuilder::new()
                 .with_interceptor_registry(Registry::new().boxed()),
         }
+    }
+
+    pub(crate) fn with_participant_id<S: Into<String>>(mut self, participant_id: S) -> Self {
+        self.participant_id = participant_id.into();
+        self
     }
 
     pub(crate) fn with_configuration(mut self, configuration: RTCConfiguration) -> Self {
@@ -89,6 +96,7 @@ impl RtcEndpointBuilder {
             id: self.id,
             rtc_lobby_id: self.rtc_lobby_id,
             local_addr: self.local_addr,
+            participant_id: self.participant_id,
             peer_connection: self.peer_connection_builder.build()?,
 
             next_request_id: 0,
@@ -118,6 +126,7 @@ pub(crate) struct RtcEndpoint {
     id: RtcEndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
+    participant_id: String,
     peer_connection: RTCPeerConnection<BoxedInterceptor>,
 
     next_request_id: RequestId,
@@ -427,10 +436,10 @@ impl RtcEndpoint {
     /// Rebuild `track` from the receiver's negotiated parameters, then fill in the publish-side
     /// primary SSRC (`a=ssrc`) from the remote description when it is known.
     ///
-    /// The forwarded track's stream/track ids are stamped with the publishing endpoint's id
-    /// (`peer-<endpoint_id>`), so the msid the SFU forwards carries the publisher's identity to
-    /// every subscriber — the browser never has to embed it. The publisher's original track id is
-    /// kept as a suffix to keep each track's id unique within the endpoint's stream.
+    /// The forwarded track id ends with the publishing participant id, so the msid the SFU
+    /// forwards carries the publisher's identity to every subscriber. The prefix uses the
+    /// publishing endpoint id plus the publisher's original track id to keep multiple tracks from
+    /// the same participant unique.
     ///
     /// This keeps only codecs the SFU side already matched as supported instead of copying
     /// every raw offered codec from the browser m-line, which can include codecs the
@@ -471,7 +480,7 @@ impl RtcEndpoint {
 
         MediaStreamTrack::new(
             format!("peer-{}-{}", self.id, track.stream_id()),
-            format!("peer-{}-{}", self.id, track.track_id()),
+            format!("{}-{}-{}", self.id, track.track_id(), self.participant_id),
             format!("peer-{}-{}", self.id, track.label()),
             track.kind(),
             codings,
@@ -776,6 +785,7 @@ impl RtcEndpoint {
                 request_id,
                 rtc_lobby_id,
                 endpoint_id,
+                ..
             } => {
                 warn!(
                     "{}:[{}/{}] has already joined",
@@ -847,12 +857,14 @@ mod tests {
 
         let endpoint =
             RtcEndpointBuilder::new(10, RtcLobbyId::from_u128(20), "0.0.0.0:0".parse().unwrap())
+                .with_participant_id("participant-10")
                 .with_media_engine(media_engine)
                 .build()
                 .expect("default endpoint should build");
 
         assert_eq!(endpoint.id, 10);
         assert_eq!(endpoint.rtc_lobby_id, RtcLobbyId::from_u128(20));
+        assert_eq!(endpoint.participant_id, "participant-10");
     }
 
     #[test]
@@ -932,6 +944,7 @@ mod tests {
             .expect("default codecs should register");
         let endpoint =
             RtcEndpointBuilder::new(42, RtcLobbyId::from_u128(20), "0.0.0.0:0".parse().unwrap())
+                .with_participant_id("3c734426-bc94-4a38-8ffd-dd2a46c056de")
                 .with_media_engine(media_engine)
                 .build()
                 .expect("endpoint should build");
@@ -945,10 +958,13 @@ mod tests {
             rebuilt.codings()[0].rtp_coding_parameters.ssrc,
             Some(424242)
         );
-        // The forwarded track's identity is stamped with the publishing endpoint's id (42) so
-        // subscribers can recover the publisher from the msid.
+        // The forwarded track id contains the publishing participant id so subscribers can
+        // recover the publisher from the msid.
         assert_eq!(rebuilt.stream_id(), "peer-42-stream");
-        assert_eq!(rebuilt.track_id(), "peer-42-track");
+        assert_eq!(
+            rebuilt.track_id(),
+            "42-track-3c734426-bc94-4a38-8ffd-dd2a46c056de"
+        );
         assert_eq!(rebuilt.label(), "peer-42-label");
     }
 

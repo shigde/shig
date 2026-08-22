@@ -82,7 +82,7 @@ sequenceDiagram
     Lobby->>Peer: "CreatePublishEndpoint offer"
 
     Peer->>Core: "NegotiateEndpoint publish endpoint offer"
-    Core->>Engine: "SFUEvent Join"
+    Core->>Engine: "SFUEvent Join with participant id"
     Engine->>Engine: "create RtcLobby"
     Engine->>RtcLobby: "Join"
     RtcLobby->>Endpoint: "build receiving endpoint"
@@ -132,7 +132,7 @@ Inside the RTC core, endpoint negotiation is represented as `SFUEvent`s:
 
 | Event | Direction | Effect |
 | --- | --- | --- |
-| `SFUEvent::Join` | control plane to `MediaEngine` | Create the `RtcLobby` if it does not exist and add the new `RtcEndpoint`. |
+| `SFUEvent::Join` | control plane to `MediaEngine` | Create the `RtcLobby` if it does not exist and add the new `RtcEndpoint` with its participant ID. |
 | `SFUEvent::SessionDescription` with offer | control plane to endpoint | Apply the remote SDP offer from the client. |
 | local host candidate | endpoint internal | Add the RTC core media address as a host candidate. |
 | `create_answer` | endpoint internal | Create the SDP answer for the client offer. |

@@ -9,6 +9,8 @@ pub enum SfuError {
     LobbyNotExists(),
     LobbyError(LobbyError),
     LobbyMailboxError(actix::MailboxError),
+    RtcMailboxError(actix::MailboxError),
+    RtcError(RtcError),
 }
 
 pub type LobbyResult<T> = Result<T, LobbyError>;
