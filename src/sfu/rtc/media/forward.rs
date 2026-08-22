@@ -74,21 +74,23 @@ impl ForwardTable {
 
     /// Drop forwardings that are no longer wanted and collect their senders so the caller
     /// can `remove_track` them from the subscriber peer connections:
-    ///   - the `(publisher, mid)` is no longer published (not in `desired`), or
-    ///   - the publisher or the subscriber has left the lobby (not in `live_endpoints`).
+    ///   - the `(publisher, mid)` is no longer published (not in `desired`),
+    ///   - the publisher has left the lobby or is no longer a publish endpoint, or
+    ///   - the subscriber has left the lobby or is no longer a subscribe endpoint.
     ///
     /// SSRC bindings whose key vanished are pruned with it. Everything still wanted is
     /// kept, so re-running this with an unchanged lobby is a no-op (the intersection case).
     pub(crate) fn retain(
         &mut self,
         desired: &HashSet<ForwardKey>,
-        live_endpoints: &HashSet<RtcEndpointId>,
+        live_publishers: &HashSet<RtcEndpointId>,
+        live_subscribers: &HashSet<RtcEndpointId>,
         removed: &mut Vec<(RtcEndpointId, RTCRtpSenderId)>,
     ) {
         self.entries.retain(|key, subs| {
-            let key_alive = desired.contains(key) && live_endpoints.contains(&key.publisher);
+            let key_alive = desired.contains(key) && live_publishers.contains(&key.publisher);
             subs.retain(|subscriber, sender| {
-                let keep = key_alive && live_endpoints.contains(subscriber);
+                let keep = key_alive && live_subscribers.contains(subscriber);
                 if !keep {
                     removed.push((*subscriber, *sender));
                 }
@@ -160,8 +162,9 @@ mod tests {
         // Publisher 1 gone: entry and its SSRC binding must both go.
         let mut removed = Vec::new();
         let desired = HashSet::from([k]);
-        let live = HashSet::from([2]);
-        table.retain(&desired, &live, &mut removed);
+        let live_publishers = HashSet::new();
+        let live_subscribers = HashSet::from([2]);
+        table.retain(&desired, &live_publishers, &live_subscribers, &mut removed);
 
         assert_eq!(removed, vec![(2, RTCRtpSenderId::from(7))]);
         assert!(table.route_by_ssrc(1111).is_none());

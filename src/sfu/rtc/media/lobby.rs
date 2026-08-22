@@ -1,15 +1,16 @@
 use super::demuxer::Demuxer;
-use super::endpoint::{Mid, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent};
+use super::endpoint::{
+    Mid, PublishedTrack, PublishedTrackInfo, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent,
+};
 use super::event::SFUEvent;
 use super::forward::{ForwardKey, ForwardTable};
 use super::rtcp_forwarder::RtcpForwarderBuilder;
-use crate::sfu::endpoint::{EndpointId, RtcEndpointId};
+use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
 use log::{trace, warn};
 use rtc::ice::rand::{generate_pwd, generate_ufrag};
 use rtc::interceptor::Registry;
-use rtc::media_stream::MediaStreamTrack;
 use rtc::peer_connection::configuration::interceptor_registry::register_default_interceptors;
 use rtc::peer_connection::configuration::media_engine::MediaEngine;
 use rtc::peer_connection::configuration::setting_engine::SettingEngine;
@@ -89,6 +90,9 @@ pub(crate) struct RtcLobby {
     local_addr: SocketAddr,
     demuxer: Demuxer,
     endpoints: HashMap<RtcEndpointId, RtcEndpoint>,
+    publishers: HashSet<RtcEndpointId>,
+    subscribers: HashSet<RtcEndpointId>,
+    published_tracks: HashMap<ForwardKey, PublishedTrackInfo>,
     forward: ForwardTable,
 
     writes: VecDeque<TaggedBytesMut>,
@@ -103,6 +107,9 @@ impl RtcLobby {
 
             demuxer: Default::default(),
             endpoints: Default::default(),
+            publishers: Default::default(),
+            subscribers: Default::default(),
+            published_tracks: Default::default(),
             forward: Default::default(),
             writes: Default::default(),
             events: Default::default(),
@@ -165,13 +172,28 @@ impl RtcLobby {
         // Snapshot publish state before mutating any endpoint. `get_forward_tracks` reads
         // the negotiated receivers (needs `&mut`), so this collects owned tracks first
         // and releases the borrow before the add/remove passes below.
-        let live: HashSet<RtcEndpointId> = self.endpoints.keys().copied().collect();
-        let publishers: Vec<(RtcEndpointId, HashMap<Mid, MediaStreamTrack>)> = self
-            .endpoints
-            .iter_mut()
-            .map(|(id, endpoint)| (*id, endpoint.get_forward_tracks()))
+        let live_publishers: HashSet<RtcEndpointId> = self
+            .publishers
+            .iter()
+            .copied()
+            .filter(|id| self.endpoints.contains_key(id))
+            .collect();
+        let live_subscribers: HashSet<RtcEndpointId> = self
+            .subscribers
+            .iter()
+            .copied()
+            .filter(|id| self.endpoints.contains_key(id))
+            .collect();
+        let publishers: Vec<(RtcEndpointId, HashMap<Mid, PublishedTrack>)> = live_publishers
+            .iter()
+            .filter_map(|id| {
+                self.endpoints
+                    .get_mut(id)
+                    .map(|endpoint| (*id, endpoint.get_forward_tracks()))
+            })
             .filter(|(_, tracks)| !tracks.is_empty())
             .collect();
+        let mut published_tracks = HashMap::new();
 
         let desired: HashSet<ForwardKey> = publishers
             .iter()
@@ -185,7 +207,12 @@ impl RtcLobby {
 
         // 1. Tear down forwardings that are no longer wanted.
         let mut removed = Vec::new();
-        self.forward.retain(&desired, &live, &mut removed);
+        self.forward.retain(
+            &desired,
+            &live_publishers,
+            &live_subscribers,
+            &mut removed,
+        );
         for (subscriber, sender) in removed {
             if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
                 if let Err(err) = endpoint.remove_forward_track(sender) {
@@ -202,20 +229,21 @@ impl RtcLobby {
                     publisher: *publisher,
                     mid: mid.clone(),
                 };
+                published_tracks.insert(key.clone(), track.info.clone());
 
                 // Bind the publisher's wire SSRC(s) for packet routing (idempotent).
                 // Tracks whose SSRC the SDP couldn't name (bare m-line, RID simulcast)
                 // are bound later from the publisher's OnTrack(OnOpen) in poll_event.
-                for ssrc in track.ssrcs() {
+                for ssrc in track.track.ssrcs() {
                     self.forward.bind_ssrc(ssrc, key.clone());
                 }
 
-                for &subscriber in &live {
-                    if subscriber == *publisher || self.forward.has_subscriber(&key, &subscriber) {
+                for &subscriber in &live_subscribers {
+                    if self.forward.has_subscriber(&key, &subscriber) {
                         continue;
                     }
                     if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
-                        match endpoint.add_forward_track(track.clone()) {
+                        match endpoint.add_forward_track(track.track.clone()) {
                             Ok(sender) => self.forward.insert(key.clone(), subscriber, sender),
                             Err(err) => warn!(
                                 "{}: failed to add forwarding {}->{} for mid {}: {}",
@@ -226,6 +254,7 @@ impl RtcLobby {
                 }
             }
         }
+        self.published_tracks = published_tracks;
     }
 
     /// Build the RTP packet to forward to one subscriber.
@@ -301,6 +330,15 @@ impl RtcLobby {
     /// [`translate_rtp_for_subscriber`]). Drops the packet if its SSRC is not (yet) bound, or if
     /// it arrives from an endpoint other than the SSRC's bound publisher.
     fn forward_rtp(&mut self, endpoint_id: RtcEndpointId, rtp_packet: &rtc::rtp::Packet) {
+        if !self.publishers.contains(&endpoint_id) {
+            trace!(
+                "{}: dropping rtp from non-publish endpoint {}",
+                self.id,
+                endpoint_id
+            );
+            return;
+        }
+
         let ssrc = rtp_packet.header.ssrc;
         let Some((key, subscribers)) = self.forward.route_by_ssrc(ssrc) else {
             trace!(
@@ -614,13 +652,24 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     endpoint.handle_event(RtcEndpointEvent::SFUEvent(evt))?;
                 }
             } else if let SFUEvent::Join { .. } = &evt {
+                let endpoint_kind = endpoint_id.kind();
                 let endpoint = self.build_endpoint(endpoint_id, rtc_lobby_id)?;
+                match endpoint_kind {
+                    EndpointKind::Publish => {
+                        self.publishers.insert(rtc_endpoint_id);
+                    }
+                    EndpointKind::Subscribe => {
+                        self.subscribers.insert(rtc_endpoint_id);
+                    }
+                }
                 self.endpoints.insert(rtc_endpoint_id, endpoint);
                 needs_reconcile = false;
             }
 
             if remove_endpoint {
                 self.endpoints.remove(&rtc_endpoint_id);
+                self.publishers.remove(&rtc_endpoint_id);
+                self.subscribers.remove(&rtc_endpoint_id);
             }
 
             if needs_reconcile {
@@ -656,13 +705,15 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                         // `a=ssrc`, or RID-based simulcast — one OnOpen per layer, all
                         // binding to the same {publisher, mid} key).
                         if let Some(mid) = endpoint.transceiver_mid(init.receiver_id) {
-                            self.forward.bind_ssrc(
-                                init.ssrc,
-                                ForwardKey {
-                                    publisher: *endpoint_id,
-                                    mid,
-                                },
-                            );
+                            if self.publishers.contains(endpoint_id) {
+                                self.forward.bind_ssrc(
+                                    init.ssrc,
+                                    ForwardKey {
+                                        publisher: *endpoint_id,
+                                        mid,
+                                    },
+                                );
+                            }
                         } else {
                             warn!(
                                 "{}: OnTrack(OnOpen) ssrc {} from {} has no mid — not bound",
@@ -701,6 +752,9 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
 
     fn close(&mut self) -> Result<(), Self::Error> {
         self.endpoints.clear();
+        self.publishers.clear();
+        self.subscribers.clear();
+        self.published_tracks.clear();
         self.forward.clear();
         self.writes.clear();
         self.events.clear();

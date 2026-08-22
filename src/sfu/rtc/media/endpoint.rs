@@ -19,7 +19,7 @@ use rtc::peer_connection::RTCPeerConnectionBuilder;
 use rtc::rtcp;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RTCRtpHeaderExtensionParameters,
-    RTCRtpReceiveParameters, RTCRtpSendParameters,
+    RTCRtpReceiveParameters, RTCRtpSendParameters, RtpCodecKind,
 };
 use rtc::rtp_transceiver::{
     RTCRtpReceiverId, RTCRtpSenderId, RTCRtpTransceiverDirection, RTCRtpTransceiverId,
@@ -109,6 +109,27 @@ impl RtcEndpointBuilder {
 /// SDP media identification tag (`a=mid`) of one m-line — the stable key for a publish
 /// track across renegotiations.
 pub(crate) type Mid = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrackPurpose {
+    Participant,
+    Stream,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PublishedTrackInfo {
+    pub(crate) endpoint_id: EndpointId,
+    pub(crate) media_kind: RtpCodecKind,
+    pub(crate) purpose: TrackPurpose,
+    pub(crate) muted: bool,
+    pub(crate) info: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PublishedTrack {
+    pub(crate) track: MediaStreamTrack,
+    pub(crate) info: PublishedTrackInfo,
+}
 
 //TODO: make it configurable
 const ONGOING_NEGOTIATION_TIMEOUT_IN_SECOND: Duration = Duration::from_secs(5);
@@ -384,7 +405,7 @@ impl RtcEndpoint {
     /// `get_receivers()` lists only currently-receiving m-lines, so the SFU's own sendonly
     /// forwarding transceivers and muted/stopped publishes (`recvonly`/`inactive`) drop
     /// out here, and data-channel sections never appear.
-    pub(crate) fn get_forward_tracks(&mut self) -> HashMap<Mid, MediaStreamTrack> {
+    pub(crate) fn get_forward_tracks(&mut self) -> HashMap<Mid, PublishedTrack> {
         let mut tracks = HashMap::new();
 
         let parsed = self
@@ -414,13 +435,46 @@ impl RtcEndpoint {
                     .iter()
                     .find(|media| media.attribute("mid").flatten() == Some(mid.as_str()))
             }) {
-                tracks.insert(
-                    mid,
-                    self.track_with_codings_from_media_description(track, &parameters, media),
-                );
+                let media_kind = track.kind();
+                let info = self.published_track_info(media_kind, media);
+                let track =
+                    self.track_with_codings_from_media_description(track, &parameters, media);
+                tracks.insert(mid, PublishedTrack { track, info });
             }
         }
         tracks
+    }
+
+    fn published_track_info(
+        &self,
+        media_kind: RtpCodecKind,
+        media: &MediaDescription,
+    ) -> PublishedTrackInfo {
+        let (purpose, muted, info) = media
+            .media_title
+            .as_deref()
+            .map(RtcEndpoint::parse_media_title)
+            .unwrap_or((TrackPurpose::Participant, false, "Guest".to_owned()));
+
+        PublishedTrackInfo {
+            endpoint_id: self.id.clone(),
+            media_kind,
+            purpose,
+            muted,
+            info,
+        }
+    }
+
+    fn parse_media_title(media_title: &str) -> (TrackPurpose, bool, String) {
+        let mut parts = media_title.splitn(3, ' ');
+        let purpose = match parts.next().and_then(|part| part.parse::<u8>().ok()) {
+            Some(2) => TrackPurpose::Stream,
+            _ => TrackPurpose::Participant,
+        };
+        let muted = matches!(parts.next(), Some("1"));
+        let info = parts.next().unwrap_or("Guest").to_owned();
+
+        (purpose, muted, info)
     }
 
     /// Rebuild `track` from the receiver's negotiated parameters, then fill in the publish-side

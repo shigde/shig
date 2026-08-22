@@ -101,6 +101,29 @@ ForwardKey {
 The endpoint identifies the publishing peer connection. The `mid` identifies the
 media line, and therefore the track, inside that peer connection.
 
+The lobby also keeps endpoint-role indexes derived from `EndpointId.kind()`:
+
+```text
+Publish endpoints   -> may produce published RTP tracks
+Subscribe endpoints -> may receive forwarded tracks
+```
+
+Every publisher normally contributes participant audio and participant video.
+The lobby owner can additionally publish stream audio and stream video on the
+same publish endpoint. All of these tracks are normal lobby tracks and are
+forwarded to all subscribe endpoints.
+
+Track metadata is stored separately from the forwarding matrix:
+
+```text
+ForwardKey { publisher, mid } -> PublishedTrackInfo
+```
+
+`PublishedTrackInfo` carries values such as media kind, purpose, muted state,
+and display info. These values come from the SDP media-line `i=` field. They are
+needed for UI state, mute/unmute state, and future relay selection. They do not
+change the normal subscriber forwarding rule.
+
 ## RTP Routing
 
 RTP packets carry an SSRC. They do not carry the ICE ufrag.
@@ -121,6 +144,7 @@ The forwarding path in code is:
 RtcLobby::poll_read()
   -> endpoint.poll_read()
   -> RTCMessage::RtpPacket
+  -> accept only from Publish endpoints
   -> RtcLobby::forward_rtp(endpoint_id, rtp_packet)
   -> ForwardTable::route_by_ssrc(rtp_packet.header.ssrc)
   -> ForwardKey { publisher: RtcEndpointId, mid }
@@ -140,6 +164,10 @@ if ForwardKey.publisher != packet_source_endpoint {
 
 This prevents a packet from one endpoint from being forwarded through an SSRC
 binding that belongs to another publisher endpoint.
+
+Subscribe endpoints can still produce RTCP feedback. The role split only
+prevents subscribe endpoints from becoming RTP publishers; it does not stop
+RTCP feedback from flowing back to publishers.
 
 The full media routing path is:
 
