@@ -20,8 +20,8 @@ use rtc::peer_connection::RTCPeerConnection;
 use rtc::peer_connection::RTCPeerConnectionBuilder;
 use rtc::rtcp;
 use rtc::rtp_transceiver::rtp_sender::{
-    RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RTCRtpHeaderExtensionParameters,
-    RTCRtpReceiveParameters, RTCRtpSendParameters, RtpCodecKind,
+    RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
+    RTCRtpHeaderExtensionParameters, RTCRtpReceiveParameters, RTCRtpSendParameters, RtpCodecKind,
 };
 use rtc::rtp_transceiver::{
     RTCRtpReceiverId, RTCRtpSenderId, RTCRtpTransceiverDirection, RTCRtpTransceiverId,
@@ -133,6 +133,8 @@ pub(crate) struct PublishedTrackInfo {
 pub(crate) struct PublishedTrack {
     pub(crate) track: MediaStreamTrack,
     pub(crate) info: PublishedTrackInfo,
+    pub(crate) codecs: Vec<RTCRtpCodecParameters>,
+    pub(crate) header_extensions: Vec<RTCRtpHeaderExtensionParameters>,
 }
 
 //TODO: make it configurable
@@ -220,6 +222,16 @@ impl Protocol<TaggedBytesMut, RTCMessage, RtcEndpointEvent> for RtcEndpoint {
 
     fn poll_write(&mut self) -> Option<Self::Wout> {
         while let Some(msg) = self.peer_connection.poll_write() {
+            trace!(
+                "[{}/{}] rtc write kind={} bytes={} local={} peer={} protocol={:?}",
+                self.rtc_lobby_id,
+                self.id,
+                classify_rtc_payload(&msg.message),
+                msg.message.len(),
+                msg.transport.local_addr,
+                msg.transport.peer_addr,
+                msg.transport.transport_protocol
+            );
             self.writes.push_back(msg);
         }
 
@@ -317,6 +329,23 @@ impl Protocol<TaggedBytesMut, RTCMessage, RtcEndpointEvent> for RtcEndpoint {
     }
 }
 
+fn classify_rtc_payload(payload: &[u8]) -> &'static str {
+    let Some(first) = payload.first().copied() else {
+        return "empty";
+    };
+
+    match first {
+        0..=3 => "stun",
+        20..=63 => "dtls",
+        128..=191 => match payload.get(1).copied() {
+            Some(192..=223) => "rtcp",
+            Some(_) => "rtp",
+            None => "rtp/rtcp",
+        },
+        _ => "unknown",
+    }
+}
+
 impl RtcEndpoint {
     pub(crate) fn id(&self) -> &EndpointId {
         &self.id
@@ -359,73 +388,11 @@ impl RtcEndpoint {
         self.connection_state == RTCPeerConnectionState::Connected
     }
 
-    pub(crate) fn incoming_codec_for_rtp(
-        &mut self,
-        ssrc: u32,
-        payload_type: u8,
-    ) -> Option<RTCRtpCodec> {
-        let receiver_ids: Vec<RTCRtpReceiverId> = self.peer_connection.get_receivers().collect();
-        for receiver_id in receiver_ids {
-            let Some(mut receiver) = self.peer_connection.rtp_receiver(receiver_id) else {
-                continue;
-            };
-            if !receiver
-                .track()
-                .ssrcs()
-                .any(|track_ssrc| track_ssrc == ssrc)
-            {
-                continue;
-            }
-
-            if let Some(codec) =
-                RtcEndpoint::codec_for_payload_type(receiver.get_parameters(), payload_type)
-            {
-                return Some(codec);
-            }
-        }
-
-        None
-    }
-
-    /// The header extensions this endpoint negotiated on the receiver whose track carries `ssrc`,
-    /// as sent by the publisher. Used to map the publisher's extension ids to a subscriber's on
-    /// forward. Mirrors [`RtcEndpoint::incoming_codec_for_rtp`].
-    pub(crate) fn incoming_header_extensions_for_rtp(
-        &mut self,
-        ssrc: u32,
-    ) -> Option<Vec<RTCRtpHeaderExtensionParameters>> {
-        let receiver_ids: Vec<RTCRtpReceiverId> = self.peer_connection.get_receivers().collect();
-        for receiver_id in receiver_ids {
-            let Some(mut receiver) = self.peer_connection.rtp_receiver(receiver_id) else {
-                continue;
-            };
-            if !receiver
-                .track()
-                .ssrcs()
-                .any(|track_ssrc| track_ssrc == ssrc)
-            {
-                continue;
-            }
-
-            return Some(
-                receiver
-                    .get_parameters()
-                    .rtp_parameters
-                    .header_extensions
-                    .clone(),
-            );
-        }
-
-        None
-    }
-
-    pub(crate) fn outgoing_payload_type_for_codec(
+    pub(crate) fn sender_parameters(
         &mut self,
         sender_id: RTCRtpSenderId,
-        codec: &RTCRtpCodec,
-    ) -> Option<u8> {
-        let mut sender = self.peer_connection.rtp_sender(sender_id)?;
-        RtcEndpoint::payload_type_for_codec(sender.get_parameters(), codec)
+    ) -> Option<RTCRtpSendParameters> {
+        Some(self.peer_connection.rtp_sender(sender_id)?.get_parameters().clone())
     }
 
     /// The tracks this endpoint is sending toward the SFU, keyed by m-line `mid`, ready to
@@ -479,7 +446,15 @@ impl RtcEndpoint {
                 let info = self.published_track_info(media_kind, media);
                 let track =
                     self.track_with_codings_from_media_description(track, &parameters, media);
-                tracks.insert(mid, PublishedTrack { track, info });
+                tracks.insert(
+                    mid,
+                    PublishedTrack {
+                        track,
+                        info,
+                        codecs: parameters.rtp_parameters.codecs,
+                        header_extensions: parameters.rtp_parameters.header_extensions,
+                    },
+                );
             }
         }
         tracks
@@ -568,44 +543,6 @@ impl RtcEndpoint {
             track.kind(),
             codings,
         )
-    }
-
-    fn codec_for_payload_type(
-        parameters: &RTCRtpReceiveParameters,
-        payload_type: u8,
-    ) -> Option<RTCRtpCodec> {
-        parameters
-            .rtp_parameters
-            .codecs
-            .iter()
-            .find(|codec| codec.payload_type == payload_type)
-            .map(|codec| codec.rtp_codec.clone())
-    }
-
-    fn payload_type_for_codec(
-        parameters: &RTCRtpSendParameters,
-        codec: &RTCRtpCodec,
-    ) -> Option<u8> {
-        parameters
-            .rtp_parameters
-            .codecs
-            .iter()
-            .find(|candidate| {
-                candidate
-                    .rtp_codec
-                    .mime_type
-                    .eq_ignore_ascii_case(&codec.mime_type)
-                    && candidate.rtp_codec.sdp_fmtp_line == codec.sdp_fmtp_line
-            })
-            .or_else(|| {
-                parameters.rtp_parameters.codecs.iter().find(|candidate| {
-                    candidate
-                        .rtp_codec
-                        .mime_type
-                        .eq_ignore_ascii_case(&codec.mime_type)
-                })
-            })
-            .map(|matched| matched.payload_type)
     }
 
     /// The mid of the m-line a transceiver belongs to — used by `RtcLobby` to bind a
@@ -853,6 +790,7 @@ impl RtcEndpoint {
         self.peer_connection.set_remote_description(sdp)?;
 
         if sdp_type == RTCSdpType::Offer {
+            self.apply_answer_codec_preferences()?;
             self.add_local_host_candidate()?;
             let answer = self.peer_connection.create_answer(None)?;
 
@@ -891,6 +829,135 @@ impl RtcEndpoint {
         }
 
         Ok(())
+    }
+
+    fn apply_answer_codec_preferences(&mut self) -> Result<()> {
+        let Some(remote) = self.peer_connection.remote_description() else {
+            return Ok(());
+        };
+        let parsed = remote.unmarshal()?;
+
+        let transceiver_ids: Vec<RTCRtpTransceiverId> =
+            self.peer_connection.get_transceivers().collect();
+        for transceiver_id in transceiver_ids {
+            let Some(mid) = self.transceiver_mid(transceiver_id) else {
+                continue;
+            };
+            let Some(media) = parsed
+                .media_descriptions
+                .iter()
+                .find(|media| media.attribute("mid").flatten() == Some(mid.as_str()))
+            else {
+                continue;
+            };
+            if media.media_name.media != "audio" && media.media_name.media != "video" {
+                continue;
+            }
+
+            let receiver_id = RTCRtpReceiverId::from(transceiver_id);
+            let Some(codecs) = self
+                .peer_connection
+                .rtp_receiver(receiver_id)
+                .map(|mut receiver| receiver.get_parameters().rtp_parameters.codecs.clone())
+            else {
+                continue;
+            };
+            if codecs.is_empty() {
+                continue;
+            }
+
+            let (purpose, _, _) = media
+                .media_title
+                .as_deref()
+                .map(RtcEndpoint::parse_media_title)
+                .unwrap_or((TrackPurpose::Participant, false, "Guest".to_owned()));
+            let preferred =
+                RtcEndpoint::preferred_answer_codecs(&media.media_name.media, purpose, codecs);
+            if preferred.is_empty() {
+                continue;
+            }
+
+            if let Some(mut transceiver) = self.peer_connection.rtp_transceiver(transceiver_id) {
+                transceiver.set_codec_preferences(preferred)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn preferred_answer_codecs(
+        media_type: &str,
+        purpose: TrackPurpose,
+        codecs: Vec<RTCRtpCodecParameters>,
+    ) -> Vec<RTCRtpCodecParameters> {
+        if media_type == "audio" {
+            return RtcEndpoint::sort_codecs_by_preference(codecs, |codec| {
+                codec.rtp_codec.mime_type.eq_ignore_ascii_case("audio/opus")
+            });
+        }
+
+        if media_type != "video" {
+            return codecs;
+        }
+
+        match purpose {
+            TrackPurpose::Participant => RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
+                if codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/vp8") {
+                    0
+                } else if codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/vp9") {
+                    1
+                } else {
+                    2
+                }
+            }),
+            TrackPurpose::Stream => RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
+                if !codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/h264") {
+                    return 3;
+                }
+                if codec
+                    .rtp_codec
+                    .sdp_fmtp_line
+                    .contains("packetization-mode=1")
+                    && codec
+                        .rtp_codec
+                        .sdp_fmtp_line
+                        .contains("profile-level-id=42e01f")
+                {
+                    0
+                } else if codec
+                    .rtp_codec
+                    .sdp_fmtp_line
+                    .contains("packetization-mode=1")
+                {
+                    1
+                } else {
+                    2
+                }
+            }),
+        }
+    }
+
+    fn sort_codecs_by_preference(
+        codecs: Vec<RTCRtpCodecParameters>,
+        preferred: impl Fn(&RTCRtpCodecParameters) -> bool,
+    ) -> Vec<RTCRtpCodecParameters> {
+        let (mut preferred_codecs, fallback_codecs): (Vec<_>, Vec<_>) =
+            codecs.into_iter().partition(preferred);
+        preferred_codecs.extend(fallback_codecs);
+        preferred_codecs
+    }
+
+    fn sort_codecs_by_rank(
+        codecs: Vec<RTCRtpCodecParameters>,
+        rank: impl Fn(&RTCRtpCodecParameters) -> u8,
+    ) -> Vec<RTCRtpCodecParameters> {
+        let mut ranked: Vec<_> = codecs
+            .into_iter()
+            .enumerate()
+            .map(|(index, codec)| (rank(&codec), index, codec))
+            .collect();
+        ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
+        ranked.into_iter().map(|(_, _, codec)| codec).collect()
     }
 
     fn handle_sfu_event(&mut self, evt: SFUEvent) -> Result<()> {
@@ -998,7 +1065,7 @@ mod tests {
     use rtc::peer_connection::configuration::RTCConfigurationBuilder;
     use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
     use rtc::rtp_transceiver::rtp_sender::{
-        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpParameters, RTCRtpSendParameters,
+        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpParameters,
     };
 
     fn endpoint_id(rtc_id: RtcEndpointId) -> EndpointId {
@@ -1008,6 +1075,52 @@ mod tests {
             PeerId::new("3c734426-bc94-4a38-8ffd-dd2a46c056de"),
             EndpointKind::Publish,
         )
+    }
+
+    fn codec_param(mime_type: &str, payload_type: u8, fmtp: &str) -> RTCRtpCodecParameters {
+        RTCRtpCodecParameters {
+            rtp_codec: RTCRtpCodec {
+                mime_type: mime_type.into(),
+                clock_rate: 90_000,
+                channels: 0,
+                sdp_fmtp_line: fmtp.into(),
+                rtcp_feedback: vec![],
+            },
+            payload_type,
+        }
+    }
+
+    #[test]
+    fn participant_video_prefers_vp8_then_vp9() {
+        let codecs = vec![
+            codec_param("video/H264", 108, "packetization-mode=1;profile-level-id=42e01f"),
+            codec_param("video/VP9", 98, "profile-id=0"),
+            codec_param("video/VP8", 96, ""),
+        ];
+
+        let preferred =
+            RtcEndpoint::preferred_answer_codecs("video", TrackPurpose::Participant, codecs);
+
+        assert_eq!(preferred[0].rtp_codec.mime_type, "video/VP8");
+        assert_eq!(preferred[1].rtp_codec.mime_type, "video/VP9");
+        assert_eq!(preferred[2].rtp_codec.mime_type, "video/H264");
+    }
+
+    #[test]
+    fn stream_video_prefers_h264_baseline_packetization_mode_one() {
+        let codecs = vec![
+            codec_param("video/VP8", 96, ""),
+            codec_param("video/H264", 108, "packetization-mode=0;profile-level-id=42e01f"),
+            codec_param("video/H264", 125, "packetization-mode=1;profile-level-id=42e01f"),
+            codec_param("video/H264", 123, "packetization-mode=1;profile-level-id=640032"),
+        ];
+
+        let preferred = RtcEndpoint::preferred_answer_codecs("video", TrackPurpose::Stream, codecs);
+
+        assert_eq!(preferred[0].payload_type, 125);
+        assert_eq!(preferred[1].payload_type, 123);
+        assert_eq!(preferred[2].payload_type, 108);
+        assert_eq!(preferred[3].payload_type, 96);
     }
 
     #[test]
@@ -1154,41 +1267,4 @@ mod tests {
         assert_eq!(rebuilt.label(), "peer-42-label");
     }
 
-    #[test]
-    fn outgoing_payload_type_maps_codec_across_legs() {
-        let codec = RTCRtpCodec {
-            mime_type: "video/H265".into(),
-            clock_rate: 90_000,
-            channels: 0,
-            sdp_fmtp_line: "level-id=186;profile-id=1;tier-flag=0;tx-mode=SRST".into(),
-            rtcp_feedback: vec![],
-        };
-        let parameters = RTCRtpSendParameters {
-            rtp_parameters: RTCRtpParameters {
-                codecs: vec![
-                    RTCRtpCodecParameters {
-                        rtp_codec: RTCRtpCodec {
-                            mime_type: "video/ulpfec".into(),
-                            clock_rate: 90_000,
-                            channels: 0,
-                            sdp_fmtp_line: String::new(),
-                            rtcp_feedback: vec![],
-                        },
-                        payload_type: 116,
-                    },
-                    RTCRtpCodecParameters {
-                        rtp_codec: codec.clone(),
-                        payload_type: 126,
-                    },
-                ],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        assert_eq!(
-            RtcEndpoint::payload_type_for_codec(&parameters, &codec),
-            Some(126)
-        );
-    }
 }

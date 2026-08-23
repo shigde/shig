@@ -49,8 +49,8 @@ derive_more = "^0.99.18"
 serde_json = "^1.0.133"
 mime = "^0.3.17"
 sanitize-filename = "^0.6.0"
-webrtc = "0.20"
-rtc = "0.20"
+webrtc = "0.20.3"
+rtc = "0.20.3"
 sansio = "1.0.1"
 anyhow = "1.0.99"
 bytes = "1.9.0"
@@ -70,3 +70,6 @@ libc = "0.2.180"
 hex = "0.4.3"
 moq-net = "0.1.17"
 moq-mux = "0.5.6"
+
+[patch.crates-io]
+rtc = { path = "vendor/rtc-0.20.3-patched" }

@@ -10,6 +10,7 @@
 - [SFU Signaling Metadata](architecture/sfu/signaling-metadata.md)
 - [RTC Architecture](architecture/sfu/rtc.md)
 - [SFU Demuxing](architecture/sfu/demuxing.md)
+- [SFU Media Routes](architecture/sfu/media-routes.md)
 - [SFU Performance Model](architecture/sfu/performance.md)
 - [SFU Implementation Plan](architecture/sfu/migration.md)
 - [Architecture Use Cases](architecture/use-cases/index.md)

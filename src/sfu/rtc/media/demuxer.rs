@@ -5,6 +5,7 @@ use rtc::shared::TaggedBytesMut;
 use rtc::stun::attributes::ATTR_USERNAME;
 use rtc::stun::message::{is_stun_message, Message};
 use rtc::stun::textattrs::Username;
+use log::trace;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
@@ -18,10 +19,28 @@ impl Demuxer {
     pub(crate) fn demux(&mut self, pkt: &TaggedBytesMut) -> Option<(RtcLobbyId, RtcEndpointId)> {
         let four_tuple = FourTuple::from(&pkt.transport);
         if let Some(lobby_peer) = self.affinity.get(&four_tuple) {
+            trace!(
+                "demux affinity hit kind={} local={} peer={} -> lobby={} endpoint={}",
+                classify_rtc_payload(&pkt.message),
+                pkt.transport.local_addr,
+                pkt.transport.peer_addr,
+                lobby_peer.0,
+                lobby_peer.1
+            );
             return Some(*lobby_peer);
         }
 
-        self.demux_stun_username(pkt)
+        let routed = self.demux_stun_username(pkt);
+        if routed.is_none() {
+            trace!(
+                "demux miss kind={} local={} peer={}",
+                classify_rtc_payload(&pkt.message),
+                pkt.transport.local_addr,
+                pkt.transport.peer_addr
+            );
+        }
+
+        routed
     }
 
     fn demux_stun_username(&mut self, pkt: &TaggedBytesMut) -> Option<(RtcLobbyId, RtcEndpointId)> {
@@ -46,6 +65,32 @@ impl Demuxer {
             .or_default()
             .insert(four_tuple);
 
+        trace!(
+            "demux stun bind local={} peer={} username={} -> lobby={} endpoint={}",
+            pkt.transport.local_addr,
+            pkt.transport.peer_addr,
+            username.text,
+            rtc_lobby_id,
+            endpoint_id
+        );
+
         Some((rtc_lobby_id, endpoint_id))
+    }
+}
+
+fn classify_rtc_payload(payload: &[u8]) -> &'static str {
+    let Some(first) = payload.first().copied() else {
+        return "empty";
+    };
+
+    match first {
+        0..=3 => "stun",
+        20..=63 => "dtls",
+        128..=191 => match payload.get(1).copied() {
+            Some(192..=223) => "rtcp",
+            Some(_) => "rtp",
+            None => "rtp/rtcp",
+        },
+        _ => "unknown",
     }
 }

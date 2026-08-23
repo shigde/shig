@@ -7,7 +7,7 @@ use super::endpoint::{
     Mid, PublishedTrack, PublishedTrackInfo, RtcEndpoint, RtcEndpointBuilder, RtcEndpointEvent,
 };
 use super::event::SFUEvent;
-use super::forward::{ForwardKey, ForwardTable};
+use super::forward::{ForwardKey, ForwardTable, ForwardTarget, HeaderExtensionRewrite};
 use super::rtcp_forwarder::RtcpForwarderBuilder;
 use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
@@ -25,7 +25,9 @@ use rtc::peer_connection::transport::RTCDtlsRole;
 use rtc::rtcp::payload_feedbacks::full_intra_request::FullIntraRequest;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use rtc::rtcp::Packet;
-use rtc::rtp_transceiver::rtp_sender::RTCRtpHeaderExtensionParameters;
+use rtc::rtp_transceiver::rtp_sender::{
+    RTCRtpCodec, RTCRtpCodecParameters, RTCRtpHeaderExtensionParameters, RTCRtpSendParameters,
+};
 use rtc::sdp::extmap::SDES_MID_URI;
 use rtc::shared::error::{flatten_errs, Error};
 use rtc::shared::TaggedBytesMut;
@@ -191,11 +193,6 @@ impl RtcLobby {
             .copied()
             .filter(|id| self.endpoints.contains_key(id))
             .collect();
-        let endpoint_peers: HashMap<RtcEndpointId, crate::sfu::peer::PeerId> = self
-            .endpoints
-            .iter()
-            .map(|(id, endpoint)| (*id, endpoint.id().peer_id().clone()))
-            .collect();
         let publishers: Vec<(RtcEndpointId, HashMap<Mid, PublishedTrack>)> = live_publishers
             .iter()
             .filter_map(|id| {
@@ -207,15 +204,23 @@ impl RtcLobby {
             .collect();
         let mut published_tracks = HashMap::new();
 
-        let desired: HashSet<ForwardKey> = publishers
-            .iter()
-            .flat_map(|(publisher, tracks)| {
-                tracks.keys().map(move |mid| ForwardKey {
-                    publisher: *publisher,
+        let mut desired = HashSet::new();
+        for (publisher, tracks) in &publishers {
+            let Some(publisher_peer) = self
+                .endpoints
+                .get(publisher)
+                .map(|endpoint| endpoint.id().peer_id().clone())
+            else {
+                continue;
+            };
+            for mid in tracks.keys() {
+                desired.insert(ForwardKey {
+                    publisher_peer: publisher_peer.clone(),
+                    publish_endpoint: *publisher,
                     mid: mid.clone(),
-                })
-            })
-            .collect();
+                });
+            }
+        }
 
         // 1. Tear down forwardings that are no longer wanted.
         let mut removed = Vec::new();
@@ -223,7 +228,6 @@ impl RtcLobby {
             &desired,
             &live_publishers,
             &live_subscribers,
-            &endpoint_peers,
             &mut removed,
         );
         for (subscriber, sender) in removed {
@@ -237,9 +241,18 @@ impl RtcLobby {
         // 2. Add the forwardings that are missing. The publisher's track
         //    is forwarded verbatim onto a sendonly transceiver per subscriber.
         for (publisher, tracks) in &publishers {
+            let Some(publisher_peer) = self
+                .endpoints
+                .get(publisher)
+                .map(|endpoint| endpoint.id().peer_id().clone())
+            else {
+                continue;
+            };
+
             for (mid, track) in tracks {
                 let key = ForwardKey {
-                    publisher: *publisher,
+                    publisher_peer: publisher_peer.clone(),
+                    publish_endpoint: *publisher,
                     mid: mid.clone(),
                 };
                 published_tracks.insert(key.clone(), track.info.clone());
@@ -252,15 +265,44 @@ impl RtcLobby {
                 }
 
                 for &subscriber in &live_subscribers {
-                    if endpoint_peers.get(publisher) == endpoint_peers.get(&subscriber) {
+                    let Some(subscriber_peer) = self
+                        .endpoints
+                        .get(&subscriber)
+                        .map(|endpoint| endpoint.id().peer_id().clone())
+                    else {
+                        continue;
+                    };
+                    if subscriber_peer == publisher_peer {
                         continue;
                     }
-                    if self.forward.has_subscriber(&key, &subscriber) {
+                    if let Some(sender) = self.forward.subscriber_sender(&key, &subscriber_peer) {
+                        if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
+                            if let Some(target) = RtcLobby::build_forward_target(
+                                endpoint,
+                                subscriber_peer,
+                                subscriber,
+                                sender,
+                                track,
+                            ) {
+                                self.forward.update_subscriber_target(&key, target);
+                            }
+                        }
                         continue;
                     }
+
                     if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
                         match endpoint.add_forward_track(track.track.clone(), track.info.clone()) {
-                            Ok(sender) => self.forward.insert(key.clone(), subscriber, sender),
+                            Ok(sender) => {
+                                if let Some(target) = RtcLobby::build_forward_target(
+                                    endpoint,
+                                    subscriber_peer,
+                                    subscriber,
+                                    sender,
+                                    track,
+                                ) {
+                                    self.forward.insert(key.clone(), target);
+                                }
+                            }
                             Err(err) => warn!(
                                 "{}: failed to add forwarding {}->{} for mid {}: {}",
                                 self.id, publisher, subscriber, mid, err
@@ -271,6 +313,88 @@ impl RtcLobby {
             }
         }
         self.published_tracks = published_tracks;
+    }
+
+    fn build_forward_target(
+        endpoint: &mut RtcEndpoint,
+        subscriber_peer: crate::sfu::peer::PeerId,
+        subscribe_endpoint: RtcEndpointId,
+        sender_id: rtc::rtp_transceiver::RTCRtpSenderId,
+        track: &PublishedTrack,
+    ) -> Option<ForwardTarget> {
+        let sender_parameters = endpoint.sender_parameters(sender_id)?;
+        Some(ForwardTarget {
+            subscriber_peer,
+            subscribe_endpoint,
+            sender_id,
+            payload_types: RtcLobby::payload_type_map(&track.codecs, &sender_parameters),
+            extension_rewrites: RtcLobby::header_extension_rewrites(
+                &track.header_extensions,
+                &sender_parameters.rtp_parameters.header_extensions,
+            ),
+            subscriber_mid: endpoint.transceiver_mid(sender_id),
+        })
+    }
+
+    fn payload_type_map(
+        publisher_codecs: &[RTCRtpCodecParameters],
+        sender_parameters: &RTCRtpSendParameters,
+    ) -> HashMap<u8, u8> {
+        publisher_codecs
+            .iter()
+            .filter_map(|publisher_codec| {
+                RtcLobby::payload_type_for_codec(
+                    &sender_parameters.rtp_parameters.codecs,
+                    &publisher_codec.rtp_codec,
+                )
+                .map(|subscriber_payload_type| {
+                    (publisher_codec.payload_type, subscriber_payload_type)
+                })
+            })
+            .collect()
+    }
+
+    fn payload_type_for_codec(
+        subscriber_codecs: &[RTCRtpCodecParameters],
+        publisher_codec: &RTCRtpCodec,
+    ) -> Option<u8> {
+        subscriber_codecs
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .rtp_codec
+                    .mime_type
+                    .eq_ignore_ascii_case(&publisher_codec.mime_type)
+                    && candidate.rtp_codec.sdp_fmtp_line == publisher_codec.sdp_fmtp_line
+            })
+            .or_else(|| {
+                subscriber_codecs.iter().find(|candidate| {
+                    candidate
+                        .rtp_codec
+                        .mime_type
+                        .eq_ignore_ascii_case(&publisher_codec.mime_type)
+                })
+            })
+            .map(|matched| matched.payload_type)
+    }
+
+    fn header_extension_rewrites(
+        publisher_extensions: &[RTCRtpHeaderExtensionParameters],
+        subscriber_extensions: &[RTCRtpHeaderExtensionParameters],
+    ) -> Vec<HeaderExtensionRewrite> {
+        publisher_extensions
+            .iter()
+            .filter_map(|publisher_extension| {
+                subscriber_extensions
+                    .iter()
+                    .find(|subscriber_extension| subscriber_extension.uri == publisher_extension.uri)
+                    .map(|subscriber_extension| HeaderExtensionRewrite {
+                        publisher_id: publisher_extension.id as u8,
+                        subscriber_id: subscriber_extension.id as u8,
+                        rewrite_mid: subscriber_extension.uri == SDES_MID_URI,
+                    })
+            })
+            .collect()
     }
 
     /// Build the RTP packet to forward to one subscriber.
@@ -285,14 +409,13 @@ impl RtcLobby {
     fn translate_rtp_for_subscriber(
         rtp_packet: &rtc::rtp::Packet,
         outbound_payload_type: u8,
-        publisher_extensions: Option<&[RTCRtpHeaderExtensionParameters]>,
-        subscriber_extensions: Option<&[RTCRtpHeaderExtensionParameters]>,
+        extension_rewrites: &[HeaderExtensionRewrite],
         subscriber_mid: Option<&str>,
     ) -> rtc::rtp::Packet {
         let mut forwarded_rtp = rtp_packet.clone();
         forwarded_rtp.header.payload_type = outbound_payload_type;
 
-        if let (Some(pub_exts), Some(sub_exts)) = (publisher_extensions, subscriber_extensions) {
+        if !extension_rewrites.is_empty() {
             // Map each extension the packet carries to the subscriber's negotiated id, matching by
             // uri: publisher id -> uri (pub_exts) -> subscriber id (sub_exts). Extensions the
             // subscriber didn't negotiate are dropped; the sdes:mid payload is replaced with the
@@ -303,13 +426,13 @@ impl RtcLobby {
                 let Some(payload) = forwarded_rtp.header.get_extension(*id) else {
                     continue;
                 };
-                let Some(pub_param) = pub_exts.iter().find(|pe| pe.id as u8 == *id) else {
+                let Some(rewrite) = extension_rewrites
+                    .iter()
+                    .find(|rewrite| rewrite.publisher_id == *id)
+                else {
                     continue;
                 };
-                let Some(sub_param) = sub_exts.iter().find(|se| se.uri == pub_param.uri) else {
-                    continue;
-                };
-                let payload = if sub_param.uri == SDES_MID_URI {
+                let payload = if rewrite.rewrite_mid {
                     if let Some(mid) = subscriber_mid {
                         ::bytes::Bytes::copy_from_slice(mid.as_bytes())
                     } else {
@@ -323,7 +446,7 @@ impl RtcLobby {
                 //  values to the subscriber's corresponding layer IDs here.
                 //  "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
                 //  "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id",
-                translated.push((sub_param.id as u8, payload));
+                translated.push((rewrite.subscriber_id, payload));
             }
 
             // Rebuild the extensions through the public API so `extensions_padding` and the
@@ -365,33 +488,20 @@ impl RtcLobby {
             );
             return;
         };
-        if key.publisher != endpoint_id {
+        if key.publish_endpoint != endpoint_id {
             warn!(
                 "{}: rtp ssrc {} from {} is bound to publisher {} — dropping",
-                self.id, ssrc, endpoint_id, key.publisher
+                self.id, ssrc, endpoint_id, key.publish_endpoint
             );
             return;
         }
 
         let inbound_payload_type = rtp_packet.header.payload_type;
-        let Some(incoming_codec) = self
-            .endpoints
-            .get_mut(&endpoint_id)
-            .and_then(|publisher| publisher.incoming_codec_for_rtp(ssrc, inbound_payload_type))
-        else {
-            warn!(
-                "{}: unable to resolve incoming codec for {} rtp ssrc {} pt {}",
-                self.id, endpoint_id, ssrc, inbound_payload_type
-            );
-            return;
-        };
-        let publisher_extensions = self
-            .endpoints
-            .get_mut(&endpoint_id)
-            .and_then(|publisher| publisher.incoming_header_extensions_for_rtp(ssrc));
 
-        for (subscriber, sender_id) in subscribers {
-            let Some(endpoint) = self.endpoints.get_mut(subscriber) else {
+        for target in subscribers.values() {
+            let subscriber = target.subscribe_endpoint;
+            let sender_id = target.sender_id;
+            let Some(endpoint) = self.endpoints.get_mut(&subscriber) else {
                 continue;
             };
             // Skip subscribers whose transport isn't up yet: the SRTP context isn't set until
@@ -400,13 +510,12 @@ impl RtcLobby {
             if !endpoint.is_connected() {
                 continue;
             }
-            let Some(outbound_payload_type) =
-                endpoint.outgoing_payload_type_for_codec(*sender_id, &incoming_codec)
+            let Some(outbound_payload_type) = target.payload_types.get(&inbound_payload_type).copied()
             else {
                 warn!(
-                    "{}: unable to map codec {} for {}->{} rtp ssrc {} via sender {:?}",
+                    "{}: unable to map payload type {} for {}->{} rtp ssrc {} via sender {:?}",
                     self.id,
-                    incoming_codec.mime_type.as_str(),
+                    inbound_payload_type,
                     endpoint_id,
                     subscriber,
                     ssrc,
@@ -414,38 +523,26 @@ impl RtcLobby {
                 );
                 continue;
             };
-            // The subscriber leg's negotiated header extensions and this sender's m-line mid
-            // drive the header-extension-id translation.
-            let subscriber_extensions = endpoint.rtp_sender(*sender_id).map(|mut sender| {
-                sender
-                    .get_parameters()
-                    .rtp_parameters
-                    .header_extensions
-                    .clone()
-            });
-            let subscriber_mid = endpoint.transceiver_mid(*sender_id);
 
             let forwarded_rtp = RtcLobby::translate_rtp_for_subscriber(
                 rtp_packet,
                 outbound_payload_type,
-                publisher_extensions.as_deref(),
-                subscriber_extensions.as_deref(),
-                subscriber_mid.as_deref(),
+                &target.extension_rewrites,
+                target.subscriber_mid.as_deref(),
             );
 
             trace!(
-                "{}: {}->{} forward rtp ssrc {} pt {} -> {} via sender {:?} codec {}",
+                "{}: {}->{} forward rtp ssrc {} pt {} -> {} via sender {:?}",
                 self.id,
                 endpoint_id,
                 subscriber,
                 ssrc,
                 inbound_payload_type,
                 outbound_payload_type,
-                sender_id,
-                incoming_codec.mime_type.as_str()
+                sender_id
             );
             let write_result = endpoint
-                .rtp_sender(*sender_id)
+                .rtp_sender(sender_id)
                 .ok_or(Error::ErrRTPSenderNotExisted)
                 .and_then(|mut sender| sender.write_rtp(forwarded_rtp));
             if let Err(err) = write_result {
@@ -457,52 +554,38 @@ impl RtcLobby {
         }
     }
 
-    /// Route one publisher's compound RTCP to the subscribers of the stream it describes, and
-    /// relay a subscriber's keyframe requests (PLI/FIR) upstream to the publisher. Drops RTCP
-    /// whose SSRC routes to no forwarding entry.
+    /// Relay subscriber keyframe requests (PLI/FIR) upstream to the publisher endpoint.
+    ///
+    /// Normal RTCP stays inside the endpoint's own WebRTC leg and is handled by the default
+    /// interceptor chain. The lobby only sees PLI/FIR because `RtcpForwarderInterceptor`
+    /// deliberately surfaces those requests to `poll_read()`.
     fn forward_rtcp(&mut self, endpoint_id: RtcEndpointId, rtcp_packets: &[Box<dyn Packet>]) {
-        // Route by the SSRCs the compound packet describes (a publisher's SenderReport carries
-        // its media SSRC).
         let route = rtcp_packets
             .iter()
             .flat_map(|packet| packet.destination_ssrc())
             .find_map(|ssrc| {
                 self.forward
                     .route_by_ssrc(ssrc)
-                    .map(|(key, subscribers)| (ssrc, key, subscribers))
+                    .map(|(key, _subscribers)| (ssrc, key.publish_endpoint))
             });
-        let Some((ssrc, key, subscribers)) = route else {
+        let Some((ssrc, publisher_id)) = route else {
             trace!(
-                "{}: no forward binding for rtcp from {}",
+                "{}: no forward binding for keyframe rtcp from {}",
                 self.id,
                 endpoint_id
             );
             return;
         };
-        if key.publisher != endpoint_id {
-            // RTCP from a subscriber is feedback about a publisher's stream; relay its keyframe
-            // requests upstream.
-            let publisher_id = key.publisher;
-            self.relay_keyframe_request(endpoint_id, publisher_id, ssrc, rtcp_packets);
+        if publisher_id == endpoint_id {
+            trace!(
+                "{}: keyframe rtcp from publisher {} for its own ssrc {} ignored",
+                self.id,
+                endpoint_id,
+                ssrc
+            );
             return;
         }
-        for (subscriber, sender_id) in subscribers {
-            // Only forward once the subscriber's transport is up (see forward_rtp).
-            if let Some(endpoint) = self.endpoints.get_mut(subscriber) {
-                if endpoint.is_connected() {
-                    if let Err(err) = endpoint
-                        .rtp_sender(*sender_id)
-                        .ok_or(Error::ErrRTPSenderNotExisted)
-                        .and_then(|mut sender| sender.write_rtcp(rtcp_packets.to_vec()))
-                    {
-                        warn!(
-                            "{}: {}->{} forward rtcp ssrc {} err: {}",
-                            self.id, endpoint_id, subscriber, ssrc, err
-                        );
-                    }
-                }
-            }
-        }
+        self.relay_keyframe_request(endpoint_id, publisher_id, ssrc, rtcp_packets);
     }
 
     /// Relay a subscriber's keyframe requests (PLI/FIR) about `ssrc` upstream to `publisher_id`,
@@ -627,7 +710,8 @@ impl RtcLobby {
         match &metadata {
             ControlMetadata::Mute { mid, mute } => {
                 let key = ForwardKey {
-                    publisher: source_endpoint.rtc_id(),
+                    publisher_peer: source_endpoint.peer_id().clone(),
+                    publish_endpoint: source_endpoint.rtc_id(),
                     mid: mid.clone(),
                 };
                 if let Some(track) = self.published_tracks.get_mut(&key) {
@@ -908,7 +992,8 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                                 self.forward.bind_ssrc(
                                     init.ssrc,
                                     ForwardKey {
-                                        publisher: *endpoint_id,
+                                        publisher_peer: endpoint.id().peer_id().clone(),
+                                        publish_endpoint: *endpoint_id,
                                         mid,
                                     },
                                 );

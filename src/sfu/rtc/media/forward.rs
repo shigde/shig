@@ -9,8 +9,26 @@ use std::collections::{HashMap, HashSet};
 /// SSRC — is the correct dedup key for the forwarding graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ForwardKey {
-    pub(crate) publisher: RtcEndpointId,
+    pub(crate) publisher_peer: PeerId,
+    pub(crate) publish_endpoint: RtcEndpointId,
     pub(crate) mid: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ForwardTarget {
+    pub(crate) subscriber_peer: PeerId,
+    pub(crate) subscribe_endpoint: RtcEndpointId,
+    pub(crate) sender_id: RTCRtpSenderId,
+    pub(crate) payload_types: HashMap<u8, u8>,
+    pub(crate) extension_rewrites: Vec<HeaderExtensionRewrite>,
+    pub(crate) subscriber_mid: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HeaderExtensionRewrite {
+    pub(crate) publisher_id: u8,
+    pub(crate) subscriber_id: u8,
+    pub(crate) rewrite_mid: bool,
 }
 
 /// The `(publisher mid) x (subscriber)` forwarding matrix, plus the wire-level routing
@@ -28,29 +46,31 @@ pub(crate) struct ForwardKey {
 /// from the publisher's `OnTrack(OnOpen)` otherwise (bare m-line, RID-based simulcast).
 #[derive(Debug, Default)]
 pub(crate) struct ForwardTable {
-    entries: HashMap<ForwardKey, HashMap<RtcEndpointId, RTCRtpSenderId>>,
+    entries: HashMap<ForwardKey, HashMap<PeerId, ForwardTarget>>,
     ssrc_index: HashMap<SSRC, ForwardKey>,
 }
 
 impl ForwardTable {
-    /// Whether `subscriber` already has a forwarding sender for `key`.
-    pub(crate) fn has_subscriber(&self, key: &ForwardKey, subscriber: &RtcEndpointId) -> bool {
-        self.entries
-            .get(key)
-            .is_some_and(|subs| subs.contains_key(subscriber))
-    }
-
     /// Record a newly created forwarding sender.
-    pub(crate) fn insert(
-        &mut self,
-        key: ForwardKey,
-        subscriber: RtcEndpointId,
-        sender_id: RTCRtpSenderId,
-    ) {
+    pub(crate) fn insert(&mut self, key: ForwardKey, target: ForwardTarget) {
         self.entries
             .entry(key)
             .or_default()
-            .insert(subscriber, sender_id);
+            .insert(target.subscriber_peer.clone(), target);
+    }
+
+    pub(crate) fn subscriber_sender(
+        &self,
+        key: &ForwardKey,
+        subscriber: &PeerId,
+    ) -> Option<RTCRtpSenderId> {
+        Some(self.entries.get(key)?.get(subscriber)?.sender_id)
+    }
+
+    pub(crate) fn update_subscriber_target(&mut self, key: &ForwardKey, target: ForwardTarget) {
+        if let Some(subscribers) = self.entries.get_mut(key) {
+            subscribers.insert(target.subscriber_peer.clone(), target);
+        }
     }
 
     /// Bind a publisher's wire SSRC to its forward key so inbound packets carrying that
@@ -67,7 +87,7 @@ impl ForwardTable {
     pub(crate) fn route_by_ssrc(
         &self,
         ssrc: SSRC,
-    ) -> Option<(&ForwardKey, &HashMap<RtcEndpointId, RTCRtpSenderId>)> {
+    ) -> Option<(&ForwardKey, &HashMap<PeerId, ForwardTarget>)> {
         let key = self.ssrc_index.get(&ssrc)?;
         let subscribers = self.entries.get(key)?;
         Some((key, subscribers))
@@ -86,16 +106,16 @@ impl ForwardTable {
         desired: &HashSet<ForwardKey>,
         live_publishers: &HashSet<RtcEndpointId>,
         live_subscribers: &HashSet<RtcEndpointId>,
-        endpoint_peers: &HashMap<RtcEndpointId, PeerId>,
         removed: &mut Vec<(RtcEndpointId, RTCRtpSenderId)>,
     ) {
         self.entries.retain(|key, subs| {
-            let key_alive = desired.contains(key) && live_publishers.contains(&key.publisher);
-            subs.retain(|subscriber, sender| {
-                let same_peer = endpoint_peers.get(&key.publisher) == endpoint_peers.get(subscriber);
-                let keep = key_alive && live_subscribers.contains(subscriber) && !same_peer;
+            let key_alive = desired.contains(key) && live_publishers.contains(&key.publish_endpoint);
+            subs.retain(|_, target| {
+                let keep = key_alive
+                    && live_subscribers.contains(&target.subscribe_endpoint)
+                    && key.publisher_peer != target.subscriber_peer;
                 if !keep {
-                    removed.push((*subscriber, *sender));
+                    removed.push((target.subscribe_endpoint, target.sender_id));
                 }
                 keep
             });
@@ -104,10 +124,6 @@ impl ForwardTable {
 
         let entries = &self.entries;
         self.ssrc_index.retain(|_, key| entries.contains_key(key));
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     pub(crate) fn clear(&mut self) {
@@ -122,8 +138,20 @@ mod tests {
 
     fn key(publisher: RtcEndpointId, mid: &str) -> ForwardKey {
         ForwardKey {
-            publisher,
+            publisher_peer: PeerId::new(format!("publisher-{publisher}")),
+            publish_endpoint: publisher,
             mid: mid.to_owned(),
+        }
+    }
+
+    fn target(peer: &str, endpoint: RtcEndpointId, sender_id: usize) -> ForwardTarget {
+        ForwardTarget {
+            subscriber_peer: PeerId::new(peer),
+            subscribe_endpoint: endpoint,
+            sender_id: RTCRtpSenderId::from(sender_id),
+            payload_types: HashMap::new(),
+            extension_rewrites: Vec::new(),
+            subscriber_mid: None,
         }
     }
 
@@ -131,12 +159,15 @@ mod tests {
     fn routes_bound_ssrc_to_subscriber_senders() {
         let mut table = ForwardTable::default();
         let k = key(1, "0");
-        table.insert(k.clone(), 2, RTCRtpSenderId::from(7));
+        table.insert(k.clone(), target("subscriber", 2, 7));
         table.bind_ssrc(1111, k.clone());
 
         let (routed_key, subscribers) = table.route_by_ssrc(1111).expect("ssrc should route");
         assert_eq!(routed_key, &k);
-        assert_eq!(subscribers.get(&2), Some(&RTCRtpSenderId::from(7)));
+        assert_eq!(
+            subscribers.get(&PeerId::new("subscriber")).map(|target| target.sender_id),
+            Some(RTCRtpSenderId::from(7))
+        );
 
         // Unbound SSRC routes nowhere.
         assert!(table.route_by_ssrc(2222).is_none());
@@ -146,7 +177,7 @@ mod tests {
     fn simulcast_layers_bind_to_the_same_key() {
         let mut table = ForwardTable::default();
         let k = key(1, "0");
-        table.insert(k.clone(), 2, RTCRtpSenderId::from(7));
+        table.insert(k.clone(), target("subscriber", 2, 7));
         // Two layers, learned at packet time (OnTrack per RID).
         table.bind_ssrc(1111, k.clone());
         table.bind_ssrc(1112, k.clone());
@@ -159,7 +190,7 @@ mod tests {
     fn retain_prunes_ssrc_bindings_with_their_key() {
         let mut table = ForwardTable::default();
         let k = key(1, "0");
-        table.insert(k.clone(), 2, RTCRtpSenderId::from(7));
+        table.insert(k.clone(), target("subscriber", 2, 7));
         table.bind_ssrc(1111, k.clone());
 
         // Publisher 1 gone: entry and its SSRC binding must both go.
@@ -167,48 +198,42 @@ mod tests {
         let desired = HashSet::from([k]);
         let live_publishers = HashSet::new();
         let live_subscribers = HashSet::from([2]);
-        let endpoint_peers = HashMap::from([
-            (1, PeerId::new("publisher")),
-            (2, PeerId::new("subscriber")),
-        ]);
         table.retain(
             &desired,
             &live_publishers,
             &live_subscribers,
-            &endpoint_peers,
             &mut removed,
         );
 
         assert_eq!(removed, vec![(2, RTCRtpSenderId::from(7))]);
         assert!(table.route_by_ssrc(1111).is_none());
-        assert!(table.is_empty());
+        assert!(table.entries.is_empty());
     }
 
     #[test]
     fn retain_prunes_self_forwardings() {
         let mut table = ForwardTable::default();
-        let k = key(1, "0");
-        table.insert(k.clone(), 2, RTCRtpSenderId::from(7));
+        let k = ForwardKey {
+            publisher_peer: PeerId::new("same-peer"),
+            publish_endpoint: 1,
+            mid: "0".to_owned(),
+        };
+        table.insert(k.clone(), target("same-peer", 2, 7));
         table.bind_ssrc(1111, k.clone());
 
         let mut removed = Vec::new();
         let desired = HashSet::from([k]);
         let live_publishers = HashSet::from([1]);
         let live_subscribers = HashSet::from([2]);
-        let endpoint_peers = HashMap::from([
-            (1, PeerId::new("same-peer")),
-            (2, PeerId::new("same-peer")),
-        ]);
         table.retain(
             &desired,
             &live_publishers,
             &live_subscribers,
-            &endpoint_peers,
             &mut removed,
         );
 
         assert_eq!(removed, vec![(2, RTCRtpSenderId::from(7))]);
         assert!(table.route_by_ssrc(1111).is_none());
-        assert!(table.is_empty());
+        assert!(table.entries.is_empty());
     }
 }
