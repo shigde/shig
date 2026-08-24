@@ -825,6 +825,7 @@ impl RtcEndpoint {
         } else if sdp_type == RTCSdpType::Answer {
             // mark current negotiation done
             self.curr_request_id = None;
+            self.endpoint_negotiated = true;
             self.mark_curr_negotiation_complete()?;
         }
 

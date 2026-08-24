@@ -1,6 +1,6 @@
 use super::control::{
-    parse_control_message, serialize_metadata_message, serialize_offer_message, ControlMessage,
-    ControlMetadata, ControlRouter,
+    parse_control_message, ControlMessage, ControlMetadata, ControlOutMessage, ControlRouter,
+    ControlSend,
 };
 use super::demuxer::Demuxer;
 use super::endpoint::{
@@ -12,7 +12,7 @@ use super::rtcp_forwarder::RtcpForwarderBuilder;
 use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use log::{trace, warn};
+use log::{debug, trace, warn};
 use rtc::ice::rand::{generate_pwd, generate_ufrag};
 use rtc::interceptor::Registry;
 use rtc::peer_connection::configuration::interceptor_registry::register_default_interceptors;
@@ -323,11 +323,20 @@ impl RtcLobby {
         track: &PublishedTrack,
     ) -> Option<ForwardTarget> {
         let sender_parameters = endpoint.sender_parameters(sender_id)?;
+        let payload_types = RtcLobby::payload_type_map(&track.codecs, &sender_parameters);
+        debug!(
+            "forward target codecs subscriber={} sender={:?} publisher={:?} subscriber={:?} payload_map={:?}",
+            subscribe_endpoint,
+            sender_id,
+            RtcLobby::codec_summary(&track.codecs),
+            RtcLobby::codec_summary(&sender_parameters.rtp_parameters.codecs),
+            payload_types
+        );
         Some(ForwardTarget {
             subscriber_peer,
             subscribe_endpoint,
             sender_id,
-            payload_types: RtcLobby::payload_type_map(&track.codecs, &sender_parameters),
+            payload_types,
             extension_rewrites: RtcLobby::header_extension_rewrites(
                 &track.header_extensions,
                 &sender_parameters.rtp_parameters.header_extensions,
@@ -376,6 +385,19 @@ impl RtcLobby {
                 })
             })
             .map(|matched| matched.payload_type)
+    }
+
+    fn codec_summary(codecs: &[RTCRtpCodecParameters]) -> Vec<(u8, String, String)> {
+        codecs
+            .iter()
+            .map(|codec| {
+                (
+                    codec.payload_type,
+                    codec.rtp_codec.mime_type.clone(),
+                    codec.rtp_codec.sdp_fmtp_line.clone(),
+                )
+            })
+            .collect()
     }
 
     fn header_extension_rewrites(
@@ -657,7 +679,9 @@ impl RtcLobby {
             }
         };
         self.control
-            .register_data_channel(&source_endpoint, channel_id);
+            .register_data_channel(&source_endpoint, channel_id)?
+            .into_iter()
+            .try_for_each(|send| self.send_control_payload(send))?;
 
         let message = parse_control_message(data.data.as_ref())?;
         match message {
@@ -676,6 +700,19 @@ impl RtcLobby {
         request_id: u64,
         sdp: RTCSessionDescription,
     ) -> Result<(), Error> {
+        if self
+            .control
+            .is_stale_answer(source_endpoint.peer_id(), request_id)
+        {
+            debug!(
+                "{}: ignoring stale subscription answer request_id={} peer={}",
+                self.id,
+                request_id,
+                source_endpoint.peer_id()
+            );
+            return Ok(());
+        }
+
         let Some(subscription_id) = self
             .control
             .subscription_endpoint_for_peer(source_endpoint.peer_id())
@@ -734,7 +771,6 @@ impl RtcLobby {
         source_endpoint: &EndpointId,
         metadata: &ControlMetadata,
     ) -> Result<(), Error> {
-        let payload = serialize_metadata_message(metadata)?;
         let subscribers: Vec<EndpointId> = self
             .subscribers
             .iter()
@@ -743,7 +779,10 @@ impl RtcLobby {
             .collect();
 
         for subscriber in subscribers {
-            self.send_control_payload_to_peer(subscriber.peer_id(), payload.clone())?;
+            self.enqueue_control_message(
+                subscriber.peer_id(),
+                ControlOutMessage::Metadata(metadata.clone()),
+            )?;
         }
         Ok(())
     }
@@ -758,29 +797,53 @@ impl RtcLobby {
             return Ok(());
         }
 
-        let payload = serialize_offer_message(request_id, sdp)?;
-        self.send_control_payload_to_peer(endpoint_id.peer_id(), payload)
+        debug!(
+            "{}: sending subscribe renegotiation offer request_id={} peer={} endpoint={}",
+            self.id,
+            request_id,
+            endpoint_id.peer_id(),
+            endpoint_id
+        );
+        self.enqueue_control_message(
+            endpoint_id.peer_id(),
+            ControlOutMessage::Offer {
+                request_id,
+                sdp: sdp.clone(),
+            },
+        )
     }
 
-    fn send_control_payload_to_peer(
+    fn enqueue_control_message(
         &mut self,
         peer_id: &crate::sfu::peer::PeerId,
-        payload: bytes::BytesMut,
+        message: ControlOutMessage,
     ) -> Result<(), Error> {
-        let Some((control_endpoint_id, channel_id)) = self.control.control_channel_for_peer(peer_id)
-        else {
-            trace!("{}: no control channel registered for peer {}", self.id, peer_id);
-            return Ok(());
-        };
-        let Some(endpoint) = self.endpoints.get_mut(&control_endpoint_id) else {
+        let sends = self.control.enqueue_for_peer(peer_id, message)?;
+        if sends.is_empty() {
+            debug!("{}: queued control message for peer {}", self.id, peer_id);
+        }
+        sends
+            .into_iter()
+            .try_for_each(|send| self.send_control_payload(send))
+    }
+
+    fn send_control_payload(&mut self, send: ControlSend) -> Result<(), Error> {
+        let Some(endpoint) = self.endpoints.get_mut(&send.endpoint_id) else {
             warn!(
-                "{}: control channel endpoint {} for peer {} is missing",
-                self.id, control_endpoint_id, peer_id
+                "{}: control channel endpoint {} is missing",
+                self.id, send.endpoint_id
             );
             return Ok(());
         };
 
-        endpoint.send_data_channel_message(channel_id, payload)
+        debug!(
+            "{}: sending control payload bytes={} endpoint={} channel={:?}",
+            self.id,
+            send.payload.len(),
+            send.endpoint_id,
+            send.channel_id
+        );
+        endpoint.send_data_channel_message(send.channel_id, send.payload)
     }
 }
 
@@ -947,6 +1010,7 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
 
     fn poll_event(&mut self) -> Option<Self::Eout> {
         let mut subscription_offers = Vec::new();
+        let mut control_sends = Vec::new();
         for (endpoint_id, endpoint) in &mut self.endpoints {
             while let Some(event) = endpoint.poll_event() {
                 match event {
@@ -975,9 +1039,33 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                     )) => {
                         let endpoint_identity = endpoint.id().clone();
                         let label = endpoint.data_channel_label(channel_id);
+                        debug!(
+                            "{}: data channel open endpoint={} label={:?} channel={:?}",
+                            self.id,
+                            endpoint_identity,
+                            label,
+                            channel_id
+                        );
                         if label.as_deref() == Some("whip") {
-                            self.control
-                                .register_data_channel(&endpoint_identity, channel_id);
+                            match self.control.register_data_channel(&endpoint_identity, channel_id)
+                            {
+                                Ok(sends) => {
+                                    control_sends.extend(sends);
+                                }
+                                Err(err) => warn!(
+                                    "{}: failed to register control channel for peer {}: {}",
+                                    self.id,
+                                    endpoint_identity.peer_id(),
+                                    err
+                                ),
+                            }
+                            debug!(
+                                "{}: registered control channel peer={} endpoint={} channel={:?}",
+                                self.id,
+                                endpoint_identity.peer_id(),
+                                endpoint_identity.rtc_id(),
+                                channel_id
+                            );
                         }
                     }
                     RtcEndpointEvent::PeerConnectionEvent(RTCPeerConnectionEvent::OnTrack(
@@ -1009,6 +1097,11 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
                         //TODO: remaining peer connection events
                     }
                 }
+            }
+        }
+        for send in control_sends {
+            if let Err(err) = self.send_control_payload(send) {
+                warn!("{}: failed to flush queued control payload: {}", self.id, err);
             }
         }
         for (request_id, endpoint_id, sdp) in subscription_offers {
