@@ -1,6 +1,7 @@
 use super::demuxer::Demuxer;
 use super::event::SFUEvent;
 use super::lobby::{RtcLobby, RtcLobbyId};
+use crate::metrics;
 use log::{info, warn};
 use rtc::shared::error::{flatten_errs, Error};
 use rtc::shared::TaggedBytesMut;
@@ -8,9 +9,10 @@ use sansio::Protocol;
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub type MediaEngineId = u64;
+const PEER_CONNECTION_STATS_INTERVAL: Duration = Duration::from_secs(5);
 
 pub struct MediaEngine {
     id: MediaEngineId,
@@ -20,6 +22,7 @@ pub struct MediaEngine {
 
     writes: VecDeque<TaggedBytesMut>,
     events: VecDeque<SFUEvent>,
+    next_peer_connection_stats_export: Instant,
 }
 
 impl MediaEngine {
@@ -32,7 +35,35 @@ impl MediaEngine {
             rtc_lobbies: Default::default(),
             writes: Default::default(),
             events: Default::default(),
+            next_peer_connection_stats_export: Instant::now(),
         }
+    }
+
+    fn update_metrics(&self) {
+        let endpoints = self.rtc_lobbies.values().map(RtcLobby::endpoint_count).sum();
+        let publishers = self.rtc_lobbies.values().map(RtcLobby::publisher_count).sum();
+        let subscribers = self
+            .rtc_lobbies
+            .values()
+            .map(RtcLobby::subscriber_count)
+            .sum();
+        let routes = self.rtc_lobbies.values().map(RtcLobby::route_count).sum();
+        metrics::set_engine_state(
+            self.id,
+            self.rtc_lobbies.len(),
+            endpoints,
+            publishers,
+            subscribers,
+            routes,
+        );
+    }
+
+    fn export_peer_connection_stats(&mut self, now: Instant) {
+        let mut stats = metrics::PeerConnectionStats::default();
+        for lobby in self.rtc_lobbies.values_mut() {
+            lobby.collect_peer_connection_stats(now, &mut stats);
+        }
+        metrics::set_peer_connection_stats(self.id, &stats);
     }
 }
 
@@ -99,6 +130,7 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for MediaEngine {
             if remove_lobby {
                 self.rtc_lobbies.remove(&rtc_lobby_id);
             }
+            self.update_metrics();
         } else if let SFUEvent::Err {
             request_id, reason, ..
         } = evt
@@ -128,11 +160,15 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for MediaEngine {
                 errs.push(err);
             }
         }
+        if now >= self.next_peer_connection_stats_export {
+            self.export_peer_connection_stats(now);
+            self.next_peer_connection_stats_export = now + PEER_CONNECTION_STATS_INTERVAL;
+        }
         flatten_errs(errs)
     }
 
     fn poll_timeout(&mut self) -> Option<Self::Time> {
-        let mut eto: Option<Instant> = None;
+        let mut eto: Option<Instant> = Some(self.next_peer_connection_stats_export);
         for lobby in self.rtc_lobbies.values_mut() {
             if let Some(next) = lobby.poll_timeout() {
                 eto = Some(eto.map_or(next, |curr| std::cmp::min(curr, next)));

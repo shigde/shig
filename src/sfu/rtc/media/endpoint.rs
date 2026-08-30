@@ -1,7 +1,8 @@
 use super::event::RequestId;
 use super::lobby::RtcLobbyId;
 use super::SFUEvent;
-use crate::sfu::endpoint::EndpointId;
+use crate::metrics::PeerConnectionStats;
+use crate::sfu::endpoint::{EndpointId, EndpointKind};
 use crate::util::id::random_id;
 use log::{trace, warn};
 use rtc::data_channel::{RTCDataChannelId, RTCDataChannelMessage};
@@ -30,6 +31,8 @@ use rtc::rtp_transceiver::{
 use rtc::sdp::MediaDescription;
 use rtc::shared::error::{flatten_errs, Error, Result};
 use rtc::shared::TaggedBytesMut;
+use rtc::statistics::report::RTCStatsReportEntry;
+use rtc::statistics::StatsSelector;
 use sansio::Protocol;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
@@ -189,6 +192,209 @@ impl Deref for RtcEndpoint {
 impl DerefMut for RtcEndpoint {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.peer_connection
+    }
+}
+
+impl RtcEndpoint {
+    pub(crate) fn collect_peer_connection_stats(
+        &mut self,
+        now: Instant,
+        stats: &mut PeerConnectionStats,
+    ) {
+        let role = endpoint_role_label(self.id.kind());
+        let inbound_purposes = self.inbound_purposes_by_mid();
+
+        let sender_infos: Vec<(RTCRtpSenderId, PublishedTrackInfo)> = self
+            .outbound_track_info
+            .iter()
+            .map(|(sender_id, info)| (*sender_id, info.clone()))
+            .collect();
+        for (sender_id, info) in sender_infos {
+            let purpose = track_purpose_label(info.purpose);
+            let report = self.peer_connection.get_stats(now, StatsSelector::Sender(sender_id));
+            for outbound in report.outbound_rtp_streams() {
+                if let Some(media) = rtp_media_label(
+                    outbound
+                        .sent_rtp_stream_stats
+                        .rtp_stream_stats
+                        .kind,
+                ) {
+                    stats.add(
+                        role,
+                        purpose,
+                        media,
+                        "outbound_bytes_sent",
+                        outbound.sent_rtp_stream_stats.bytes_sent as f64,
+                    );
+                    stats.add(
+                        role,
+                        purpose,
+                        media,
+                        "outbound_packets_sent",
+                        outbound.sent_rtp_stream_stats.packets_sent as f64,
+                    );
+                    stats.add(
+                        role,
+                        purpose,
+                        media,
+                        "outbound_nack_count",
+                        outbound.nack_count as f64,
+                    );
+                    stats.add(
+                        role,
+                        purpose,
+                        media,
+                        "outbound_pli_count",
+                        outbound.pli_count as f64,
+                    );
+                    stats.add(
+                        role,
+                        purpose,
+                        media,
+                        "outbound_fir_count",
+                        outbound.fir_count as f64,
+                    );
+                }
+            }
+
+            for entry in report.iter() {
+                if let RTCStatsReportEntry::RemoteInboundRtp(remote_inbound) = entry {
+                    if let Some(media) = rtp_media_label(
+                        remote_inbound
+                            .received_rtp_stream_stats
+                            .rtp_stream_stats
+                            .kind,
+                    ) {
+                        stats.add(
+                            role,
+                            purpose,
+                            media,
+                            "remote_inbound_packets_lost",
+                            remote_inbound.received_rtp_stream_stats.packets_lost as f64,
+                        );
+                        stats.max(
+                            role,
+                            purpose,
+                            media,
+                            "remote_inbound_fraction_lost_max",
+                            remote_inbound.fraction_lost,
+                        );
+                        stats.max(
+                            role,
+                            purpose,
+                            media,
+                            "remote_inbound_rtt_seconds_max",
+                            remote_inbound.round_trip_time,
+                        );
+                    }
+                }
+            }
+        }
+
+        let report = self.peer_connection.get_stats(now, StatsSelector::None);
+        for inbound in report.inbound_rtp_streams() {
+            let purpose = inbound_purposes
+                .get(&inbound.mid)
+                .map(|info| track_purpose_label(info.purpose))
+                .unwrap_or("unknown");
+            if let Some(media) = rtp_media_label(
+                inbound
+                    .received_rtp_stream_stats
+                    .rtp_stream_stats
+                    .kind,
+            ) {
+                stats.add(
+                    role,
+                    purpose,
+                    media,
+                    "inbound_bytes_received",
+                    inbound.bytes_received as f64,
+                );
+                stats.add(
+                    role,
+                    purpose,
+                    media,
+                    "inbound_packets_received",
+                    inbound.received_rtp_stream_stats.packets_received as f64,
+                );
+                stats.add(
+                    role,
+                    purpose,
+                    media,
+                    "inbound_packets_lost",
+                    inbound.received_rtp_stream_stats.packets_lost as f64,
+                );
+                stats.max(
+                    role,
+                    purpose,
+                    media,
+                    "inbound_jitter_seconds_max",
+                    inbound.received_rtp_stream_stats.jitter,
+                );
+                stats.add(role, purpose, media, "inbound_nack_count", inbound.nack_count as f64);
+                stats.add(role, purpose, media, "inbound_pli_count", inbound.pli_count as f64);
+                stats.add(role, purpose, media, "inbound_fir_count", inbound.fir_count as f64);
+            }
+        }
+
+        for pair in report.candidate_pairs() {
+            if pair.nominated {
+                stats.max(
+                    role,
+                    "connection",
+                    "transport",
+                    "candidate_pair_current_rtt_seconds_max",
+                    pair.current_round_trip_time,
+                );
+                stats.add(
+                    role,
+                    "connection",
+                    "transport",
+                    "candidate_pair_available_outgoing_bitrate",
+                    pair.available_outgoing_bitrate,
+                );
+            }
+        }
+    }
+
+    fn inbound_purposes_by_mid(&self) -> HashMap<Mid, PublishedTrackInfo> {
+        self.peer_connection
+            .remote_description()
+            .and_then(|remote| remote.unmarshal().ok())
+            .map(|parsed| {
+                parsed
+                    .media_descriptions
+                    .iter()
+                    .filter_map(|media| {
+                        let mid = media.attribute("mid").flatten()?.to_owned();
+                        let media_kind = RtpCodecKind::from(media.media_name.media.as_str());
+                        Some((mid, self.published_track_info(media_kind, media)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+fn endpoint_role_label(kind: EndpointKind) -> &'static str {
+    match kind {
+        EndpointKind::Publish => "publish",
+        EndpointKind::Subscribe => "subscribe",
+    }
+}
+
+fn rtp_media_label(kind: RtpCodecKind) -> Option<&'static str> {
+    match kind {
+        RtpCodecKind::Audio => Some("audio"),
+        RtpCodecKind::Video => Some("video"),
+        RtpCodecKind::Unspecified => None,
+    }
+}
+
+fn track_purpose_label(purpose: TrackPurpose) -> &'static str {
+    match purpose {
+        TrackPurpose::Participant => "participant",
+        TrackPurpose::Stream => "stream",
     }
 }
 
@@ -833,28 +1039,10 @@ impl RtcEndpoint {
     }
 
     fn apply_answer_codec_preferences(&mut self) -> Result<()> {
-        let Some(remote) = self.peer_connection.remote_description() else {
-            return Ok(());
-        };
-        let parsed = remote.unmarshal()?;
-
         let transceiver_ids: Vec<RTCRtpTransceiverId> =
             self.peer_connection.get_transceivers().collect();
-        for transceiver_id in transceiver_ids {
-            let Some(mid) = self.transceiver_mid(transceiver_id) else {
-                continue;
-            };
-            let Some(media) = parsed
-                .media_descriptions
-                .iter()
-                .find(|media| media.attribute("mid").flatten() == Some(mid.as_str()))
-            else {
-                continue;
-            };
-            if media.media_name.media != "audio" && media.media_name.media != "video" {
-                continue;
-            }
 
+        for transceiver_id in transceiver_ids {
             let receiver_id = RTCRtpReceiverId::from(transceiver_id);
             let Some(codecs) = self
                 .peer_connection
@@ -863,17 +1051,14 @@ impl RtcEndpoint {
             else {
                 continue;
             };
-            if codecs.is_empty() {
-                continue;
-            }
 
-            let (purpose, _, _) = media
-                .media_title
-                .as_deref()
-                .map(RtcEndpoint::parse_media_title)
-                .unwrap_or((TrackPurpose::Participant, false, "Guest".to_owned()));
-            let preferred =
-                RtcEndpoint::preferred_answer_codecs(&media.media_name.media, purpose, codecs);
+            let Some(kind) = codecs
+                .first()
+                .map(|codec| codec.rtp_codec.mime_type.clone())
+            else {
+                continue;
+            };
+            let preferred = RtcEndpoint::preferred_answer_codecs(&kind, codecs);
             if preferred.is_empty() {
                 continue;
             }
@@ -888,64 +1073,38 @@ impl RtcEndpoint {
 
     fn preferred_answer_codecs(
         media_type: &str,
-        purpose: TrackPurpose,
         codecs: Vec<RTCRtpCodecParameters>,
     ) -> Vec<RTCRtpCodecParameters> {
-        if media_type == "audio" {
-            return RtcEndpoint::sort_codecs_by_preference(codecs, |codec| {
-                codec.rtp_codec.mime_type.eq_ignore_ascii_case("audio/opus")
+        if media_type.starts_with("audio/") {
+            return RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
+                if codec.rtp_codec.mime_type.eq_ignore_ascii_case("audio/opus") {
+                    0
+                } else {
+                    1
+                }
             });
         }
 
-        if media_type != "video" {
+        if !media_type.starts_with("video/") {
             return codecs;
         }
 
-        match purpose {
-            TrackPurpose::Participant => RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
-                if codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/vp8") {
-                    0
-                } else if codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/vp9") {
-                    1
-                } else {
-                    2
-                }
-            }),
-            TrackPurpose::Stream => RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
-                if !codec.rtp_codec.mime_type.eq_ignore_ascii_case("video/h264") {
-                    return 3;
-                }
-                if codec
-                    .rtp_codec
-                    .sdp_fmtp_line
-                    .contains("packetization-mode=1")
-                    && codec
-                        .rtp_codec
-                        .sdp_fmtp_line
-                        .contains("profile-level-id=42e01f")
-                {
-                    0
-                } else if codec
-                    .rtp_codec
-                    .sdp_fmtp_line
-                    .contains("packetization-mode=1")
-                {
-                    1
-                } else {
-                    2
-                }
-            }),
-        }
-    }
-
-    fn sort_codecs_by_preference(
-        codecs: Vec<RTCRtpCodecParameters>,
-        preferred: impl Fn(&RTCRtpCodecParameters) -> bool,
-    ) -> Vec<RTCRtpCodecParameters> {
-        let (mut preferred_codecs, fallback_codecs): (Vec<_>, Vec<_>) =
-            codecs.into_iter().partition(preferred);
-        preferred_codecs.extend(fallback_codecs);
-        preferred_codecs
+        RtcEndpoint::sort_codecs_by_rank(codecs, |codec| {
+            let mime_type = codec.rtp_codec.mime_type.as_str();
+            if mime_type.eq_ignore_ascii_case("video/vp9") {
+                0
+            } else if mime_type.eq_ignore_ascii_case("video/vp8") {
+                1
+            } else if mime_type.eq_ignore_ascii_case("video/av1") {
+                2
+            } else if mime_type.eq_ignore_ascii_case("video/h264") {
+                3
+            } else if mime_type.eq_ignore_ascii_case("video/h265") {
+                4
+            } else {
+                5
+            }
+        })
     }
 
     fn sort_codecs_by_rank(
@@ -1092,36 +1251,19 @@ mod tests {
     }
 
     #[test]
-    fn participant_video_prefers_vp8_then_vp9() {
+    fn video_codec_preferences_are_global() {
         let codecs = vec![
-            codec_param("video/H264", 108, "packetization-mode=1;profile-level-id=42e01f"),
-            codec_param("video/VP9", 98, "profile-id=0"),
-            codec_param("video/VP8", 96, ""),
-        ];
-
-        let preferred =
-            RtcEndpoint::preferred_answer_codecs("video", TrackPurpose::Participant, codecs);
-
-        assert_eq!(preferred[0].rtp_codec.mime_type, "video/VP8");
-        assert_eq!(preferred[1].rtp_codec.mime_type, "video/VP9");
-        assert_eq!(preferred[2].rtp_codec.mime_type, "video/H264");
-    }
-
-    #[test]
-    fn stream_video_prefers_h264_baseline_packetization_mode_one() {
-        let codecs = vec![
-            codec_param("video/VP8", 96, ""),
-            codec_param("video/H264", 108, "packetization-mode=0;profile-level-id=42e01f"),
-            codec_param("video/H264", 125, "packetization-mode=1;profile-level-id=42e01f"),
+            codec_param("video/H265", 126, ""),
             codec_param("video/H264", 123, "packetization-mode=1;profile-level-id=640032"),
+            codec_param("video/VP8", 96, ""),
+            codec_param("video/AV1", 41, "profile-id=0"),
+            codec_param("video/VP9", 98, "profile-id=0"),
         ];
 
-        let preferred = RtcEndpoint::preferred_answer_codecs("video", TrackPurpose::Stream, codecs);
+        let preferred = RtcEndpoint::preferred_answer_codecs("video/h265", codecs);
+        let payload_types: Vec<_> = preferred.iter().map(|codec| codec.payload_type).collect();
 
-        assert_eq!(preferred[0].payload_type, 125);
-        assert_eq!(preferred[1].payload_type, 123);
-        assert_eq!(preferred[2].payload_type, 108);
-        assert_eq!(preferred[3].payload_type, 96);
+        assert_eq!(payload_types, vec![98, 96, 41, 123, 126]);
     }
 
     #[test]

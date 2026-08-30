@@ -121,16 +121,17 @@ The architecture uses explicit identities for participants, WebRTC connections, 
 
 ```rust
 struct EndpointId {
+    rtc_id: RtcEndpointId,
     lobby_id: LobbyId,
     peer_id: PeerId,
     kind: EndpointKind,
 }
 ```
 
-`EndpointId` is a domain identity and deliberately contains neither a Sans-I/O `RoomId` nor a
-numeric `ClientId`. Publish and subscribe endpoints are derived deterministically from their
-lobby, peer, and endpoint kind. Neither `Peer` nor `Lobby` stores or allocates numeric Sans-I/O
-client IDs.
+`EndpointId` combines the RTC endpoint key with domain metadata. `rtc_id` is the numeric key used by
+the media plane, while `lobby_id`, `peer_id`, and `kind` describe where the endpoint belongs and how
+it should be routed. Publish and subscribe endpoints are still distinct endpoints for the same
+logical peer.
 
 The current implicit "all media except the peer's own media" routing is replaced by an
 explicit subscription graph:

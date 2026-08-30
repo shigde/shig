@@ -1,7 +1,7 @@
 use crate::relay::state::RelayState;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
-use crate::sfu::endpoint::EndpointId;
+use crate::sfu::endpoint::{EndpointId, EndpointKind};
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::peer::{
     CompleteSubscriptionEndpoint, CreatePublishEndpoint, CreateSubscriptionEndpoint, Peer, PeerId,
@@ -12,6 +12,8 @@ use crate::sfu::relay::actor::{
     StopRelayMediaStream,
 };
 use crate::sfu::rtc::core_actor::RtcCoreActor;
+use crate::sfu::rtc::media::SFUEvent;
+use crate::sfu::rtc::media_command::{RtcEvent, SetRtcEventSink};
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
@@ -19,6 +21,7 @@ use actix::{
     WrapFuture,
 };
 use moq_relay::AuthToken;
+use rtc::peer_connection::sdp::RTCSdpType;
 use std::collections::HashMap;
 
 /// Identity of a lobby in the SFU domain.
@@ -81,8 +84,43 @@ impl Lobby {
 
 impl Actor for Lobby {
     type Context = Context<Self>;
-    fn started(&mut self, _ctx: &mut Self::Context) {
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.rtc_core_addr
+            .do_send(SetRtcEventSink(ctx.address().recipient()));
         log::info!("lobby actor lobby_id={} is alive", self.id);
+    }
+}
+
+impl Handler<RtcEvent> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, message: RtcEvent, _ctx: &mut Self::Context) {
+        match message.event {
+            SFUEvent::SessionDescription {
+                endpoint_id, sdp, ..
+            } if endpoint_id.kind() == EndpointKind::Subscribe
+                && sdp.sdp_type == RTCSdpType::Offer =>
+            {
+                log::debug!(
+                    "async subscribe offer emitted, lobby_id={}, peer_id={}, core_id={}",
+                    self.id,
+                    endpoint_id.peer_id(),
+                    message.core_id
+                );
+            }
+            SFUEvent::Err {
+                request_id, reason, ..
+            } => {
+                log::warn!(
+                    "async RTC event error, lobby_id={}, core_id={}, request_id={}, reason={}",
+                    self.id,
+                    message.core_id,
+                    request_id,
+                    reason
+                );
+            }
+            _ => {}
+        }
     }
 }
 

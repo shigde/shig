@@ -3,8 +3,8 @@ use actix_web::{
     Error,
 };
 use futures_util::future::{ok, LocalBoxFuture, Ready};
-use std::task::{Context, Poll};
 use std::rc::Rc;
+use std::task::{Context, Poll};
 use std::time::Instant;
 
 pub struct LoggingMiddleware;
@@ -49,7 +49,9 @@ where
         let path = req.path().to_string();
         let start = Instant::now();
 
-        log::info!("Incoming Request: {} {}", method, path);
+        if !path.starts_with("/metrics") {
+            log::info!("Incoming Request: {} {}", method, path);
+        }
 
         let fut = self.service.call(req);
 
@@ -59,13 +61,15 @@ where
             let status = res.status();
             let duration = start.elapsed();
 
-            log::info!(
-                "Response: {} {} -> {} ({} ms)",
-                method,
-                path,
-                status.as_u16(),
-                duration.as_millis()
-            );
+            if !path.starts_with("/metrics") {
+                log::info!(
+                    "Response: {} {} -> {} ({} ms)",
+                    method,
+                    path,
+                    status.as_u16(),
+                    duration.as_millis()
+                );
+            }
 
             Ok(res)
         })

@@ -6,6 +6,7 @@ use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
+use crate::sfu::error::{LobbyError, SfuError};
 use crate::sfu::peer::PeerRole;
 use crate::sfu::{PublishLobby, Sfu};
 use actix::Addr;
@@ -66,8 +67,18 @@ pub(crate) async fn whip(
                 "SFU error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
-            log::error!("{}: {}", error_message.as_str(), e);
-            ApiError::InternalServerError { error_message }
+            match e {
+                SfuError::LobbyError(LobbyError::PeerAlreadyExists(peer_id)) => {
+                    log::warn!("{}: peer already exists: {}", error_message.as_str(), peer_id);
+                    ApiError::Conflict {
+                        error_message: format!("peer already joined: {}", peer_id),
+                    }
+                }
+                e => {
+                    log::error!("{}: {}", error_message.as_str(), e);
+                    ApiError::InternalServerError { error_message }
+                }
+            }
         })?,
 
         Err(e) => {

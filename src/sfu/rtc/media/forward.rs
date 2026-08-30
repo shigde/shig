@@ -130,6 +130,10 @@ impl ForwardTable {
         self.entries.clear();
         self.ssrc_index.clear();
     }
+
+    pub(crate) fn route_count(&self) -> usize {
+        self.entries.values().map(HashMap::len).sum()
+    }
 }
 
 #[cfg(test)]

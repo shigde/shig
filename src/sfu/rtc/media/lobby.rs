@@ -9,6 +9,8 @@ use super::endpoint::{
 use super::event::SFUEvent;
 use super::forward::{ForwardKey, ForwardTable, ForwardTarget, HeaderExtensionRewrite};
 use super::rtcp_forwarder::RtcpForwarderBuilder;
+use crate::metrics;
+use crate::metrics::PeerConnectionStats;
 use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
@@ -22,8 +24,12 @@ use rtc::peer_connection::event::{RTCDataChannelEvent, RTCPeerConnectionEvent, R
 use rtc::peer_connection::message::RTCMessage;
 use rtc::peer_connection::sdp::{RTCSdpType, RTCSessionDescription};
 use rtc::peer_connection::transport::RTCDtlsRole;
+use rtc::rtcp::header::{PacketType, FORMAT_CCFB};
 use rtc::rtcp::payload_feedbacks::full_intra_request::FullIntraRequest;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
+use rtc::rtcp::receiver_report::ReceiverReport;
+use rtc::rtcp::sender_report::SenderReport;
+use rtc::rtcp::transport_feedbacks::transport_layer_nack::TransportLayerNack;
 use rtc::rtcp::Packet;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodecParameters, RTCRtpHeaderExtensionParameters, RTCRtpSendParameters,
@@ -133,6 +139,32 @@ impl RtcLobby {
         self.endpoints.is_empty()
     }
 
+    pub(crate) fn endpoint_count(&self) -> usize {
+        self.endpoints.len()
+    }
+
+    pub(crate) fn publisher_count(&self) -> usize {
+        self.publishers.len()
+    }
+
+    pub(crate) fn subscriber_count(&self) -> usize {
+        self.subscribers.len()
+    }
+
+    pub(crate) fn route_count(&self) -> usize {
+        self.forward.route_count()
+    }
+
+    pub(crate) fn collect_peer_connection_stats(
+        &mut self,
+        now: Instant,
+        stats: &mut PeerConnectionStats,
+    ) {
+        for endpoint in self.endpoints.values_mut() {
+            endpoint.collect_peer_connection_stats(now, stats);
+        }
+    }
+
     /// Build a peer with the default media engine (default codecs), the default
     /// interceptor chain, and default setting engine.
     fn build_endpoint(
@@ -178,6 +210,7 @@ impl RtcLobby {
     /// adds nothing. Run it whenever publish state may have changed (join / leave / an
     /// applied session description).
     fn reconcile(&mut self) {
+        let started_at = Instant::now();
         // Snapshot publish state before mutating any endpoint. `get_forward_tracks` reads
         // the negotiated receivers (needs `&mut`), so this collects owned tracks first
         // and releases the borrow before the add/remove passes below.
@@ -230,6 +263,7 @@ impl RtcLobby {
             &live_subscribers,
             &mut removed,
         );
+        let removed_routes = removed.len() as u64;
         for (subscriber, sender) in removed {
             if let Some(endpoint) = self.endpoints.get_mut(&subscriber) {
                 if let Err(err) = endpoint.remove_forward_track(sender) {
@@ -237,6 +271,7 @@ impl RtcLobby {
                 }
             }
         }
+        let mut added_routes = 0_u64;
 
         // 2. Add the forwardings that are missing. The publisher's track
         //    is forwarded verbatim onto a sendonly transceiver per subscriber.
@@ -301,6 +336,7 @@ impl RtcLobby {
                                     track,
                                 ) {
                                     self.forward.insert(key.clone(), target);
+                                    added_routes += 1;
                                 }
                             }
                             Err(err) => warn!(
@@ -313,6 +349,11 @@ impl RtcLobby {
             }
         }
         self.published_tracks = published_tracks;
+        metrics::observe_reconcile(
+            started_at.elapsed().as_secs_f64(),
+            added_routes,
+            removed_routes,
+        );
     }
 
     fn build_forward_target(
@@ -491,7 +532,9 @@ impl RtcLobby {
     /// [`translate_rtp_for_subscriber`]). Drops the packet if its SSRC is not (yet) bound, or if
     /// it arrives from an endpoint other than the SSRC's bound publisher.
     fn forward_rtp(&mut self, endpoint_id: RtcEndpointId, rtp_packet: &rtc::rtp::Packet) {
+        metrics::inc_rtp_in(rtp_packet.payload.len());
         if !self.publishers.contains(&endpoint_id) {
+            metrics::inc_rtp_dropped("non_publisher");
             trace!(
                 "{}: dropping rtp from non-publish endpoint {}",
                 self.id,
@@ -502,6 +545,7 @@ impl RtcLobby {
 
         let ssrc = rtp_packet.header.ssrc;
         let Some((key, subscribers)) = self.forward.route_by_ssrc(ssrc) else {
+            metrics::inc_rtp_dropped("no_route");
             trace!(
                 "{}: no forward binding for rtp ssrc {} from {}",
                 self.id,
@@ -511,6 +555,7 @@ impl RtcLobby {
             return;
         };
         if key.publish_endpoint != endpoint_id {
+            metrics::inc_rtp_dropped("wrong_publisher");
             warn!(
                 "{}: rtp ssrc {} from {} is bound to publisher {} — dropping",
                 self.id, ssrc, endpoint_id, key.publish_endpoint
@@ -530,10 +575,12 @@ impl RtcLobby {
             // DTLS completes, so forwarding now would just be dropped ("local_srtp_context is not
             // set yet"). Once connected, the subscriber requests a keyframe and media flows.
             if !endpoint.is_connected() {
+                metrics::inc_rtp_dropped("subscriber_not_connected");
                 continue;
             }
             let Some(outbound_payload_type) = target.payload_types.get(&inbound_payload_type).copied()
             else {
+                metrics::inc_rtp_dropped("payload_map_missing");
                 warn!(
                     "{}: unable to map payload type {} for {}->{} rtp ssrc {} via sender {:?}",
                     self.id,
@@ -568,10 +615,13 @@ impl RtcLobby {
                 .ok_or(Error::ErrRTPSenderNotExisted)
                 .and_then(|mut sender| sender.write_rtp(forwarded_rtp));
             if let Err(err) = write_result {
+                metrics::inc_rtp_dropped("write_error");
                 warn!(
                     "{}: {}->{} forward rtp ssrc {} err: {}",
                     self.id, endpoint_id, subscriber, ssrc, err
                 );
+            } else {
+                metrics::inc_rtp_forwarded(rtp_packet.payload.len());
             }
         }
     }
@@ -582,6 +632,9 @@ impl RtcLobby {
     /// interceptor chain. The lobby only sees PLI/FIR because `RtcpForwarderInterceptor`
     /// deliberately surfaces those requests to `poll_read()`.
     fn forward_rtcp(&mut self, endpoint_id: RtcEndpointId, rtcp_packets: &[Box<dyn Packet>]) {
+        for packet in rtcp_packets {
+            metrics::inc_rtcp_in(classify_rtcp_packet(packet.as_ref()));
+        }
         let route = rtcp_packets
             .iter()
             .flat_map(|packet| packet.destination_ssrc())
@@ -591,6 +644,7 @@ impl RtcLobby {
                     .map(|(key, _subscribers)| (ssrc, key.publish_endpoint))
             });
         let Some((ssrc, publisher_id)) = route else {
+            metrics::inc_rtcp_dropped("no_route");
             trace!(
                 "{}: no forward binding for keyframe rtcp from {}",
                 self.id,
@@ -599,6 +653,7 @@ impl RtcLobby {
             return;
         };
         if publisher_id == endpoint_id {
+            metrics::inc_rtcp_dropped("from_publisher");
             trace!(
                 "{}: keyframe rtcp from publisher {} for its own ssrc {} ignored",
                 self.id,
@@ -631,6 +686,7 @@ impl RtcLobby {
             .map(|packet| packet.cloned())
             .collect();
         if keyframe_requests.is_empty() {
+            metrics::inc_rtcp_keyframe_request("ignored_no_pli_fir");
             trace!(
                 "{}: rtcp from subscriber {} about publisher {} ssrc {} carries no PLI/FIR — ignored",
                 self.id, subscriber_id, publisher_id, ssrc
@@ -646,6 +702,7 @@ impl RtcLobby {
             ssrc
         );
         let Some(publisher) = self.endpoints.get_mut(&publisher_id) else {
+            metrics::inc_rtcp_keyframe_request("dropped_missing_publisher");
             trace!(
                 "{}: publisher {} no longer in lobby — keyframe request for ssrc {} dropped",
                 self.id,
@@ -655,10 +712,13 @@ impl RtcLobby {
             return;
         };
         if let Err(err) = publisher.request_keyframe(ssrc, keyframe_requests) {
+            metrics::inc_rtcp_keyframe_request("write_error");
             warn!(
                 "{}: failed to forward keyframe request to publisher {} for ssrc {}: {}",
                 self.id, publisher_id, ssrc, err
             );
+        } else {
+            metrics::inc_rtcp_keyframe_request("forwarded");
         }
     }
 
@@ -1145,6 +1205,32 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for RtcLobby {
         self.events.clear();
         Ok(())
     }
+}
+
+fn classify_rtcp_packet(packet: &dyn Packet) -> &'static str {
+    let any = packet.as_any();
+    if any.is::<PictureLossIndication>() {
+        return "pli";
+    }
+    if any.is::<FullIntraRequest>() {
+        return "fir";
+    }
+    if any.is::<TransportLayerNack>() {
+        return "nack";
+    }
+    if any.is::<ReceiverReport>() {
+        return "receiver_report";
+    }
+    if any.is::<SenderReport>() {
+        return "sender_report";
+    }
+
+    let header = packet.header();
+    if header.packet_type == PacketType::TransportSpecificFeedback && header.count == FORMAT_CCFB {
+        return "ccfb";
+    }
+
+    "unknown"
 }
 
 #[cfg(test)]
