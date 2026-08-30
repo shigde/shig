@@ -1,0 +1,24 @@
+[package]
+name = "rtc-interceptor"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "RTC Interceptor in Rust"
+license.workspace = true
+documentation = "https://docs.rs/rtc-interceptor"
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+shared = { workspace = true, default-features = false, features = [] }
+sansio.workspace = true
+interceptor-derive.workspace = true
+
+rtp.workspace = true
+rtcp.workspace = true
+rand.workspace = true
+log.workspace = true
+
+[dev-dependencies]

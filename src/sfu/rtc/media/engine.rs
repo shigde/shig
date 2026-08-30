@@ -1,6 +1,7 @@
 use super::demuxer::Demuxer;
 use super::event::SFUEvent;
 use super::lobby::{RtcLobby, RtcLobbyId};
+use super::RtcDiagnostics;
 use crate::metrics;
 use log::{info, warn};
 use rtc::shared::error::{flatten_errs, Error};
@@ -19,7 +20,7 @@ pub struct MediaEngine {
     local_addr: SocketAddr,
     demuxer: Demuxer,
     rtc_lobbies: HashMap<RtcLobbyId, RtcLobby>,
-    packet_io_diagnostics: bool,
+    diagnostics: RtcDiagnostics,
 
     writes: VecDeque<TaggedBytesMut>,
     events: VecDeque<SFUEvent>,
@@ -27,14 +28,14 @@ pub struct MediaEngine {
 }
 
 impl MediaEngine {
-    pub fn new(id: MediaEngineId, local_addr: SocketAddr, packet_io_diagnostics: bool) -> Self {
+    pub fn new(id: MediaEngineId, local_addr: SocketAddr, diagnostics: RtcDiagnostics) -> Self {
         Self {
             id,
             local_addr,
 
             demuxer: Default::default(),
             rtc_lobbies: Default::default(),
-            packet_io_diagnostics,
+            diagnostics,
             writes: Default::default(),
             events: Default::default(),
             next_peer_connection_stats_export: Instant::now(),
@@ -124,8 +125,11 @@ impl Protocol<TaggedBytesMut, Infallible, SFUEvent> for MediaEngine {
                     remove_lobby = true;
                 }
             } else if let SFUEvent::Join { .. } = &evt {
-                let mut lobby =
-                    RtcLobby::new(rtc_lobby_id, self.local_addr, self.packet_io_diagnostics);
+                let mut lobby = RtcLobby::new(
+                    rtc_lobby_id,
+                    self.local_addr,
+                    self.diagnostics,
+                );
                 lobby.handle_event(evt)?;
                 self.rtc_lobbies.insert(rtc_lobby_id, lobby);
             }
@@ -356,7 +360,7 @@ mod tests {
 
     #[test]
     fn join_creates_lobby_and_peer() {
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         assert!(worker.rtc_lobbies.is_empty());
 
         join(&mut worker, 1);
@@ -374,7 +378,7 @@ mod tests {
 
     #[test]
     fn leave_removes_peer_and_reaps_empty_lobby() {
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join(&mut worker, 1);
         assert!(worker.rtc_lobbies.contains_key(&LOBBY));
 
@@ -396,7 +400,7 @@ mod tests {
 
     #[test]
     fn session_description_offer_returns_answer() {
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join(&mut worker, 1);
 
         let request_id: RequestId = 2;
@@ -445,7 +449,7 @@ mod tests {
     fn subscribe_offer_advertises_all_publisher_codecs() {
         const SUBSCRIBER_ENDPOINT: RtcEndpointId = 300;
 
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join_endpoint(&mut worker, 1, ENDPOINT);
         join_endpoint(&mut worker, 2, SUBSCRIBER_ENDPOINT);
 
@@ -487,7 +491,7 @@ mod tests {
     fn publish_triggers_subscribe_offer_to_other_peer() {
         const SUBSCRIBER_ENDPOINT: RtcEndpointId = 300;
 
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join_endpoint(&mut worker, 1, ENDPOINT);
         join_endpoint(&mut worker, 2, SUBSCRIBER_ENDPOINT);
 
@@ -534,7 +538,7 @@ mod tests {
         const SUBSCRIBER_ENDPOINT: RtcEndpointId = 300;
         const UNSUPPORTED_PT: u8 = 123;
 
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join_endpoint(&mut worker, 1, ENDPOINT);
         join_endpoint(&mut worker, 2, SUBSCRIBER_ENDPOINT);
 
@@ -573,7 +577,7 @@ mod tests {
     fn republish_same_offer_is_idempotent() {
         const SUBSCRIBER_ENDPOINT: RtcEndpointId = 300;
 
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join_endpoint(&mut worker, 1, ENDPOINT);
         join_endpoint(&mut worker, 2, SUBSCRIBER_ENDPOINT);
 
@@ -633,7 +637,7 @@ mod tests {
     fn subscribe_offer_after_publisher_published() {
         const SUBSCRIBER_ENDPOINT: RtcEndpointId = 300;
 
-        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), false);
+        let mut worker = MediaEngine::new(0, "0.0.0.0:0".parse().unwrap(), Default::default());
         join_endpoint(&mut worker, 1, ENDPOINT);
 
         // ENDPOINT publishes one sendonly video track.

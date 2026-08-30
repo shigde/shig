@@ -214,6 +214,8 @@ assignment = "least_loaded"
 
 [sfu.diagnostics]
 packet_io = false
+nack_cache = false
+forward_timing = false
 ```
 
 The Sans-I/O media plane creates one SFU core and one UDP port per configured core. Each
@@ -231,8 +233,11 @@ For Kubernetes, expose the resulting contiguous UDP block from `base_port` throu
 `cores` value makes that Service declaration deterministic.
 
 `[sfu.diagnostics]` contains optional diagnostics for short troubleshooting sessions. Keep
-`packet_io = false` during normal operation. Set it to `true` only when you need packet-level
-Prometheus counters for peer-connection output and UDP output.
+`packet_io = false`, `nack_cache = false`, and `forward_timing = false` during normal
+operation. Set `packet_io` to `true` when you need packet-level Prometheus counters for
+peer-connection output and UDP output. Set `nack_cache` to `true` when you need NACK/RTX
+cache diagnostics at the RTC interceptor boundary. Set `forward_timing` to `true` when
+you need the RTP forwarding delay histogram.
 
 ## Relay
 

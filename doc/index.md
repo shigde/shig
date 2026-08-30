@@ -12,6 +12,7 @@
 - [SFU Demuxing](architecture/sfu/demuxing.md)
 - [SFU Media Routes](architecture/sfu/media-routes.md)
 - [SFU Performance Model](architecture/sfu/performance.md)
+- [SFU Improvement Notes](architecture/sfu/improve.md)
 - [SFU Implementation Plan](architecture/sfu/migration.md)
 - [Architecture Use Cases](architecture/use-cases/index.md)
 

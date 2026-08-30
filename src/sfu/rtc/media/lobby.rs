@@ -9,6 +9,7 @@ use super::endpoint::{
 use super::event::SFUEvent;
 use super::forward::{ForwardKey, ForwardTable, ForwardTarget, HeaderExtensionRewrite};
 use super::rtcp_forwarder::RtcpForwarderBuilder;
+use super::RtcDiagnostics;
 use crate::metrics;
 use crate::metrics::PeerConnectionStats;
 use crate::sfu::endpoint::{EndpointId, EndpointKind, RtcEndpointId};
@@ -33,6 +34,7 @@ use rtc::rtcp::transport_feedbacks::transport_layer_nack::TransportLayerNack;
 use rtc::rtcp::Packet;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodecParameters, RTCRtpHeaderExtensionParameters, RTCRtpSendParameters,
+    RtpCodecKind,
 };
 use rtc::sdp::extmap::SDES_MID_URI;
 use rtc::shared::error::{flatten_errs, Error};
@@ -102,7 +104,7 @@ pub(crate) struct RtcLobby {
     id: RtcLobbyId,
     local_addr: SocketAddr,
     demuxer: Demuxer,
-    packet_io_diagnostics: bool,
+    diagnostics: RtcDiagnostics,
     endpoints: HashMap<RtcEndpointId, RtcEndpoint>,
     publishers: HashSet<RtcEndpointId>,
     subscribers: HashSet<RtcEndpointId>,
@@ -118,14 +120,14 @@ impl RtcLobby {
     pub(crate) fn new(
         id: RtcLobbyId,
         local_addr: SocketAddr,
-        packet_io_diagnostics: bool,
+        diagnostics: RtcDiagnostics,
     ) -> Self {
         Self {
             id,
             local_addr,
 
             demuxer: Default::default(),
-            packet_io_diagnostics,
+            diagnostics,
             endpoints: Default::default(),
             publishers: Default::default(),
             subscribers: Default::default(),
@@ -195,12 +197,18 @@ impl RtcLobby {
         // Outermost layer: surface inbound RTCP (a subscriber's PLI/FIR keyframe requests)
         // to poll_read so the SFU can relay them upstream to the publisher; the default
         // chain would otherwise consume RTCP before the application sees it.
-        let registry = registry.with(RtcpForwarderBuilder::new().build());
+        let role = match endpoint_id.kind() {
+            EndpointKind::Publish => "publish",
+            EndpointKind::Subscribe => "subscribe",
+        };
+        let registry = registry.with(
+            RtcpForwarderBuilder::new(role, self.diagnostics.nack_cache).build(),
+        );
         RtcEndpointBuilder::new(
             endpoint_id,
             rtc_lobby_id,
             self.local_addr,
-            self.packet_io_diagnostics,
+            self.diagnostics.packet_io,
         )
             .with_setting_engine(setting_engine)
             .with_media_engine(media_engine)
@@ -574,6 +582,13 @@ impl RtcLobby {
             return;
         }
 
+        let forward_started_at = self.diagnostics.forward_timing.then(Instant::now);
+        let subscriber_count = subscribers.len();
+        let media = self
+            .published_tracks
+            .get(key)
+            .map(|track| media_kind_label(track.media_kind))
+            .unwrap_or("unknown");
         let inbound_payload_type = rtp_packet.header.payload_type;
 
         for target in subscribers.values() {
@@ -634,6 +649,14 @@ impl RtcLobby {
             } else {
                 metrics::inc_rtp_forwarded(rtp_packet.payload.len());
             }
+        }
+
+        if let Some(started_at) = forward_started_at {
+            metrics::observe_rtp_forward_delay(
+                media,
+                subscriber_count,
+                started_at.elapsed().as_secs_f64(),
+            );
         }
     }
 
@@ -1242,6 +1265,14 @@ fn classify_rtcp_packet(packet: &dyn Packet) -> &'static str {
     }
 
     "unknown"
+}
+
+fn media_kind_label(kind: RtpCodecKind) -> &'static str {
+    match kind {
+        RtpCodecKind::Audio => "audio",
+        RtpCodecKind::Video => "video",
+        _ => "unknown",
+    }
 }
 
 #[cfg(test)]

@@ -57,3 +57,5 @@ assignment = "least_loaded"
 
 [sfu.diagnostics]
 packet_io = false
+nack_cache = false
+forward_timing = false

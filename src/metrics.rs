@@ -14,10 +14,14 @@ static RTCP_DROPPED: OnceLock<IntCounterVec> = OnceLock::new();
 static RTCP_KEYFRAME_REQUESTS: OnceLock<IntCounterVec> = OnceLock::new();
 static RTC_PACKET_IO: OnceLock<IntCounterVec> = OnceLock::new();
 static RTC_PACKET_IO_BYTES: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_RTP_PACKET_IO: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_RTP_PACKET_IO_BYTES: OnceLock<IntCounterVec> = OnceLock::new();
 static RTC_UDP_SEND_ERRORS: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_NACK_CACHE: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_CHANGES: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_DURATION: OnceLock<HistogramVec> = OnceLock::new();
+static RTP_FORWARD_DELAY: OnceLock<HistogramVec> = OnceLock::new();
 static ENGINE_STATE: OnceLock<IntGaugeVec> = OnceLock::new();
 static PEER_CONNECTION_STATS: OnceLock<GaugeVec> = OnceLock::new();
 
@@ -106,10 +110,14 @@ pub(crate) fn init() {
     rtcp_keyframe_requests();
     rtc_packet_io();
     rtc_packet_io_bytes();
+    rtc_rtp_packet_io();
+    rtc_rtp_packet_io_bytes();
     rtc_udp_send_errors();
+    rtc_nack_cache();
     reconcile_total();
     reconcile_changes();
     reconcile_duration();
+    rtp_forward_delay();
     engine_state();
     peer_connection_stats();
 }
@@ -165,6 +173,22 @@ pub(crate) fn inc_rtc_peer_connection_out(
         .inc_by(bytes as u64);
 }
 
+pub(crate) fn inc_rtc_peer_connection_rtp_out(
+    role: &'static str,
+    ssrc: u32,
+    payload_type: u8,
+    bytes: usize,
+) {
+    let ssrc = ssrc.to_string();
+    let payload_type = payload_type.to_string();
+    rtc_rtp_packet_io()
+        .with_label_values(&["peer_connection_out", role, &ssrc, &payload_type])
+        .inc();
+    rtc_rtp_packet_io_bytes()
+        .with_label_values(&["peer_connection_out", role, &ssrc, &payload_type])
+        .inc_by(bytes as u64);
+}
+
 pub(crate) fn inc_rtc_udp_out(packet_kind: &'static str, bytes: usize) {
     rtc_packet_io()
         .with_label_values(&["udp_out", "all", packet_kind])
@@ -180,6 +204,17 @@ pub(crate) fn inc_rtc_udp_send_error(packet_kind: &'static str) {
         .inc();
 }
 
+pub(crate) fn inc_rtc_nack_cache(
+    role: &'static str,
+    event: &'static str,
+    media: &'static str,
+    detail: &'static str,
+) {
+    rtc_nack_cache()
+        .with_label_values(&[role, event, media, detail])
+        .inc();
+}
+
 pub(crate) fn observe_reconcile(duration_seconds: f64, added_routes: u64, removed_routes: u64) {
     reconcile_total().with_label_values(&["run"]).inc();
     reconcile_changes()
@@ -190,6 +225,17 @@ pub(crate) fn observe_reconcile(duration_seconds: f64, added_routes: u64, remove
         .inc_by(removed_routes);
     reconcile_duration()
         .with_label_values(&["seconds"])
+        .observe(duration_seconds);
+}
+
+pub(crate) fn observe_rtp_forward_delay(
+    media: &'static str,
+    subscriber_count: usize,
+    duration_seconds: f64,
+) {
+    let subscriber_count = subscriber_count.to_string();
+    rtp_forward_delay()
+        .with_label_values(&[media, &subscriber_count])
         .observe(duration_seconds);
 }
 
@@ -321,12 +367,42 @@ fn rtc_packet_io_bytes() -> &'static IntCounterVec {
     })
 }
 
+fn rtc_rtp_packet_io() -> &'static IntCounterVec {
+    RTC_RTP_PACKET_IO.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_rtp_packet_io_total",
+            "Total RTC RTP packets emitted by peer connections with SSRC and payload type.",
+            &["stage", "role", "ssrc", "payload_type"],
+        )
+    })
+}
+
+fn rtc_rtp_packet_io_bytes() -> &'static IntCounterVec {
+    RTC_RTP_PACKET_IO_BYTES.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_rtp_packet_io_bytes_total",
+            "Total RTC RTP bytes emitted by peer connections with SSRC and payload type.",
+            &["stage", "role", "ssrc", "payload_type"],
+        )
+    })
+}
+
 fn rtc_udp_send_errors() -> &'static IntCounterVec {
     RTC_UDP_SEND_ERRORS.get_or_init(|| {
         register_int_counter_vec(
             "shig_rtc_udp_send_errors_total",
             "Total RTC UDP send errors by packet kind.",
             &["packet_kind"],
+        )
+    })
+}
+
+fn rtc_nack_cache() -> &'static IntCounterVec {
+    RTC_NACK_CACHE.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_nack_cache_events_total",
+            "NACK cache diagnostics observed at the RTC interceptor boundary.",
+            &["role", "event", "media", "detail"],
         )
     })
 }
@@ -365,6 +441,27 @@ fn reconcile_duration() -> &'static HistogramVec {
         default_registry()
             .register(Box::new(histogram.clone()))
             .expect("register reconcile duration histogram");
+        histogram
+    })
+}
+
+fn rtp_forward_delay() -> &'static HistogramVec {
+    RTP_FORWARD_DELAY.get_or_init(|| {
+        let histogram = HistogramVec::new(
+            HistogramOpts::new(
+                "shig_rtc_rtp_forward_delay_seconds",
+                "Time spent forwarding one inbound RTP packet through the SFU media router.",
+            )
+            .buckets(vec![
+                0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1,
+                0.25, 0.5, 1.0,
+            ]),
+            &["media", "subscriber_count"],
+        )
+        .expect("valid RTP forward delay histogram");
+        default_registry()
+            .register(Box::new(histogram.clone()))
+            .expect("register RTP forward delay histogram");
         histogram
     })
 }

@@ -2,7 +2,7 @@ use crate::sfu::rtc::media_command::{
     ApplyEndpointAnswer, ApplySfuEvent, CloseEndpoint, CreateEndpointOffer, NegotiateEndpoint,
     RtcError, RtcEvent, SetRtcEventSink, StopRtcCore,
 };
-use crate::sfu::rtc::media::{MediaEngine, SFUEvent};
+use crate::sfu::rtc::media::{MediaEngine, RtcDiagnostics, SFUEvent};
 use crate::metrics;
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, Recipient, Running,
@@ -31,7 +31,7 @@ pub struct RtcCoreActor {
     socket: Arc<UdpSocket>,
     advertised_addr: SocketAddr,
     event_sink: Option<Recipient<RtcEvent>>,
-    packet_io_diagnostics: bool,
+    diagnostics: RtcDiagnostics,
     timeout_generation: u64,
     next_request_id: u64,
     endpoint_request_ids: HashMap<crate::sfu::endpoint::EndpointId, u64>,
@@ -45,22 +45,27 @@ impl RtcCoreActor {
         advertised_addr: SocketAddr,
     ) -> io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind(bind_addr).await?);
-        Ok(Self::from_socket(id, socket, advertised_addr, false))
+        Ok(Self::from_socket(
+            id,
+            socket,
+            advertised_addr,
+            RtcDiagnostics::default(),
+        ))
     }
 
     pub fn from_socket(
         id: RtcCoreId,
         socket: Arc<UdpSocket>,
         advertised_addr: SocketAddr,
-        packet_io_diagnostics: bool,
+        diagnostics: RtcDiagnostics,
     ) -> Self {
         Self {
             id,
-            engine: MediaEngine::new(id, advertised_addr, packet_io_diagnostics),
+            engine: MediaEngine::new(id, advertised_addr, diagnostics),
             socket,
             advertised_addr,
             event_sink: None,
-            packet_io_diagnostics,
+            diagnostics,
             timeout_generation: 0,
             next_request_id: 0,
             endpoint_request_ids: HashMap::new(),
@@ -133,7 +138,7 @@ impl RtcCoreActor {
             let socket = Arc::clone(&self.socket);
             let peer_addr = output.transport.peer_addr;
             let payload = output.message.freeze();
-            let packet_kind = if self.packet_io_diagnostics {
+            let packet_kind = if self.diagnostics.packet_io {
                 Some(classify_rtc_payload(&payload))
             } else {
                 None

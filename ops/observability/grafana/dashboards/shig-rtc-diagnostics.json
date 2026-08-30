@@ -1,0 +1,408 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.001 }
+            ]
+          },
+          "unit": "pps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shig_rtc_packet_io_total{stage=\"peer_connection_out\",role=\"publish\",packet_kind=\"rtcp\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "publish pc rtcp out"
+        }
+      ],
+      "title": "Publish PeerConnection RTCP Out",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.001 }
+            ]
+          },
+          "unit": "pps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shig_rtc_packet_io_total{stage=\"peer_connection_out\",role=\"subscribe\",packet_kind=\"rtcp\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "subscribe pc rtcp out"
+        }
+      ],
+      "title": "Subscribe PeerConnection RTCP Out",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.001 }
+            ]
+          },
+          "unit": "pps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shig_rtc_packet_io_total{stage=\"udp_out\",role=\"all\",packet_kind=\"rtcp\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "udp rtcp out"
+        }
+      ],
+      "title": "UDP RTCP Out",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "pps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shig_rtc_udp_send_errors_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "send errors"
+        }
+      ],
+      "title": "UDP Send Errors",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage, role, packet_kind) (rate(shig_rtc_packet_io_total[$__rate_interval]))",
+          "legendFormat": "{{stage}} {{role}} {{packet_kind}}"
+        }
+      ],
+      "title": "RTC Packet IO",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage, role, packet_kind) (rate(shig_rtc_packet_io_bytes_total[$__rate_interval]) * 8)",
+          "legendFormat": "{{stage}} {{role}} {{packet_kind}}"
+        }
+      ],
+      "title": "RTC Packet IO Bitrate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (role) (rate(shig_rtc_packet_io_total{stage=\"peer_connection_out\",packet_kind=\"rtcp\"}[$__rate_interval]))",
+          "legendFormat": "pc out {{role}}"
+        },
+        {
+          "expr": "sum(rate(shig_rtc_packet_io_total{stage=\"udp_out\",role=\"all\",packet_kind=\"rtcp\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "udp out all rtcp"
+        }
+      ],
+      "title": "RTCP: PeerConnection Out vs UDP Out",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (role) (rate(shig_rtc_packet_io_total{stage=\"peer_connection_out\",packet_kind=\"rtp\"}[$__rate_interval]))",
+          "legendFormat": "pc out {{role}}"
+        },
+        {
+          "expr": "sum(rate(shig_rtc_packet_io_total{stage=\"udp_out\",role=\"all\",packet_kind=\"rtp\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "udp out all rtp"
+        }
+      ],
+      "title": "RTP: PeerConnection Out vs UDP Out",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (direction, kind) (rate(shig_rtc_rtcp_packets_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} {{kind}}"
+        }
+      ],
+      "title": "Media Router RTCP Observed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 10,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (role, purpose, media, metric) (rate(shig_rtc_peer_connection_stats{metric=~\"outbound_nack_count|outbound_pli_count|outbound_fir_count|inbound_nack_count|inbound_pli_count|inbound_fir_count\"}[$__rate_interval]))",
+          "legendFormat": "{{role}} {{purpose}} {{media}} {{metric}}"
+        }
+      ],
+      "title": "PeerConnection RTCP Feedback Stats",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(shig_rtc_rtcp_keyframe_requests_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "title": "Keyframe Request Outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(shig_rtc_rtp_dropped_total[$__rate_interval]))",
+          "legendFormat": "rtp {{reason}}"
+        },
+        {
+          "expr": "sum by (reason) (rate(shig_rtc_rtcp_dropped_total[$__rate_interval]))",
+          "legendFormat": "rtcp {{reason}}"
+        }
+      ],
+      "title": "Drop Reasons",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (role, event, media, detail) (increase(shig_rtc_nack_cache_events_total[$__range]))",
+          "legendFormat": "{{role}} {{event}} {{media}} {{detail}}"
+        },
+        {
+          "expr": "sum by (event, media, detail) (increase(shig_rtc_nack_responder_events_total[$__range]))",
+          "legendFormat": "responder {{event}} {{media}} {{detail}}"
+        }
+      ],
+      "title": "NACK Cache Diagnostics",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "id": 14,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (media_ssrc, rtx_ssrc, original_payload_type, rtx_payload_type) (rate(shig_rtc_nack_responder_rtx_total[$__rate_interval]))",
+          "legendFormat": "media {{media_ssrc}} pt {{original_payload_type}} -> rtx {{rtx_ssrc}} pt {{rtx_payload_type}}"
+        }
+      ],
+      "title": "NACK Responder RTX Mapping",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "pps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "id": 15,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (role, ssrc, payload_type) (rate(shig_rtc_rtp_packet_io_total{stage=\"peer_connection_out\"}[$__rate_interval]))",
+          "legendFormat": "{{role}} ssrc {{ssrc}} pt {{payload_type}}"
+        }
+      ],
+      "title": "PeerConnection RTP Out by SSRC/PT",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
+      "id": 16,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, media, subscriber_count) (rate(shig_rtc_rtp_forward_delay_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50 {{media}} subscribers={{subscriber_count}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, media, subscriber_count) (rate(shig_rtc_rtp_forward_delay_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{media}} subscribers={{subscriber_count}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, media, subscriber_count) (rate(shig_rtc_rtp_forward_delay_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99 {{media}} subscribers={{subscriber_count}}"
+        }
+      ],
+      "title": "RTP Forward Delay",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["shig", "rtc", "diagnostics"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Shig RTC Diagnostics",
+  "uid": "shig-rtc-diagnostics",
+  "version": 1,
+  "weekStart": ""
+}

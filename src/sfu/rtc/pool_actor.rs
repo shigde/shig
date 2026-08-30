@@ -1,6 +1,7 @@
 use crate::sfu::config::{RtcAssignmentStrategy, SfuConfig};
 use crate::sfu::lobby::LobbyId;
 use crate::sfu::rtc::core_actor::{RtcCoreActor, RtcCoreId};
+use crate::sfu::rtc::media::RtcDiagnostics;
 use crate::sfu::rtc::media_command::{
     AssignLobby, ReleaseLobby, RtcCoreAssignment, RtcError, StopRtcCore, StopRtcPool,
 };
@@ -32,6 +33,10 @@ impl RtcPoolActor {
     /// When `dedicated_threads` is enabled, every core gets an independent Actix
     /// Arbiter and therefore an independent OS thread and Tokio reactor.
     pub fn launch(config: &SfuConfig) -> Result<Addr<Self>, RtcError> {
+        rtc_interceptor::diagnostics::set_nack_responder_diagnostics_enabled(
+            config.diagnostics.nack_cache,
+        );
+
         let layout = RtcCoreLayout::from_config(config)?;
         let mut cores = Vec::with_capacity(layout.core_count);
 
@@ -40,7 +45,11 @@ impl RtcPoolActor {
             let port = layout.base_port + index as u16;
             let bind_addr = SocketAddr::new(layout.bind_ip, port);
             let media_addr = SocketAddr::new(layout.advertised_ip, port);
-            let packet_io_diagnostics = config.diagnostics.packet_io;
+            let diagnostics = RtcDiagnostics {
+                packet_io: config.diagnostics.packet_io,
+                nack_cache: config.diagnostics.nack_cache,
+                forward_timing: config.diagnostics.forward_timing,
+            };
             let socket = StdUdpSocket::bind(bind_addr).map_err(|error| {
                 RtcError(format!(
                     "failed to bind RTC core {id} at {bind_addr}: {error}"
@@ -59,7 +68,7 @@ impl RtcPoolActor {
                         id,
                         Arc::new(socket),
                         media_addr,
-                        packet_io_diagnostics,
+                        diagnostics,
                     )
                 });
                 (actor, Some(arbiter))
@@ -72,7 +81,7 @@ impl RtcPoolActor {
                         id,
                         Arc::new(socket),
                         media_addr,
-                        packet_io_diagnostics,
+                        diagnostics,
                     )
                     .start(),
                     None,

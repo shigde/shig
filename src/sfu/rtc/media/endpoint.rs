@@ -444,6 +444,16 @@ impl Protocol<TaggedBytesMut, RTCMessage, RtcEndpointEvent> for RtcEndpoint {
                 "disabled"
             };
             if self.packet_io_diagnostics {
+                if packet_kind == "rtp" {
+                    if let Some((ssrc, payload_type)) = rtp_packet_mapping(&msg.message) {
+                        metrics::inc_rtc_peer_connection_rtp_out(
+                            endpoint_role_label(self.id.kind()),
+                            ssrc,
+                            payload_type,
+                            msg.message.len(),
+                        );
+                    }
+                }
                 metrics::inc_rtc_peer_connection_out(
                     endpoint_role_label(self.id.kind()),
                     packet_kind,
@@ -572,6 +582,20 @@ fn classify_rtc_payload(payload: &[u8]) -> &'static str {
         },
         _ => "unknown",
     }
+}
+
+fn rtp_packet_mapping(payload: &[u8]) -> Option<(u32, u8)> {
+    if payload.len() < 12 {
+        return None;
+    }
+    let first = payload[0];
+    if !(128..=191).contains(&first) || matches!(payload[1], 192..=223) {
+        return None;
+    }
+
+    let payload_type = payload[1] & 0x7f;
+    let ssrc = u32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    Some((ssrc, payload_type))
 }
 
 impl RtcEndpoint {

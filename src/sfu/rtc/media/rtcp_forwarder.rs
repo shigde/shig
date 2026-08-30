@@ -11,31 +11,41 @@ use log::trace;
 use rtc::interceptor::{interceptor, Interceptor, Packet, StreamInfo, TaggedPacket};
 use rtc::rtcp::payload_feedbacks::full_intra_request::FullIntraRequest;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
+use rtc::rtcp::transport_feedbacks::transport_layer_nack::TransportLayerNack;
 use rtc::rtcp::Packet as RtcpPacket;
-use rtc::sansio;
 use rtc::shared::error::Error;
 use std::collections::VecDeque;
 
+use crate::metrics;
+
 /// Builder for [`RtcpForwarderInterceptor`], plugged into a `Registry` via `.with(...)`.
 pub(crate) struct RtcpForwarderBuilder<P> {
+    role: &'static str,
+    diagnostics_enabled: bool,
     _phantom: std::marker::PhantomData<P>,
 }
 
 impl<P> Default for RtcpForwarderBuilder<P> {
     fn default() -> Self {
         Self {
+            role: "unknown",
+            diagnostics_enabled: false,
             _phantom: std::marker::PhantomData,
         }
     }
 }
 
 impl<P> RtcpForwarderBuilder<P> {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(role: &'static str, diagnostics_enabled: bool) -> Self {
+        Self {
+            role,
+            diagnostics_enabled,
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     pub(crate) fn build(self) -> impl FnOnce(P) -> RtcpForwarderInterceptor<P> {
-        move |inner| RtcpForwarderInterceptor::new(inner)
+        move |inner| RtcpForwarderInterceptor::new(inner, self.role, self.diagnostics_enabled)
     }
 }
 
@@ -45,13 +55,17 @@ impl<P> RtcpForwarderBuilder<P> {
 pub(crate) struct RtcpForwarderInterceptor<P> {
     #[next]
     next: P,
+    role: &'static str,
+    diagnostics_enabled: bool,
     read_queue: VecDeque<TaggedPacket>,
 }
 
 impl<P> RtcpForwarderInterceptor<P> {
-    fn new(next: P) -> Self {
+    fn new(next: P, role: &'static str, diagnostics_enabled: bool) -> Self {
         Self {
             next,
+            role,
+            diagnostics_enabled,
             read_queue: VecDeque::new(),
         }
     }
@@ -65,6 +79,14 @@ impl<P: Interceptor> RtcpForwarderInterceptor<P> {
         // the SFU relays upstream to publishers. Everything else (SR/RR/NACK/TWCC) is left
         // to the default chain and not duplicated to poll_read.
         if let Packet::Rtcp(rtcp_packets) = &msg.message {
+            if self.diagnostics_enabled {
+                for packet in rtcp_packets {
+                    if packet.as_any().is::<TransportLayerNack>() {
+                        metrics::inc_rtc_nack_cache(self.role, "rtcp_in", "unknown", "nack");
+                    }
+                }
+            }
+
             let keyframe_requests: Vec<Box<dyn RtcpPacket>> = rtcp_packets
                 .iter()
                 .filter(|packet| {
@@ -91,6 +113,39 @@ impl<P: Interceptor> RtcpForwarderInterceptor<P> {
     }
 
     #[overrides]
+    fn bind_local_stream(&mut self, info: &StreamInfo) {
+        if self.diagnostics_enabled {
+            let media = media_label(info);
+            let nack = if stream_supports_nack(info) {
+                "nack"
+            } else {
+                "no_nack"
+            };
+            let rtx = if info.ssrc_rtx.is_some() && info.payload_type_rtx.is_some() {
+                "rtx"
+            } else {
+                "no_rtx"
+            };
+            metrics::inc_rtc_nack_cache(self.role, "bind_local_stream", media, nack);
+            metrics::inc_rtc_nack_cache(self.role, "bind_local_stream", media, rtx);
+        }
+        self.next.bind_local_stream(info);
+    }
+
+    #[overrides]
+    fn unbind_local_stream(&mut self, info: &StreamInfo) {
+        if self.diagnostics_enabled {
+            metrics::inc_rtc_nack_cache(
+                self.role,
+                "unbind_local_stream",
+                media_label(info),
+                "stream",
+            );
+        }
+        self.next.unbind_local_stream(info);
+    }
+
+    #[overrides]
     fn poll_read(&mut self) -> Option<Self::Rout> {
         if let Some(pkt) = self.read_queue.pop_front() {
             return Some(pkt);
@@ -103,4 +158,20 @@ impl<P: Interceptor> RtcpForwarderInterceptor<P> {
         self.read_queue.clear();
         self.next.close()
     }
+}
+
+fn media_label(info: &StreamInfo) -> &'static str {
+    if info.mime_type.starts_with("audio/") {
+        "audio"
+    } else if info.mime_type.starts_with("video/") {
+        "video"
+    } else {
+        "unknown"
+    }
+}
+
+fn stream_supports_nack(info: &StreamInfo) -> bool {
+    info.rtcp_feedback
+        .iter()
+        .any(|feedback| feedback.typ == "nack" && feedback.parameter.is_empty())
 }

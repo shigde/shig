@@ -28,6 +28,8 @@ pub enum RtcAssignmentStrategy {
 #[serde(default)]
 pub struct SfuDiagnosticsConfig {
     pub packet_io: bool,
+    pub nack_cache: bool,
+    pub forward_timing: bool,
 }
 
 impl Default for SfuConfig {

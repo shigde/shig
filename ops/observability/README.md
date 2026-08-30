@@ -40,8 +40,15 @@ The dashboard separates two views:
 ```toml
 [sfu.diagnostics]
 packet_io = true
+nack_cache = true
+forward_timing = true
 ```
 
-Keep this disabled during normal operation.
+Keep these disabled during normal operation. Use `nack_cache` only while checking whether
+NACK-capable local streams are bound, whether inbound NACK packets reach the interceptor
+chain, whether the internal NACK responder cache returns hits, misses, and retransmits,
+and whether RTX SSRC/payload-type mappings match the SDP for a subscriber leg.
+Use `forward_timing` only while checking whether RTP packets spend too much time inside
+the SFU media router before they are written to subscriber peer connections.
 
 For a server deployment, change the Prometheus target in `prometheus/prometheus.yml` or proxy `/metrics` through an internal-only Nginx location.
