@@ -28,11 +28,20 @@ Default login:
 admin / admin
 ```
 
-The pre-provisioned dashboard is named `Shig RTC Overview`.
+The pre-provisioned dashboards are named `Shig RTC Overview` and `Shig RTC Diagnostics`.
 
 The dashboard separates two views:
 
 - SFU media router metrics, such as RTP input, forwarded RTP, drops, reconcile activity, and routed PLI/FIR.
 - PeerConnection stats exported from `rtc`, such as outbound/inbound bitrate, NACK/PLI/FIR counters, remote inbound RTT/loss, and selected candidate pair RTT. These metrics include a `purpose` label (`participant`, `stream`, or `connection`) so stream video can be diagnosed separately from normal participant video.
+
+`Shig RTC Diagnostics` is for short troubleshooting sessions. Its packet IO panels require:
+
+```toml
+[sfu.diagnostics]
+packet_io = true
+```
+
+Keep this disabled during normal operation.
 
 For a server deployment, change the Prometheus target in `prometheus/prometheus.yml` or proxy `/metrics` through an internal-only Nginx location.

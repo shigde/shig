@@ -3,6 +3,7 @@ use crate::sfu::rtc::media_command::{
     RtcError, RtcEvent, SetRtcEventSink, StopRtcCore,
 };
 use crate::sfu::rtc::media::{MediaEngine, SFUEvent};
+use crate::metrics;
 use actix::{
     Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, Recipient, Running,
 };
@@ -30,6 +31,7 @@ pub struct RtcCoreActor {
     socket: Arc<UdpSocket>,
     advertised_addr: SocketAddr,
     event_sink: Option<Recipient<RtcEvent>>,
+    packet_io_diagnostics: bool,
     timeout_generation: u64,
     next_request_id: u64,
     endpoint_request_ids: HashMap<crate::sfu::endpoint::EndpointId, u64>,
@@ -43,16 +45,22 @@ impl RtcCoreActor {
         advertised_addr: SocketAddr,
     ) -> io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind(bind_addr).await?);
-        Ok(Self::from_socket(id, socket, advertised_addr))
+        Ok(Self::from_socket(id, socket, advertised_addr, false))
     }
 
-    pub fn from_socket(id: RtcCoreId, socket: Arc<UdpSocket>, advertised_addr: SocketAddr) -> Self {
+    pub fn from_socket(
+        id: RtcCoreId,
+        socket: Arc<UdpSocket>,
+        advertised_addr: SocketAddr,
+        packet_io_diagnostics: bool,
+    ) -> Self {
         Self {
             id,
-            engine: MediaEngine::new(id, advertised_addr),
+            engine: MediaEngine::new(id, advertised_addr, packet_io_diagnostics),
             socket,
             advertised_addr,
             event_sink: None,
+            packet_io_diagnostics,
             timeout_generation: 0,
             next_request_id: 0,
             endpoint_request_ids: HashMap::new(),
@@ -125,8 +133,19 @@ impl RtcCoreActor {
             let socket = Arc::clone(&self.socket);
             let peer_addr = output.transport.peer_addr;
             let payload = output.message.freeze();
+            let packet_kind = if self.packet_io_diagnostics {
+                Some(classify_rtc_payload(&payload))
+            } else {
+                None
+            };
+            if let Some(packet_kind) = packet_kind {
+                metrics::inc_rtc_udp_out(packet_kind, payload.len());
+            }
             ctx.spawn(actix::fut::wrap_future(async move {
                 if let Err(error) = socket.send_to(&payload, peer_addr).await {
+                    if let Some(packet_kind) = packet_kind {
+                        metrics::inc_rtc_udp_send_error(packet_kind);
+                    }
                     log::warn!("RTC UDP send failed: peer={peer_addr} error={error}");
                 }
             }));
@@ -165,6 +184,23 @@ impl RtcCoreActor {
             },
             delay,
         );
+    }
+}
+
+fn classify_rtc_payload(payload: &[u8]) -> &'static str {
+    let Some(first) = payload.first().copied() else {
+        return "empty";
+    };
+
+    match first {
+        0..=3 => "stun",
+        20..=63 => "dtls",
+        128..=191 => match payload.get(1).copied() {
+            Some(192..=223) => "rtcp",
+            Some(_) => "rtp",
+            None => "rtp/rtcp",
+        },
+        _ => "unknown",
     }
 }
 

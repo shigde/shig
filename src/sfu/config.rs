@@ -13,6 +13,7 @@ pub struct SfuConfig {
     /// Run every RTC core on its own Actix Arbiter / OS thread.
     pub dedicated_threads: bool,
     pub assignment: RtcAssignmentStrategy,
+    pub diagnostics: SfuDiagnosticsConfig,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +22,12 @@ pub enum RtcAssignmentStrategy {
     RoundRobin,
     #[default]
     LeastLoaded,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct SfuDiagnosticsConfig {
+    pub packet_io: bool,
 }
 
 impl Default for SfuConfig {
@@ -32,6 +39,7 @@ impl Default for SfuConfig {
             base_port: 50000,
             dedicated_threads: true,
             assignment: RtcAssignmentStrategy::LeastLoaded,
+            diagnostics: SfuDiagnosticsConfig::default(),
         }
     }
 }

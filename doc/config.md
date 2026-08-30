@@ -211,6 +211,9 @@ cores = 4
 base_port = 50000
 dedicated_threads = true
 assignment = "least_loaded"
+
+[sfu.diagnostics]
+packet_io = false
 ```
 
 The Sans-I/O media plane creates one SFU core and one UDP port per configured core. Each
@@ -226,6 +229,10 @@ development.
 For Kubernetes, expose the resulting contiguous UDP block from `base_port` through
 `base_port + resolved_core_count - 1` on the Pod and Service. In production, an explicit
 `cores` value makes that Service declaration deterministic.
+
+`[sfu.diagnostics]` contains optional diagnostics for short troubleshooting sessions. Keep
+`packet_io = false` during normal operation. Set it to `true` only when you need packet-level
+Prometheus counters for peer-connection output and UDP output.
 
 ## Relay
 

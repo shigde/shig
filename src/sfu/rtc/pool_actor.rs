@@ -40,6 +40,7 @@ impl RtcPoolActor {
             let port = layout.base_port + index as u16;
             let bind_addr = SocketAddr::new(layout.bind_ip, port);
             let media_addr = SocketAddr::new(layout.advertised_ip, port);
+            let packet_io_diagnostics = config.diagnostics.packet_io;
             let socket = StdUdpSocket::bind(bind_addr).map_err(|error| {
                 RtcError(format!(
                     "failed to bind RTC core {id} at {bind_addr}: {error}"
@@ -54,7 +55,12 @@ impl RtcPoolActor {
                 let actor = RtcCoreActor::start_in_arbiter(&arbiter.handle(), move |_ctx| {
                     let socket = UdpSocket::from_std(socket)
                         .expect("validated non-blocking RTC socket must attach to core reactor");
-                    RtcCoreActor::from_socket(id, Arc::new(socket), media_addr)
+                    RtcCoreActor::from_socket(
+                        id,
+                        Arc::new(socket),
+                        media_addr,
+                        packet_io_diagnostics,
+                    )
                 });
                 (actor, Some(arbiter))
             } else {
@@ -62,7 +68,13 @@ impl RtcPoolActor {
                     RtcError(format!("failed to attach RTC core {id} socket: {error}"))
                 })?;
                 (
-                    RtcCoreActor::from_socket(id, Arc::new(socket), media_addr).start(),
+                    RtcCoreActor::from_socket(
+                        id,
+                        Arc::new(socket),
+                        media_addr,
+                        packet_io_diagnostics,
+                    )
+                    .start(),
                     None,
                 )
             };

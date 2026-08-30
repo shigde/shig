@@ -54,3 +54,6 @@ cores = 0
 base_port = 50000
 dedicated_threads = true
 assignment = "least_loaded"
+
+[sfu.diagnostics]
+packet_io = false

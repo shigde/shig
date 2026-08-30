@@ -102,6 +102,7 @@ pub(crate) struct RtcLobby {
     id: RtcLobbyId,
     local_addr: SocketAddr,
     demuxer: Demuxer,
+    packet_io_diagnostics: bool,
     endpoints: HashMap<RtcEndpointId, RtcEndpoint>,
     publishers: HashSet<RtcEndpointId>,
     subscribers: HashSet<RtcEndpointId>,
@@ -114,12 +115,17 @@ pub(crate) struct RtcLobby {
 }
 
 impl RtcLobby {
-    pub(crate) fn new(id: RtcLobbyId, local_addr: SocketAddr) -> Self {
+    pub(crate) fn new(
+        id: RtcLobbyId,
+        local_addr: SocketAddr,
+        packet_io_diagnostics: bool,
+    ) -> Self {
         Self {
             id,
             local_addr,
 
             demuxer: Default::default(),
+            packet_io_diagnostics,
             endpoints: Default::default(),
             publishers: Default::default(),
             subscribers: Default::default(),
@@ -190,7 +196,12 @@ impl RtcLobby {
         // to poll_read so the SFU can relay them upstream to the publisher; the default
         // chain would otherwise consume RTCP before the application sees it.
         let registry = registry.with(RtcpForwarderBuilder::new().build());
-        RtcEndpointBuilder::new(endpoint_id, rtc_lobby_id, self.local_addr)
+        RtcEndpointBuilder::new(
+            endpoint_id,
+            rtc_lobby_id,
+            self.local_addr,
+            self.packet_io_diagnostics,
+        )
             .with_setting_engine(setting_engine)
             .with_media_engine(media_engine)
             .with_interceptor_registry(registry)

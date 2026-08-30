@@ -1,7 +1,7 @@
 use super::event::RequestId;
 use super::lobby::RtcLobbyId;
 use super::SFUEvent;
-use crate::metrics::PeerConnectionStats;
+use crate::metrics::{self, PeerConnectionStats};
 use crate::sfu::endpoint::{EndpointId, EndpointKind};
 use crate::util::id::random_id;
 use log::{trace, warn};
@@ -47,15 +47,22 @@ pub(crate) struct RtcEndpointBuilder {
     id: EndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
+    packet_io_diagnostics: bool,
     peer_connection_builder: RTCPeerConnectionBuilder<BoxedInterceptor>,
 }
 
 impl RtcEndpointBuilder {
-    pub(crate) fn new(id: EndpointId, rtc_lobby_id: RtcLobbyId, local_addr: SocketAddr) -> Self {
+    pub(crate) fn new(
+        id: EndpointId,
+        rtc_lobby_id: RtcLobbyId,
+        local_addr: SocketAddr,
+        packet_io_diagnostics: bool,
+    ) -> Self {
         Self {
             id,
             rtc_lobby_id,
             local_addr,
+            packet_io_diagnostics,
             peer_connection_builder: RTCPeerConnectionBuilder::new()
                 .with_interceptor_registry(Registry::new().boxed()),
         }
@@ -95,6 +102,7 @@ impl RtcEndpointBuilder {
             id: self.id,
             rtc_lobby_id: self.rtc_lobby_id,
             local_addr: self.local_addr,
+            packet_io_diagnostics: self.packet_io_diagnostics,
             peer_connection: self.peer_connection_builder.build()?,
 
             next_request_id: 0,
@@ -147,6 +155,7 @@ pub(crate) struct RtcEndpoint {
     id: EndpointId,
     rtc_lobby_id: RtcLobbyId,
     local_addr: SocketAddr,
+    packet_io_diagnostics: bool,
     peer_connection: RTCPeerConnection<BoxedInterceptor>,
 
     next_request_id: RequestId,
@@ -428,11 +437,24 @@ impl Protocol<TaggedBytesMut, RTCMessage, RtcEndpointEvent> for RtcEndpoint {
 
     fn poll_write(&mut self) -> Option<Self::Wout> {
         while let Some(msg) = self.peer_connection.poll_write() {
+            let packet_kind = if self.packet_io_diagnostics || log::log_enabled!(log::Level::Trace)
+            {
+                classify_rtc_payload(&msg.message)
+            } else {
+                "disabled"
+            };
+            if self.packet_io_diagnostics {
+                metrics::inc_rtc_peer_connection_out(
+                    endpoint_role_label(self.id.kind()),
+                    packet_kind,
+                    msg.message.len(),
+                );
+            }
             trace!(
                 "[{}/{}] rtc write kind={} bytes={} local={} peer={} protocol={:?}",
                 self.rtc_lobby_id,
                 self.id,
-                classify_rtc_payload(&msg.message),
+                packet_kind,
                 msg.message.len(),
                 msg.transport.local_addr,
                 msg.transport.peer_addr,
@@ -1277,6 +1299,7 @@ mod tests {
             endpoint_id(10),
             RtcLobbyId::from_u128(20),
             "0.0.0.0:0".parse().unwrap(),
+            false,
         )
         .with_media_engine(media_engine)
         .build()
@@ -1301,6 +1324,7 @@ mod tests {
             endpoint_id(1),
             RtcLobbyId::from_u128(2),
             "0.0.0.0:0".parse().unwrap(),
+            false,
         )
         .with_media_engine(media_engine)
         .build()
@@ -1318,6 +1342,7 @@ mod tests {
             endpoint_id(3),
             RtcLobbyId::from_u128(4),
             "0.0.0.0:0".parse().unwrap(),
+            false,
         )
         .with_media_engine(media_engine)
         .with_setting_engine(SettingEngine::default())
@@ -1337,6 +1362,7 @@ mod tests {
             endpoint_id(5),
             RtcLobbyId::from_u128(6),
             "0.0.0.0:0".parse().unwrap(),
+            false,
         )
         .with_configuration(configuration)
         .with_media_engine(media_engine)
@@ -1381,6 +1407,7 @@ mod tests {
             endpoint_id(42),
             RtcLobbyId::from_u128(20),
             "0.0.0.0:0".parse().unwrap(),
+            false,
         )
         .with_media_engine(media_engine)
         .build()

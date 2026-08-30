@@ -12,6 +12,9 @@ static RTP_DROPPED: OnceLock<IntCounterVec> = OnceLock::new();
 static RTCP_PACKETS: OnceLock<IntCounterVec> = OnceLock::new();
 static RTCP_DROPPED: OnceLock<IntCounterVec> = OnceLock::new();
 static RTCP_KEYFRAME_REQUESTS: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_PACKET_IO: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_PACKET_IO_BYTES: OnceLock<IntCounterVec> = OnceLock::new();
+static RTC_UDP_SEND_ERRORS: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_CHANGES: OnceLock<IntCounterVec> = OnceLock::new();
 static RECONCILE_DURATION: OnceLock<HistogramVec> = OnceLock::new();
@@ -101,6 +104,9 @@ pub(crate) fn init() {
     rtcp_packets();
     rtcp_dropped();
     rtcp_keyframe_requests();
+    rtc_packet_io();
+    rtc_packet_io_bytes();
+    rtc_udp_send_errors();
     reconcile_total();
     reconcile_changes();
     reconcile_duration();
@@ -144,6 +150,34 @@ pub(crate) fn inc_rtcp_keyframe_request(outcome: &'static str) {
 
 pub(crate) fn inc_rtcp_dropped(reason: &'static str) {
     rtcp_dropped().with_label_values(&[reason]).inc();
+}
+
+pub(crate) fn inc_rtc_peer_connection_out(
+    role: &'static str,
+    packet_kind: &'static str,
+    bytes: usize,
+) {
+    rtc_packet_io()
+        .with_label_values(&["peer_connection_out", role, packet_kind])
+        .inc();
+    rtc_packet_io_bytes()
+        .with_label_values(&["peer_connection_out", role, packet_kind])
+        .inc_by(bytes as u64);
+}
+
+pub(crate) fn inc_rtc_udp_out(packet_kind: &'static str, bytes: usize) {
+    rtc_packet_io()
+        .with_label_values(&["udp_out", "all", packet_kind])
+        .inc();
+    rtc_packet_io_bytes()
+        .with_label_values(&["udp_out", "all", packet_kind])
+        .inc_by(bytes as u64);
+}
+
+pub(crate) fn inc_rtc_udp_send_error(packet_kind: &'static str) {
+    rtc_udp_send_errors()
+        .with_label_values(&[packet_kind])
+        .inc();
 }
 
 pub(crate) fn observe_reconcile(duration_seconds: f64, added_routes: u64, removed_routes: u64) {
@@ -263,6 +297,36 @@ fn rtcp_keyframe_requests() -> &'static IntCounterVec {
             "shig_rtc_rtcp_keyframe_requests_total",
             "Total RTCP PLI/FIR keyframe requests handled by the SFU media router.",
             &["outcome"],
+        )
+    })
+}
+
+fn rtc_packet_io() -> &'static IntCounterVec {
+    RTC_PACKET_IO.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_packet_io_total",
+            "Total RTC transport packets emitted by peer connections and queued for UDP send.",
+            &["stage", "role", "packet_kind"],
+        )
+    })
+}
+
+fn rtc_packet_io_bytes() -> &'static IntCounterVec {
+    RTC_PACKET_IO_BYTES.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_packet_io_bytes_total",
+            "Total RTC transport bytes emitted by peer connections and queued for UDP send.",
+            &["stage", "role", "packet_kind"],
+        )
+    })
+}
+
+fn rtc_udp_send_errors() -> &'static IntCounterVec {
+    RTC_UDP_SEND_ERRORS.get_or_init(|| {
+        register_int_counter_vec(
+            "shig_rtc_udp_send_errors_total",
+            "Total RTC UDP send errors by packet kind.",
+            &["packet_kind"],
         )
     })
 }
