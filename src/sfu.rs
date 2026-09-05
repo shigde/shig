@@ -23,6 +23,7 @@ mod media;
 mod message;
 pub mod peer;
 mod relay;
+mod rtc;
 
 pub struct Sfu {
     config: SfuConfig,

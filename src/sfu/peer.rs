@@ -53,15 +53,15 @@ impl Actor for Peer {
 
 #[derive(Message)]
 #[rtype(result = "PeerResult<String>")]
-pub struct PeerStartReceiving {
+pub struct PeerInitPublishEndpoint {
     pub offer: String,
 }
 
-impl Handler<PeerStartReceiving> for Peer {
+impl Handler<PeerInitPublishEndpoint> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
-    fn handle(&mut self, msg: PeerStartReceiving, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("Starting (Receiver) for peer actor peer_id={}", self.id);
+    fn handle(&mut self, msg: PeerInitPublishEndpoint, ctx: &mut Self::Context) -> Self::Result {
+        log::info!("Starting (Publish) for peer actor peer_id={}", self.id);
         let id = self.id.clone();
         let addr = ctx.address();
         let lobby_addr = self.parent_addr.clone();
