@@ -18,10 +18,10 @@ use crate::api::user::{
     channel, get_active_user, lobby, search_active_users_by_name, stream_preview, whep, whip,
 };
 use actix_files as fs;
-use actix_web::web;
+use actix_web::{get, web, HttpResponse, Responder};
 
 // ignore routes
-pub const IGNORE_ROUTES: [&str; 8] = [
+pub const IGNORE_ROUTES: [&str; 9] = [
     "/api/auth/register",
     "/api/auth/verify",
     "/api/auth/login",
@@ -30,10 +30,21 @@ pub const IGNORE_ROUTES: [&str; 8] = [
     "/api/auth/pass/reset",
     "/static",
     "/api/pub/",
+    "/metrics",
 ];
 
+#[get("/metrics")]
+async fn metrics() -> impl Responder {
+    match crate::metrics::render() {
+        Ok(body) => HttpResponse::Ok()
+            .content_type("text/plain; version=0.0.4; charset=utf-8")
+            .body(body),
+        Err(error) => HttpResponse::InternalServerError().body(error.to_string()),
+    }
+}
+
 pub fn config_services(cfg: &mut web::ServiceConfig) {
-    cfg.service(
+    cfg.service(metrics).service(
         fs::Files::new("/static", "./htdocs")
             // .show_files_listing()
             .use_last_modified(true),

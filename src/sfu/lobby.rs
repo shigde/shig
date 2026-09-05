@@ -1,3 +1,4 @@
+use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
@@ -138,6 +139,7 @@ impl Handler<Publish> for Lobby {
         )
         .start();
         self.peers.insert(peer_id, peer_addr.clone());
+        metrics::set_active_lobby_peers(&self.id, self.peers.len());
 
         self.db_actor_addr.do_send(AddParticipant {
             lobby_uuid,
@@ -302,6 +304,7 @@ impl Handler<PeerStopped> for Lobby {
 
     fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) -> Self::Result {
         self.peers.remove(&msg.id);
+        metrics::set_active_lobby_peers(&self.id, self.peers.len());
         self.db_actor_addr.do_send(RemoveParticipant {
             lobby_uuid: self.id.clone(),
             stream_uuid: self.stream_uuid.clone(),

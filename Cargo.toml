@@ -55,6 +55,7 @@ anyhow = "1.0.99"
 bytes = "1.9.0"
 regex = "1.11.1"
 futures-util = "0.3.31"
+prometheus = "0.13.4"
 
 ## MoQ relay
 moq-lite = { version = "0.17.0"}

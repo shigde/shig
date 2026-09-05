@@ -1,3 +1,4 @@
+use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
@@ -103,6 +104,7 @@ impl Handler<PublishLobby> for Sfu {
                 )
                 .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
+                metrics::set_active_lobbies(self.lobbies.len());
                 self.db_actor.do_send(SetLobbyOnline {
                     lobby_uuid: lobby_uuid.clone(),
                     stream_uuid: stream_uuid.clone(),
@@ -332,6 +334,8 @@ impl Handler<LobbyStopped> for Sfu {
 
     fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
         self.lobbies.remove(&msg.id);
+        metrics::set_active_lobbies(self.lobbies.len());
+        metrics::remove_active_lobby_peers(&msg.id);
         self.db_actor.do_send(SetLobbyOffline {
             lobby_uuid: msg.id.to_string(),
         });

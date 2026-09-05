@@ -5,6 +5,7 @@ mod db;
 mod federation;
 mod files;
 mod middleware;
+mod metrics;
 mod models;
 mod relay;
 mod server;
@@ -39,6 +40,7 @@ struct Cli {
 
 fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    metrics::init();
     let cli = Cli::parse();
 
     let filename = &cli.config[..];
