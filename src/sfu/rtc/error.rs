@@ -8,4 +8,6 @@ pub(crate) enum RtcError {
     Socket(String),
     #[display(fmt = "EndpointBuild error: {}", _0)]
     EndpointBuild(String),
+    #[display(fmt = "PublishEndpoint error: {}", _0)]
+    PublishEndpoint(String),
 }
