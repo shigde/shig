@@ -7,7 +7,7 @@ use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
 use crate::sfu::media::{AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::peer::{
-    Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerHandleOfferPublishEndpoint, PeerStartSending,
+    Peer, PeerId, PeerRole, PeerSending, PeerShutdown, PeerOfferForPublishEndpoint, PeerStartSending,
 };
 use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
@@ -149,7 +149,7 @@ impl Handler<Publish> for Lobby {
 
         let offer = msg.offer.clone();
         let fut = async move {
-            let result = peer_addr.send(PeerHandleOfferPublishEndpoint { offer }).await;
+            let result = peer_addr.send(PeerOfferForPublishEndpoint { offer }).await;
 
             match result {
                 Ok(val) => match val {
