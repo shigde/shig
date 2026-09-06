@@ -11,6 +11,7 @@ use crate::sfu::peer::{
 };
 use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
+use crate::sfu::rtc::PortAllocator;
 use crate::sfu::{LobbyStopped, Sfu};
 use crate::worker::manager::WorkerManager;
 use actix::{
@@ -31,6 +32,7 @@ pub struct Lobby {
     parent_addr: Addr<Sfu>,
     db_actor_addr: Addr<DbActor>,
     relay_addr: Addr<RelayActor>,
+    port_allocator: PortAllocator,
     router: Router,
     shutting_down: bool,
     streaming: bool,
@@ -46,6 +48,7 @@ impl Lobby {
         db_actor_addr: Addr<DbActor>,
         relay_state: RelayState,
         worker_manager: Addr<WorkerManager>,
+        port_allocator: PortAllocator,
     ) -> Self {
         let relay_addr =
             RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
@@ -59,6 +62,7 @@ impl Lobby {
             parent_addr,
             db_actor_addr,
             relay_addr,
+            port_allocator,
             router: Router::new(),
             shutting_down: false,
             streaming: false,
@@ -136,6 +140,7 @@ impl Handler<Publish> for Lobby {
             ctx.address(),
             msg.role,
             self.sfu_config.clone(),
+            self.port_allocator.clone(),
         )
         .start();
         self.peers.insert(peer_id, peer_addr.clone());

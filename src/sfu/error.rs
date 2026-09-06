@@ -1,5 +1,6 @@
 use crate::sfu::media::error::MediaError;
 use crate::sfu::peer::PeerId;
+use crate::sfu::rtc::RtcError;
 use derive_more::Display;
 
 pub type SfuResult<T> = Result<T, SfuError>;
@@ -35,6 +36,8 @@ pub type PeerResult<T> = Result<T, PeerError>;
 pub enum PeerError {
     #[display(fmt = "Peer internal error: {}", _0)]
     InternalMedia(MediaError),
+    #[display(fmt = "Peer RTC error: {}", _0)]
+    InternalRtc(String),
     #[allow(dead_code)]
     PeerAlreadyStarted(),
 }
@@ -42,5 +45,11 @@ pub enum PeerError {
 impl From<MediaError> for PeerError {
     fn from(e: MediaError) -> Self {
         PeerError::InternalMedia(e)
+    }
+}
+
+impl From<RtcError> for PeerError {
+    fn from(e: RtcError) -> Self {
+        PeerError::InternalRtc(e.to_string())
     }
 }

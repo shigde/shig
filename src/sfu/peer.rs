@@ -1,38 +1,49 @@
+use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{LeavePeer, Lobby, PeerStopped};
 use crate::sfu::media::connector::{Connector, ConnectorType};
 use crate::sfu::media::control_data_channel::ControlDataChannel;
 use crate::sfu::media::data_channel::{DataChannelMsg, EventType, OnDataChannel};
 use crate::sfu::media::message::MediaMessage;
-use crate::sfu::media::receiver::Receiver;
 use crate::sfu::media::sender::Sender;
 use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
+use crate::sfu::rtc::{
+    EndpointBuilder, EndpointEvent, EndpointEventHandler, EndpointId, EndpointKind, PortAllocator,
+    PublishEndpoint,
+};
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::sfu::config::SfuConfig;
 
 pub struct Peer {
     pub id: PeerId,
     #[allow(dead_code)]
     pub role: PeerRole,
     sfu_config: SfuConfig,
+    port_allocator: PortAllocator,
     parent_addr: Addr<Lobby>,
-    receiver: Option<Arc<Mutex<Receiver>>>,
+    publish_endpoint: Option<Arc<Mutex<PublishEndpoint>>>,
     sender: Option<Arc<Mutex<Sender>>>,
     control_channel: Arc<Mutex<ControlDataChannel>>,
 }
 
 impl Peer {
-    pub fn new(id: PeerId, parent_addr: Addr<Lobby>, role: PeerRole, sfu_config: SfuConfig) -> Self {
+    pub fn new(
+        id: PeerId,
+        parent_addr: Addr<Lobby>,
+        role: PeerRole,
+        sfu_config: SfuConfig,
+        port_allocator: PortAllocator,
+    ) -> Self {
         Self {
             id: id.clone(),
             role,
             parent_addr,
             sfu_config,
-            receiver: None,
+            port_allocator,
+            publish_endpoint: None,
             sender: None,
             control_channel: Arc::new(Mutex::new(ControlDataChannel::new(id))),
         }
@@ -62,28 +73,89 @@ impl Handler<PeerOfferForPublishEndpoint> for Peer {
 
     fn handle(&mut self, msg: PeerOfferForPublishEndpoint, ctx: &mut Self::Context) -> Self::Result {
         log::info!("Init (Publish) for peer actor peer_id={}", self.id);
-        let id = self.id.clone();
-        let addr = ctx.address();
-        let lobby_addr = self.parent_addr.clone();
+        let endpoint_id = EndpointId::new(self.id.clone(), EndpointKind::Publish);
+        let handler = Arc::new(EndpointEventHandler::new(
+            endpoint_id.clone(),
+            ctx.address().recipient(),
+        ));
+        let builder = EndpointBuilder::from_sfu_config(&self.sfu_config);
+        let port_allocator = self.port_allocator.clone();
         let sdp_offer = msg.offer;
 
-        // Prepare the Future
-        let sfu_config = self.sfu_config.clone();
         Box::pin(
             async move {
-                let mut receiver = Receiver::new(id, addr, lobby_addr, sfu_config).await?;
-                let answer = receiver.connect(sdp_offer.as_str()).await?;
-                Ok((receiver, answer))
+                let endpoint = builder.build(endpoint_id, handler, &port_allocator).await?;
+                Ok::<_, PeerError>(Arc::new(Mutex::new(PublishEndpoint::new(endpoint))))
             }
             .into_actor(self)
-            .map(|res, actor, _| match res {
-                Ok((receiver, answer)) => {
-                    actor.receiver = Some(Arc::new(Mutex::new(receiver)));
-                    Ok(answer)
+            .then(|res, actor, _ctx| match res {
+                Ok(publish_endpoint) => {
+                    actor.publish_endpoint = Some(publish_endpoint.clone());
+                    async move {
+                        let publish_endpoint = publish_endpoint.lock().await;
+                        publish_endpoint.accept_offer(sdp_offer).await.map_err(Into::into)
+                    }
+                    .into_actor(actor)
                 }
-                Err(e) => Err(PeerError::InternalMedia(e)),
+                Err(err) => async move { Err(err) }.into_actor(actor),
             }),
         )
+    }
+}
+
+impl Handler<EndpointEvent> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, msg: EndpointEvent, _ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            EndpointEvent::NegotiationNeeded { endpoint_id } => {
+                log::debug!("endpoint negotiation needed, endpoint_id={}", endpoint_id);
+            }
+            EndpointEvent::IceCandidate { endpoint_id, .. } => {
+                log::debug!("endpoint ice candidate, endpoint_id={}", endpoint_id);
+            }
+            EndpointEvent::IceCandidateError { endpoint_id, event } => {
+                log::warn!(
+                    "endpoint ice candidate error, endpoint_id={}, error={:?}",
+                    endpoint_id,
+                    event
+                );
+            }
+            EndpointEvent::SignalingStateChange { endpoint_id, state } => {
+                log::debug!(
+                    "endpoint signaling state changed, endpoint_id={}, state={:?}",
+                    endpoint_id,
+                    state
+                );
+            }
+            EndpointEvent::IceConnectionStateChange { endpoint_id, state } => {
+                log::debug!(
+                    "endpoint ice connection state changed, endpoint_id={}, state={:?}",
+                    endpoint_id,
+                    state
+                );
+            }
+            EndpointEvent::IceGatheringStateChange { endpoint_id, state } => {
+                log::debug!(
+                    "endpoint ice gathering state changed, endpoint_id={}, state={:?}",
+                    endpoint_id,
+                    state
+                );
+            }
+            EndpointEvent::ConnectionStateChange { endpoint_id, state } => {
+                log::info!(
+                    "endpoint connection state changed, endpoint_id={}, state={:?}",
+                    endpoint_id,
+                    state
+                );
+            }
+            EndpointEvent::DataChannel { endpoint_id, .. } => {
+                log::debug!("endpoint data channel received, endpoint_id={}", endpoint_id);
+            }
+            EndpointEvent::Track { endpoint_id, .. } => {
+                log::debug!("endpoint track received, endpoint_id={}", endpoint_id);
+            }
+        }
     }
 }
 
@@ -344,37 +416,15 @@ impl Handler<DataChannelMsg> for Peer {
         let peer_id = self.id.clone();
         match msg {
             DataChannelMsg::OfferMsg(msg) => {
-                let Some(receiver_arc) = self.receiver.clone() else {
-                    return Box::pin(
-                        async move {
-                            log::warn!(
-                                "Peer has no receiver to handle offer for peer_id={}",
-                                peer_id
-                            );
-                        }
-                        .into_actor(self),
-                    );
-                };
-                let control_arc = self.control_channel.clone();
-                let offer_number = msg.clone().number.clone();
                 Box::pin(
                     async move {
-                        let anwser = {
-                            let mut receiver = receiver_arc.lock().await;
-                            receiver.on_signaling_offer(msg).await.ok()
-                        };
-                        anwser
+                        log::warn!(
+                            "Peer cannot handle signal offer with publish endpoint yet, peer_id={}, offer_number={}",
+                            peer_id,
+                            msg.number
+                        );
                     }
-                    .into_actor(self)
-                    .then(move |answer_opt, actor, _ctx| {
-                        async move {
-                            if let Some(answer) = answer_opt {
-                                let mut control = control_arc.lock().await;
-                                let _ = control.send_answer(answer, offer_number).await;
-                            }
-                        }
-                        .into_actor(actor)
-                    }),
+                    .into_actor(self),
                 )
             }
             DataChannelMsg::AnswerMsg(msg) => {
@@ -504,15 +554,15 @@ impl Handler<PeerShutdown> for Peer {
         let peer_id = self.id.clone();
         let parent_addr = self.parent_addr.clone();
         let sender = self.sender.clone();
-        let receiver = self.receiver.clone();
+        let publish_endpoint = self.publish_endpoint.clone();
 
         Box::pin(
             async move {
                 log::info!("cleanup peer actor, peer_id={}", peer_id);
-                if let Some(receiver_arc) = receiver {
+                if let Some(publish_endpoint_arc) = publish_endpoint {
                     {
-                        let receiver = receiver_arc.lock().await;
-                        let _ = receiver.shutdown().await;
+                        let publish_endpoint = publish_endpoint_arc.lock().await;
+                        let _ = publish_endpoint.shutdown().await;
                     }
                 }
 

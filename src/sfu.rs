@@ -7,6 +7,7 @@ use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
     LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
+use crate::sfu::rtc::PortAllocator;
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::ShutdownWorkers;
 use actix::prelude::*;
@@ -33,6 +34,7 @@ pub struct Sfu {
     db_actor: Addr<DbActor>,
     relay_state: RelayState,
     worker_manager: Addr<WorkerManager>,
+    port_allocator: PortAllocator,
 }
 
 impl Sfu {
@@ -44,6 +46,7 @@ impl Sfu {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
         let worker_manager = WorkerManager::new().start();
+        let port_allocator = PortAllocator::new(config.port_min, config.port_max);
         Sfu {
             config,
             lobbies,
@@ -51,6 +54,7 @@ impl Sfu {
             shutting_down: false,
             db_actor,
             worker_manager,
+            port_allocator,
         }
     }
 }
@@ -101,6 +105,7 @@ impl Handler<PublishLobby> for Sfu {
                     self.db_actor.clone(),
                     self.relay_state.clone(),
                     self.worker_manager.clone(),
+                    self.port_allocator.clone(),
                 )
                 .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());

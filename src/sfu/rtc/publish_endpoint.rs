@@ -1,7 +1,6 @@
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
-use crate::sfu::rtc::error::{RtcError, RtcResult};
-use std::sync::Arc;
-use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
+use crate::sfu::rtc::{RtcError, RtcResult};
+use webrtc::peer_connection::RTCSessionDescription;
 
 /// Actor-owned connection that receives media from a peer.
 pub struct PublishEndpoint {
@@ -39,6 +38,14 @@ impl PublishEndpoint {
             .await
             .map_err(|err| RtcError::PublishEndpoint(err.to_string()))?;
 
-        Ok(answer.sdp )
+        Ok(answer.sdp)
+    }
+
+    pub async fn shutdown(&self) -> RtcResult<()> {
+        self.endpoint
+            .peer_connection
+            .close()
+            .await
+            .map_err(|err| RtcError::PublishEndpoint(err.to_string()))
     }
 }
