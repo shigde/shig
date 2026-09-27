@@ -1,12 +1,16 @@
 use crate::sfu::peer::PeerId;
+use crate::sfu::rtc::endpoint_event::IceGatheringEvents;
+use crate::sfu::rtc::{RtcError, RtcResult};
 use crate::sfu::rtc::port_allocator::PortLease;
 use derive_more::Display;
 use std::sync::Arc;
-use webrtc::peer_connection::PeerConnection;
+use tokio::sync::broadcast;
+use webrtc::peer_connection::{PeerConnection, RTCIceGatheringState, RTCSessionDescription};
 
 pub struct Endpoint {
     pub id: EndpointId,
     pub peer_connection: Arc<dyn PeerConnection>,
+    ice_gathering_events: IceGatheringEvents,
     _port_lease: PortLease,
 }
 
@@ -15,12 +19,44 @@ impl Endpoint {
         id: EndpointId,
         peer_connection: Arc<dyn PeerConnection>,
         port_lease: PortLease,
+        ice_gathering_events: IceGatheringEvents,
     ) -> Self {
         Self {
             id,
             peer_connection,
+            ice_gathering_events,
             _port_lease: port_lease,
         }
+    }
+
+    /// Produces a non-trickle SDP only after its ICE candidates are complete.
+    pub async fn set_local_description_and_gather(
+        &self,
+        description: RTCSessionDescription,
+    ) -> RtcResult<RTCSessionDescription> {
+        // Subscribe before setting the description so a fast gathering completion cannot be lost.
+        let mut gathering_events = self.ice_gathering_events.subscribe();
+
+        self.peer_connection
+            .set_local_description(description)
+            .await
+            .map_err(|err| RtcError::EndpointBuild(err.to_string()))?;
+
+        loop {
+            match gathering_events.recv().await {
+                Ok(RTCIceGatheringState::Complete) => break,
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err(RtcError::EndpointBuild(
+                        "ICE gathering event stream closed".into(),
+                    ));
+                }
+            }
+        }
+
+        self.peer_connection.local_description().await.ok_or_else(|| {
+            RtcError::EndpointBuild("missing local description after ICE gathering".into())
+        })
     }
 }
 

@@ -308,6 +308,8 @@ impl Handler<Shutdown> for Sfu {
         self.shutting_down = true;
 
         let lobbies: Vec<_> = self.lobbies.values().cloned().collect();
+        let lobby_ids: Vec<_> = self.lobbies.keys().cloned().collect();
+        let db_actor = self.db_actor.clone();
         let worker = self.worker_manager.clone();
 
         Box::pin(
@@ -317,6 +319,10 @@ impl Handler<Shutdown> for Sfu {
                     .map(|lobby| lobby.send(LobbyShutdown {}));
 
                 let _ = join_all(lobby_shutdowns).await;
+
+                for lobby_uuid in lobby_ids {
+                    let _ = db_actor.send(SetLobbyOffline { lobby_uuid }).await;
+                }
 
                 let _ = worker.send(ShutdownWorkers).await;
             }

@@ -80,9 +80,6 @@ impl Lobby {
             self.streaming = false;
         }
 
-        self.parent_addr.do_send(LobbyStopped {
-            id: self.id.clone(),
-        });
         ctx.stop();
     }
 
@@ -108,6 +105,9 @@ impl Actor for Lobby {
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
         log::info!("Lobby actor lobby_id={} is stopped", self.id);
+        self.parent_addr.do_send(LobbyStopped {
+            id: self.id.clone(),
+        });
     }
 }
 
@@ -143,7 +143,7 @@ impl Handler<Publish> for Lobby {
             self.port_allocator.clone(),
         )
         .start();
-        self.peers.insert(peer_id, peer_addr.clone());
+        self.peers.insert(peer_id.clone(), peer_addr.clone());
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
 
         self.db_actor_addr.do_send(AddParticipant {
@@ -153,6 +153,7 @@ impl Handler<Publish> for Lobby {
         });
 
         let offer = msg.offer.clone();
+        let failed_peer_addr = peer_addr.clone();
         let fut = async move {
             let result = peer_addr.send(PeerCreatePublishAnswer { offer }).await;
 
@@ -166,7 +167,17 @@ impl Handler<Publish> for Lobby {
         }
         .into_actor(self);
 
-        Box::pin(fut)
+        Box::pin(fut.map(move |result, _actor, _ctx| {
+            if let Err(ref error) = result {
+                log::warn!(
+                    "publish setup failed; shutting down peer, peer_id={}, error={}",
+                    peer_id,
+                    error
+                );
+                failed_peer_addr.do_send(PeerShutdown {});
+            }
+            result
+        }))
     }
 }
 
@@ -201,6 +212,7 @@ impl Handler<Subscribe> for Lobby {
 
         let answer_option = msg.answer.clone();
         let kind = msg.kind;
+        let failed_peer_addr = peer_addr.clone();
         let medias = match kind {
             SubscribeKind::Offer => self.router.get_medias_without_peer(&peer_id),
             SubscribeKind::Answer => vec![],
@@ -231,7 +243,17 @@ impl Handler<Subscribe> for Lobby {
         }
         .into_actor(self);
 
-        Box::pin(fut)
+        Box::pin(fut.map(move |result, _actor, _ctx| {
+            if let Err(ref error) = result {
+                log::warn!(
+                    "subscribe setup failed; shutting down peer, peer_id={}, error={}",
+                    peer_id,
+                    error
+                );
+                failed_peer_addr.do_send(PeerShutdown {});
+            }
+            result
+        }))
     }
 }
 

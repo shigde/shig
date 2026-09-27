@@ -607,7 +607,7 @@ impl Handler<PeerShutdown> for Peer {
                     }
                 }
 
-                let _ = parent_addr.try_send(PeerStopped {
+                parent_addr.do_send(PeerStopped {
                     id: peer_id.clone(),
                 });
             }

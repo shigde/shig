@@ -2,6 +2,7 @@ use crate::sfu::rtc::endpoint::EndpointId;
 use actix::{Message, Recipient};
 use async_trait::async_trait;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use webrtc::data_channel::DataChannel;
 use webrtc::media_stream::track_remote::TrackRemote;
 use webrtc::peer_connection::{
@@ -53,6 +54,7 @@ pub enum EndpointEvent {
 pub struct EndpointEventHandler {
     endpoint_id: EndpointId,
     event_sink: Recipient<EndpointEvent>,
+    ice_gathering_events: IceGatheringEvents,
 }
 
 impl EndpointEventHandler {
@@ -60,7 +62,33 @@ impl EndpointEventHandler {
         Self {
             endpoint_id,
             event_sink,
+            ice_gathering_events: IceGatheringEvents::new(),
         }
+    }
+
+    pub(crate) fn ice_gathering_events(&self) -> IceGatheringEvents {
+        self.ice_gathering_events.clone()
+    }
+}
+
+/// Per-endpoint ICE gathering notifications used by non-trickle signalling.
+#[derive(Clone)]
+pub(crate) struct IceGatheringEvents {
+    sender: broadcast::Sender<RTCIceGatheringState>,
+}
+
+impl IceGatheringEvents {
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(8);
+        Self { sender }
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<RTCIceGatheringState> {
+        self.sender.subscribe()
+    }
+
+    fn publish(&self, state: RTCIceGatheringState) {
+        let _ = self.sender.send(state);
     }
 }
 
@@ -103,6 +131,7 @@ impl PeerConnectionEventHandler for EndpointEventHandler {
     }
 
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        self.ice_gathering_events.publish(state);
         self.event_sink
             .do_send(EndpointEvent::IceGatheringStateChange {
                 endpoint_id: self.endpoint_id.clone(),

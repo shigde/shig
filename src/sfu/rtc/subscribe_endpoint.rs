@@ -99,9 +99,9 @@ impl SubscribeEndpoint {
             .await
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
 
-        self.endpoint
-            .peer_connection
-            .set_local_description(offer.clone())
+        let offer = self
+            .endpoint
+            .set_local_description_and_gather(offer)
             .await
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
 

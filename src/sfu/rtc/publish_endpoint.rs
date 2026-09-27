@@ -50,9 +50,9 @@ impl PublishEndpoint {
             .await
             .map_err(|err| RtcError::PublishEndpoint(err.to_string()))?;
 
-        self.endpoint
-            .peer_connection
-            .set_local_description(answer.clone())
+        let answer = self
+            .endpoint
+            .set_local_description_and_gather(answer)
             .await
             .map_err(|err| RtcError::PublishEndpoint(err.to_string()))?;
 

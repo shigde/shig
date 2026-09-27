@@ -1,12 +1,13 @@
 use crate::sfu::config::SfuConfig;
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
+use crate::sfu::rtc::endpoint_event::EndpointEventHandler;
 use crate::sfu::rtc::error::{RtcError, RtcResult};
 use crate::sfu::rtc::port_allocator::PortAllocator;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use webrtc::peer_connection::{
-    register_default_interceptors, MediaEngine, PeerConnectionBuilder, PeerConnectionEventHandler,
-    RTCConfigurationBuilder, RTCIceCandidateType, Registry, SettingEngineBuilder,
+    register_default_interceptors, MediaEngine, PeerConnectionBuilder, RTCConfigurationBuilder,
+    RTCIceCandidateType, Registry, SettingEngineBuilder,
 };
 
 /// Builds WebRTC.rs peer connections for SFU peer endpoints.
@@ -42,7 +43,7 @@ impl EndpointBuilder {
     pub async fn build(
         &self,
         id: EndpointId,
-        handler: Arc<dyn PeerConnectionEventHandler>,
+        handler: Arc<EndpointEventHandler>,
         port_allocator: &PortAllocator,
     ) -> RtcResult<Endpoint> {
         let lease = port_allocator
@@ -78,13 +79,18 @@ impl EndpointBuilder {
             .with_media_engine(media_engine)
             .with_setting_engine(setting_engine)
             .with_interceptor_registry(registry)
-            .with_handler(handler)
+            .with_handler(handler.clone())
             .with_dedicated_reactor_pool_size(self.dedicated_reactor_pool_size)
             .with_data_channel_send_buffer_limit(self.data_channel_send_buffer_limit)
             .build()
             .await
             .map_err(|e| RtcError::EndpointBuild(e.to_string()))?;
 
-        Ok(Endpoint::new(id, Arc::new(peer_connection), lease))
+        Ok(Endpoint::new(
+            id,
+            Arc::new(peer_connection),
+            lease,
+            handler.ice_gathering_events(),
+        ))
     }
 }
