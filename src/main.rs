@@ -106,11 +106,16 @@ fn main() {
             signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
             log::info!("Shutdown signal received!");
 
-            // stop sfu
-            sfu_addr_cp
-                .send(Shutdown {})
-                .await
-                .expect("Failed shut down sfu");
+            // The SFU may already have been stopped independently.
+            match sfu_addr_cp.send(Shutdown {}).await {
+                Ok(()) => log::info!("SFU shutdown completed"),
+                Err(actix::MailboxError::Closed) => {
+                    log::info!("SFU was already stopped before process shutdown")
+                }
+                Err(error) => {
+                    log::error!("SFU shutdown request failed; continuing shutdown: {error}")
+                }
+            }
 
             // stop relay
             shutdown_token.cancel();

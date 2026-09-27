@@ -9,26 +9,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::sfu::media::track_info::TrackInfo;
 use crate::util::id::random_id;
-use webrtc::rtp::packet::Packet;
-use webrtc::rtp_transceiver::PayloadType;
-use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::TrackLocalWriter;
+use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec as RTCRtpCodecCapability, RtpCodecKind};
+use rtc::rtp_transceiver::PayloadType;
+use rtp::packet::Packet;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
+use webrtc::media_stream::track_local::TrackLocal;
 
-pub mod connector;
-pub mod control_data_channel;
-pub mod data_channel;
-mod data_channel_test;
-pub mod error;
-pub mod message;
-pub mod receiver;
 pub mod router;
 mod router_test;
-mod sdp;
-pub mod sender;
-mod track_info;
+pub(crate) mod track_info;
 
 pub(crate) type RtpSenderChannel = broadcast::Sender<Arc<Packet>>;
+pub(crate) type RtpCodecType = RtpCodecKind;
 
 /**
  * The Media object is centrally managed in the lobby.
@@ -48,7 +40,7 @@ pub struct Media {
     pub src_track_id: String,
     pub src_stream_id: String,
     pub capability: RTCRtpCodecCapability,
-    pub kind: RTPCodecType,
+    pub kind: RtpCodecType,
     pub rtp_tx: RtpSenderChannel,
     stopped: CancellationToken,
 
@@ -74,7 +66,7 @@ impl Media {
         src_track_id: String,
         src_stream_id: String,
         capability: RTCRtpCodecCapability,
-        kind: RTPCodecType,
+        kind: RtpCodecType,
         rtp_tx: broadcast::Sender<Arc<Packet>>,
         stopped: CancellationToken,
         muted: bool,
@@ -103,6 +95,10 @@ impl Media {
         self.muted = muted;
     }
 
+    pub(crate) fn muted(&self) -> bool {
+        self.muted
+    }
+
     pub(crate) async fn subscribe(&self, local_track: Arc<TrackLocalStaticRTP>) {
         let mut rtp_rx = self.rtp_tx.subscribe();
         let publisher_stopped = self.stopped.clone();
@@ -115,7 +111,7 @@ impl Media {
                     rtp = rtp_rx.recv() => {
                         match rtp {
                             Ok(rtp_packet) => {
-                                let _ = local_track.write_rtp(&rtp_packet).await;
+                                let _ = local_track.write_rtp((*rtp_packet).clone()).await;
                             },
                             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                                 log::warn!("rtp_tx.recv() skipped {} packets", skipped);
@@ -138,7 +134,7 @@ pub struct MediaId(String);
 
 impl MediaId {
     pub fn from(peer_id: PeerId) -> Self {
-        let id_string = format!("{}-{}", random_id(6), peer_id);
+        let id_string = format!("{}-{}", random_id(5), peer_id);
         log::trace!("MediaId: ({}", id_string);
         Self(id_string)
     }
@@ -204,7 +200,7 @@ impl Default for MediaPurpose {
 }
 
 impl MediaPurpose {
-    fn from_option_str(s: Option<&str>) -> MediaPurpose {
+    pub(crate) fn from_option_str(s: Option<&str>) -> MediaPurpose {
         match s {
             Some("1") => MediaPurpose::PARTICIPANT,
             Some("2") => MediaPurpose::STREAM,
@@ -212,7 +208,7 @@ impl MediaPurpose {
         }
     }
 
-    fn to_string(&self) -> String {
+    pub(crate) fn to_string(&self) -> String {
         let s = match self {
             MediaPurpose::PARTICIPANT => "1",
             MediaPurpose::STREAM => "2",

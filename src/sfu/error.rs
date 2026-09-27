@@ -1,4 +1,3 @@
-use crate::sfu::media::error::MediaError;
 use crate::sfu::peer::PeerId;
 use crate::sfu::rtc::RtcError;
 use derive_more::Display;
@@ -34,18 +33,12 @@ pub type PeerResult<T> = Result<T, PeerError>;
 
 #[derive(Debug, Display)]
 pub enum PeerError {
-    #[display(fmt = "Peer internal error: {}", _0)]
-    InternalMedia(MediaError),
     #[display(fmt = "Peer RTC error: {}", _0)]
     InternalRtc(String),
+    #[display(fmt = "Peer has no subscribe endpoint")]
+    MissingSubscribeEndpoint(),
     #[allow(dead_code)]
     PeerAlreadyStarted(),
-}
-
-impl From<MediaError> for PeerError {
-    fn from(e: MediaError) -> Self {
-        PeerError::InternalMedia(e)
-    }
 }
 
 impl From<RtcError> for PeerError {

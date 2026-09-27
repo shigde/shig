@@ -10,4 +10,6 @@ pub(crate) enum RtcError {
     EndpointBuild(String),
     #[display(fmt = "PublishEndpoint error: {}", _0)]
     PublishEndpoint(String),
+    #[display(fmt = "SubscribeEndpoint error: {}", _0)]
+    SubscribeEndpoint(String),
 }

@@ -51,6 +51,9 @@ serde_json = "^1.0.133"
 mime = "^0.3.17"
 sanitize-filename = "^0.6.0"
 webrtc = { version = "0.21.0-rc.1" }
+rtc = { version = "0.21.0-rc.1" }
+rtcp = { version = "0.21.0-rc.1", package = "rtc-rtcp" }
+rtp = { version = "0.21.0-rc.1", package = "rtc-rtp" }
 anyhow = "1.0.99"
 bytes = "1.9.0"
 regex = "1.11.1"

@@ -5,8 +5,8 @@ use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::{broadcast, watch};
 use tokio_util::sync::CancellationToken;
-use webrtc::rtp::packet::Packet;
-use webrtc::util::Marshal;
+use rtp::packet::Packet;
+use rtc::shared::marshal::Marshal;
 use crate::sfu::relay::error::{RelayError, RelayResult};
 
 #[derive(Debug, Display, PartialEq, Clone, Copy)]

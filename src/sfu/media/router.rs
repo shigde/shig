@@ -1,8 +1,7 @@
-use crate::sfu::media::{Media, MediaId, MediaPurpose};
+use crate::sfu::media::{Media, MediaId, MediaPurpose, RtpCodecType};
 use crate::sfu::peer::PeerId;
 use crate::sfu::relay::RelayMediaStream;
 use std::collections::HashMap;
-use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 
 pub struct Router {
     pub medias: HashMap<MediaId, Media>,
@@ -58,8 +57,8 @@ impl Router {
         for media in self.medias.values() {
             if media.purpose == MediaPurpose::STREAM {
                 match media.kind {
-                    RTPCodecType::Audio => stream.audio = Some(media.clone()),
-                    RTPCodecType::Video => stream.video = Some(media.clone()),
+                    RtpCodecType::Audio => stream.audio = Some(media.clone()),
+                    RtpCodecType::Video => stream.video = Some(media.clone()),
                     _ => continue,
                 }
             }

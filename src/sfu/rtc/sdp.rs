@@ -1,9 +1,8 @@
 use crate::sfu::media::track_info::{InboundTrackInfo, OutboundTrackInfo};
-use crate::sfu::media::MediaPurpose;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
+use crate::sfu::media::{MediaPurpose, RtpCodecType};
+use webrtc::peer_connection::RTCSessionDescription;
 
-pub fn parse_offered_track_info(sdp: &str) -> anyhow::Result<Vec<InboundTrackInfo>> {
+pub(crate) fn parse_offered_track_info(sdp: &str) -> anyhow::Result<Vec<InboundTrackInfo>> {
     let mut result = Vec::new();
     let mut current_track_info: Option<InboundTrackInfo> = None;
     let mut parsed_mid = false;
@@ -11,21 +10,16 @@ pub fn parse_offered_track_info(sdp: &str) -> anyhow::Result<Vec<InboundTrackInf
 
     for line in sdp.lines() {
         let line = line.trim();
-        // --- Media Section Start ---
         if line.starts_with("m=audio") {
-            current_track_info = Some(InboundTrackInfo::new(RTPCodecType::Audio));
+            current_track_info = Some(InboundTrackInfo::new(RtpCodecType::Audio));
         } else if line.starts_with("m=video") {
-            current_track_info = Some(InboundTrackInfo::new(RTPCodecType::Video));
-        }
-        // --- MID ---
-        else if line.starts_with("a=mid:") {
+            current_track_info = Some(InboundTrackInfo::new(RtpCodecType::Video));
+        } else if line.starts_with("a=mid:") {
             if let Some(track_info) = current_track_info.as_mut() {
                 track_info.mid = line.trim_start_matches("a=mid:").trim().to_string();
                 parsed_mid = true;
             }
-        }
-        // --- DESCRIPTION ---
-        else if line.starts_with("i=") {
+        } else if line.starts_with("i=") {
             if let Some(track_info) = current_track_info.as_mut() {
                 parsed_dec = true;
                 let desc = line.trim_start_matches("i=").trim();
@@ -33,7 +27,7 @@ pub fn parse_offered_track_info(sdp: &str) -> anyhow::Result<Vec<InboundTrackInf
 
                 track_info.purpose = MediaPurpose::from_option_str(parts.next());
                 track_info.muted = parse_muted(parts.next());
-                track_info.info = parts.next().map(|s| s.to_string()).unwrap_or(String::new());
+                track_info.info = parts.next().map(|s| s.to_string()).unwrap_or_default();
             }
         }
 
@@ -54,7 +48,11 @@ pub fn parse_offered_track_info(sdp: &str) -> anyhow::Result<Vec<InboundTrackInf
     Ok(result)
 }
 
-pub fn set_track_info(
+fn parse_muted(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
+}
+
+pub(crate) fn set_track_info(
     mut sdp: RTCSessionDescription,
     track_info: Vec<&OutboundTrackInfo>,
 ) -> Result<RTCSessionDescription, anyhow::Error> {
@@ -76,7 +74,7 @@ pub fn set_track_info(
         let purpose_str = track.purpose.to_string();
         let muted_str = format_muted(track.muted);
         let description = format!("{} {} {}", purpose_str, muted_str, track.info.as_str());
-        media.media_title = Some(description.clone())
+        media.media_title = Some(description)
     }
 
     log::trace!("updated session: {session:#?}");
@@ -84,13 +82,7 @@ pub fn set_track_info(
     Ok(sdp)
 }
 
-pub fn parse_muted(value: Option<&str>) -> bool {
-    // Some("1") => true,
-    // Some("2") => false,
-    matches!(value, Some("1"))
-}
-
-pub fn format_muted(muted: bool) -> &'static str {
+fn format_muted(muted: bool) -> &'static str {
     if muted {
         "1"
     } else {

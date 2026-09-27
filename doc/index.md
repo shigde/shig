@@ -7,6 +7,7 @@
 ### Architecture
 - [MoQ Relay Architecture](architecture/relay.md)
 - [SFU Signaling](architecture/sfu/signaling.md)
+- [SFU Signaling Metadata](architecture/sfu/signaling-metadata.md)
 - [SFU RTC Event Synchronization](architecture/sfu/rtc-sync.md)
 
 ### Admin
