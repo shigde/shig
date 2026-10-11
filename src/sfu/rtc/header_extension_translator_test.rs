@@ -2,8 +2,9 @@ use super::header_extension_translator::RtpHeaderExtensionTranslator;
 use bytes::Bytes;
 use rtc::rtp_transceiver::rtp_sender::RTCRtpHeaderExtensionParameters;
 use rtc_sdp::extmap::{SDES_MID_URI, TRANSPORT_CC_URI};
-use rtp::header::Extension;
+use rtp::header::{EXTENSION_PROFILE_ONE_BYTE, Extension};
 use rtp::packet::Packet;
+use rtc::shared::marshal::Marshal;
 use std::collections::HashMap;
 
 #[test]
@@ -32,6 +33,9 @@ fn rewrites_extensions_for_the_subscriber_leg() {
     );
     let mut packet = Packet::default();
     packet.header.extension = true;
+    packet.header.extension_profile = EXTENSION_PROFILE_ONE_BYTE;
+    // The publisher packet had a three-byte extension padding before TWCC was removed.
+    packet.header.extensions_padding = 3;
     packet.header.extensions = vec![
         Extension {
             id: 1,
@@ -54,4 +58,6 @@ fn rewrites_extensions_for_the_subscriber_leg() {
     assert_eq!(packet.header.extensions[0].payload, "subscriber-mid");
     assert_eq!(packet.header.extensions[1].id, 2);
     assert_eq!(packet.header.extensions[1].payload, "audio-level");
+    assert_eq!(packet.header.extensions_padding, 1);
+    assert!(packet.marshal().is_ok());
 }

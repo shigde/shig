@@ -81,14 +81,19 @@ impl RtpHeaderExtensionTranslator {
             packet.header.extension = false;
             packet.header.extension_profile = 0;
             packet.header.extensions_padding = 0;
-        } else if packet.header.extension_profile == EXTENSION_PROFILE_ONE_BYTE
-            && packet
-                .header
-                .extensions
-                .iter()
-                .any(|extension| extension.id > 14 || extension.payload.len() > 16)
-        {
-            packet.header.extension_profile = EXTENSION_PROFILE_TWO_BYTE;
+        } else {
+            if packet.header.extension_profile == EXTENSION_PROFILE_ONE_BYTE
+                && packet
+                    .header
+                    .extensions
+                    .iter()
+                    .any(|extension| extension.id > 14 || extension.payload.len() > 16)
+            {
+                packet.header.extension_profile = EXTENSION_PROFILE_TWO_BYTE;
+            }
+
+            let extension_len = packet.header.get_extension_payload_len();
+            packet.header.extensions_padding = (4 - extension_len % 4) % 4;
         }
     }
 }
