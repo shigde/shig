@@ -1,4 +1,4 @@
-use crate::sfu::media::{Media, MediaId, MediaPurpose, RtpCodecType};
+use crate::sfu::media::{ForwardTarget, Media, MediaId, MediaPurpose, RtpCodecType};
 use crate::sfu::peer::PeerId;
 use crate::sfu::relay::RelayMediaStream;
 use std::collections::HashMap;
@@ -64,5 +64,20 @@ impl Router {
             }
         }
         stream
+    }
+
+    pub(crate) fn activate_target(
+        &self,
+        media_id: &MediaId,
+        target: ForwardTarget,
+    ) -> Option<Media> {
+        let media = self.medias.get(media_id)?;
+        media.add_target(target).then(|| media.clone())
+    }
+
+    pub(crate) fn remove_targets_for_peer(&self, peer_id: &PeerId) {
+        for media in self.medias.values() {
+            media.remove_targets_for_peer(peer_id);
+        }
     }
 }

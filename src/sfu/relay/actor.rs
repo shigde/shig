@@ -4,6 +4,7 @@ use crate::sfu::relay::error::{RelayError, RelayResult};
 use crate::sfu::relay::message::{RelayFailed, StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::relay::port_allocator::PortAllocator;
 use crate::sfu::relay::rtp_forwarder::{forward_rtp_sender_to_udp, RtpForwarderKind};
+use crate::sfu::relay::publisher::HangPublisher;
 use crate::worker::manager::WorkerManager;
 use crate::worker::message::StartWorker;
 use crate::worker::process::{Process, FMP4_PACKAGE_QUEUE_SIZE};
@@ -13,7 +14,6 @@ use actix::{
 use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use crate::sfu::relay::publisher::HangPublisher;
 
 pub struct RelayActor {
     stream_uuid: String,
@@ -176,7 +176,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                 let ffmpeg_ready_audio_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
                     if let Err(err) = forward_rtp_sender_to_udp(
-                        audio_track.rtp_tx.subscribe(),
+                        audio_track.relay_rtp_tx.subscribe(),
                         audio_addr,
                         cancel_audio.clone(),
                         ffmpeg_ready_audio_rx,
@@ -198,7 +198,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                 let ffmpeg_ready_video_rx = ffmpeg_ready_rx.clone();
                 tokio::spawn(async move {
                     if let Err(err) = forward_rtp_sender_to_udp(
-                        video_track.rtp_tx.subscribe(),
+                        video_track.relay_rtp_tx.subscribe(),
                         video_addr,
                         cancel_video.clone(),
                         ffmpeg_ready_video_rx,

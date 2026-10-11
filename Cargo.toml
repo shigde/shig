@@ -26,6 +26,7 @@ actix-files = { version = "^0.6.6" }
 actix-rt = "2.11.0"
 actix-service = { version = "^2.0.2" }
 async-trait = "0.1"
+arc-swap = "1.9.2"
 enclose = "1.2"
 jsonwebtoken = "^9.3.0"
 lettre = { version = "0.11.11", features = ["tokio1", "tokio1-native-tls"] }

@@ -3,12 +3,12 @@ use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
 use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::rtc::{
-    EndpointBuilder, EndpointEvent, EndpointEventHandler, EndpointId, EndpointKind, PortAllocator,
-    PublishEndpoint, SubscribeEndpoint,
     control_data_channel::ControlDataChannel,
     data_channel::{
-        DataChannelMsg, DataChannelReader, EventType, OnDataChannel, start_data_channel_reader,
+        start_data_channel_reader, DataChannelMsg, DataChannelReader, EventType, OnDataChannel,
     },
+    EndpointBuilder, EndpointEvent, EndpointEventHandler, EndpointId, EndpointKind, PortAllocator,
+    PublishEndpoint, SubscribeEndpoint,
 };
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
@@ -288,6 +288,7 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
         let subscribe_endpoint = self.subscribe_endpoint.clone();
 
         let peer_id = self.id.clone();
+        let parent_addr = self.parent_addr.clone();
         Box::pin(
             async move {
                 let Some(subscribe_endpoint) = subscribe_endpoint else {
@@ -298,14 +299,22 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
                     return Err(PeerError::MissingSubscribeEndpoint());
                 };
 
-                if let Err(err) = {
+                match {
                     let mut subscribe_endpoint = subscribe_endpoint.lock().await;
-                    subscribe_endpoint.accept_answer(sdp_answer).await
+                    subscribe_endpoint
+                        .accept_answer(peer_id.clone(), sdp_answer)
+                        .await
                 } {
-                    log::error!("set_answer failed peer_id={}: {:?}", peer_id, err);
-                    Err(err.into())
-                } else {
-                    Ok("".to_string())
+                    Ok(activations) => {
+                        for activation in activations {
+                            parent_addr.do_send(activation);
+                        }
+                        Ok("".to_string())
+                    }
+                    Err(err) => {
+                        log::error!("set_answer failed peer_id={}: {:?}", peer_id, err);
+                        Err(err.into())
+                    }
                 }
             }
             .into_actor(self),
@@ -492,6 +501,7 @@ impl Handler<DataChannelMsg> for Peer {
                 };
 
                 let control_arc = self.control_channel.clone();
+                let parent_addr = self.parent_addr.clone();
                 Box::pin(
                     async move {
                         let is_answer_stale = {
@@ -504,15 +514,22 @@ impl Handler<DataChannelMsg> for Peer {
                             return;
                         }
 
-                        if let Err(e) = {
+                        match {
                             let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
                             subscribe_endpoint.set_signal_answer(msg).await
                         } {
-                            log::error!(
-                                "Failed to set signaling answer for peer_id={}: {}",
-                                peer_id,
-                                e
-                            );
+                            Ok(activations) => {
+                                for activation in activations {
+                                    parent_addr.do_send(activation);
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "Failed to set signaling answer for peer_id={}: {}",
+                                    peer_id,
+                                    e
+                                );
+                            }
                         }
                     }
                     .into_actor(self),

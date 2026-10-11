@@ -1,10 +1,15 @@
 #[cfg(test)]
 mod tests {
     use crate::sfu::media::router::Router;
-    use crate::sfu::media::{Media, MediaId};
+    use crate::sfu::media::{ForwardTarget, Media, MediaId};
     use crate::sfu::peer::PeerId;
+    use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
+    use rtc::media_stream::MediaStreamTrack;
+    use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use tokio::sync::broadcast;
+    use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
     // --- Helper -------------------------------------------------------------
 
     fn peer(id: &str) -> PeerId {
@@ -12,7 +17,7 @@ mod tests {
     }
 
     fn media(id: &str, peer_id: &PeerId, mid: &str) -> Media {
-        let (rtp_tx, _dummy_rx) = broadcast::channel(1);
+        let (relay_rtp_tx, _relay_rtp_rx) = broadcast::channel(1);
         Media {
             id: MediaId(id.to_string()),
             peer_id: peer_id.clone(),
@@ -23,8 +28,9 @@ mod tests {
             capability: Default::default(),
             kind: Default::default(),
             ssrc: Default::default(),
-            rtp_tx,
-            stopped: Default::default(),
+            source_track: None,
+            targets: Default::default(),
+            relay_rtp_tx,
             purpose: Default::default(),
             muted: false,
             info: "info".into(),
@@ -43,6 +49,21 @@ mod tests {
         medias.insert(MediaId("m3".into()), media("m3", &peer_b, "video-0"));
 
         Router { medias }
+    }
+
+    fn target(peer_id: PeerId) -> ForwardTarget {
+        let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+            "stream".into(),
+            "track".into(),
+            "test".into(),
+            RtpCodecKind::Video,
+            vec![],
+        )));
+        ForwardTarget::new(
+            peer_id,
+            track,
+            RtpHeaderExtensionTranslator::new(&HashMap::new(), &[], "0".into()),
+        )
     }
 
     // --- Tests --------------------------------------------------------------
@@ -123,5 +144,23 @@ mod tests {
 
         // peer-b still present
         assert_eq!(router.medias.len(), 1);
+    }
+
+    #[test]
+    fn test_activate_and_remove_target() {
+        let router = router_with_medias();
+        let media_id = MediaId("m1".into());
+        let peer_b = peer("peer-b");
+
+        assert!(router
+            .activate_target(&media_id, target(peer_b.clone()))
+            .is_some());
+        assert!(router
+            .activate_target(&media_id, target(peer_b.clone()))
+            .is_none());
+
+        router.remove_targets_for_peer(&peer_b);
+
+        assert!(router.activate_target(&media_id, target(peer_b)).is_some());
     }
 }

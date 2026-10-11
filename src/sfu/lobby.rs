@@ -5,9 +5,12 @@ use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
-use crate::sfu::media::{AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia};
+use crate::sfu::media::{
+    ActivateMedia, AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia,
+};
 use crate::sfu::peer::{
-    Peer, PeerId, PeerRole, PeerReceiveSubscribeAnswer, PeerShutdown, PeerCreatePublishAnswer, PeerCreateSubscribeOffer,
+    Peer, PeerCreatePublishAnswer, PeerCreateSubscribeOffer, PeerId, PeerReceiveSubscribeAnswer,
+    PeerRole, PeerShutdown,
 };
 use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
@@ -331,6 +334,7 @@ impl Handler<PeerStopped> for Lobby {
 
     fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) -> Self::Result {
         self.peers.remove(&msg.id);
+        self.router.remove_targets_for_peer(&msg.id);
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
         self.db_actor_addr.do_send(RemoveParticipant {
             lobby_uuid: self.id.clone(),
@@ -341,6 +345,23 @@ impl Handler<PeerStopped> for Lobby {
         if self.peers.is_empty() {
             self.stop(ctx);
         }
+    }
+}
+
+impl Handler<ActivateMedia> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, msg: ActivateMedia, _ctx: &mut Self::Context) -> Self::Result {
+        let media_id = msg.media_id;
+        let Some(media) = self.router.activate_target(&media_id, msg.target) else {
+            log::debug!("cannot activate missing media route, media_id={}", media_id);
+            return;
+        };
+
+        log::debug!("activated media route, media_id={}", media_id);
+        actix::spawn(async move {
+            media.request_keyframe_after_route_activation().await;
+        });
     }
 }
 

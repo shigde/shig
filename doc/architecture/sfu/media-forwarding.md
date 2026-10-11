@@ -75,35 +75,35 @@ subscriber MID -> SDP metadata -> forwarded MediaId -> publishing peer ID
 
 The SDK should treat MIDs as strings. SDP permits arbitrary MID tokens even though the current SFU happens to produce numeric MIDs.
 
-## Current Forwarding Path
+## Forwarding Path
 
-The current implementation distributes each inbound packet through a Tokio broadcast channel. Every subscriber has a receiver task which passes the packet to its local WebRTC sender.
-
-```text
-publisher RTP
--> Media broadcast channel
--> subscriber receiver task
--> TrackLocalStaticRTP.write_rtp
--> subscriber PeerConnection driver
--> SRTP and UDP
-```
-
-The RTP payload is stored in `bytes::Bytes`, so cloning an `rtp::Packet` shares the payload buffer. Its header and extension vector are still cloned for every subscriber.
-
-## Target Direction
-
-The intended SFU hot path replaces the generic broadcast channel with prepared direct targets. Reconciliation updates the target list when media or subscriptions change; packet forwarding only reads that prepared list.
+The router owns the active targets for every publisher `Media`. A target is created while the subscriber endpoint builds its SDP offer, but it becomes active only after the subscriber answer has been accepted. Local sender binding then completes asynchronously on the peer-connection driver.
 
 ```text
-MediaId -> prepared forward targets
+MediaId -> Media -> prepared active targets
 
 publisher RTP
--> direct fan-out to target queues or a shared core worker
+-> load prepared target list
+-> direct fan-out to TrackLocalStaticRTP
 -> subscriber PeerConnection sender
 -> SRTP and UDP
 ```
 
-This removes the broadcast receiver task and its extra wakeup from the forwarding path. It does not change the routing identity: tracks continue to be routed by `MediaId`.
+Reconciliation replaces the prepared target list when a subscription is activated or removed. The publisher RTP reader only loads that list and forwards to its entries. It does not use a broadcast channel, a subscriber receiver task, or a data channel. Tracks continue to be routed by `MediaId`.
+
+### Route Activation And Keyframes
+
+After the subscriber answer, the peer reports the prepared target to the lobby router. The router adds it to the source `Media` and sends a bounded PLI backoff on the publisher track for video. The first PLI is immediate; two short retries cover the asynchronous local-track bind. This gives a newly connected subscriber a decodable keyframe instead of waiting for the publisher's next periodic keyframe.
+
+```text
+subscriber answer accepted
+-> target becomes active in MediaId route
+-> router sends bounded PLI backoff to source publisher track
+-> publisher emits keyframe
+-> active targets receive RTP
+```
+
+Subscriber PLI and FIR feedback belongs to the same `MediaId` route: once feedback delivery from the subscriber WebRTC leg is enabled, the router relays those keyframe requests to the source publisher track. Ordinary RTCP reports stay on their own WebRTC leg and are not cross-routed.
 
 ## Unavoidable Per-Target Work
 
@@ -113,6 +113,6 @@ The goal is not to remove this required work. The goal is to avoid unnecessary p
 
 ## Zero-Copy Rule
 
-The SFU must preserve shared RTP payload storage during fan-out. A future forwarding interface should pass packet references or shared packet storage to prepared targets. It must not copy encoded media payload bytes merely to route a packet.
+The SFU must preserve shared RTP payload storage during fan-out. The target-specific RTP header and extensions are cloned and translated, but encoded media payload bytes must not be copied merely to route a packet.
 
 The current public WebRTC.rs async track API consumes an owned `rtp::Packet` through `TrackLocalStaticRTP::write_rtp`. Any deeper removal of packet-header clones therefore requires either a reference-based API at that boundary or a lower-level RTC-core integration. This is a future optimization, not a reason to change routing semantics today.

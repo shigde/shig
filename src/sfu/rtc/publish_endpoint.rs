@@ -9,7 +9,6 @@ use actix::Addr;
 use rtc::rtp_transceiver::rtp_sender::RTCRtpCodec;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::peer_connection::RTCSessionDescription;
 
@@ -69,11 +68,6 @@ impl PublishEndpoint {
         let track_id = track.track_id().await;
         let stream_id = track.stream_id().await;
         let track_info = self.take_track_info(kind, &track_id, &stream_id);
-        let stop = CancellationToken::new();
-        let (rtp_tx, _dummy_rx) = broadcast::channel(8192);
-        let media_id = Arc::new(tokio::sync::Mutex::new(None));
-        let media_id_for_reader = media_id.clone();
-
         log::info!(
             "receive publish track, peer_id={}, endpoint_id={}, kind={:?}, track_id={}, stream_id={}, mid={}",
             peer_id,
@@ -85,16 +79,17 @@ impl PublishEndpoint {
         );
 
         tokio::spawn(async move {
+            let mut media = None;
+            let (relay_rtp_tx, _relay_rtp_rx) = broadcast::channel(8192);
             while let Some(event) = track.poll().await {
                 match event {
                     TrackRemoteEvent::OnRtpPacket(packet) => {
-                        let mut media_id_guard = media_id_for_reader.lock().await;
-                        if media_id_guard.is_none() {
+                        if media.is_none() {
                             let codec = track
                                 .codec(packet.header.ssrc)
                                 .await
                                 .unwrap_or_else(RTCRtpCodec::default);
-                            let media = Media::new(
+                            let source_media = Media::new(
                                 peer_id.clone(),
                                 track_info.mid.clone(),
                                 track_id.clone(),
@@ -103,26 +98,30 @@ impl PublishEndpoint {
                                 codec,
                                 kind,
                                 packet.header.ssrc,
-                                rtp_tx.clone(),
-                                stop.clone(),
+                                Some(Arc::clone(&track)),
+                                relay_rtp_tx.clone(),
                                 track_info.muted,
                                 track_info.purpose.clone(),
                                 track_info.info.clone(),
                                 packet.header.payload_type,
                             );
-                            *media_id_guard = Some(media.id.clone());
-                            lobby_addr.do_send(AddMedia { media });
+                            lobby_addr.do_send(AddMedia {
+                                media: source_media.clone(),
+                            });
+                            media = Some(source_media);
                         }
-                        drop(media_id_guard);
 
-                        let _ = rtp_tx.send(Arc::new(packet));
+                        if let Some(media) = &media {
+                            let _ = media.relay_rtp_tx.send(Arc::new(packet.clone()));
+                            media.forward_rtp(packet).await;
+                        }
                     }
                     TrackRemoteEvent::OnEnded | TrackRemoteEvent::OnError => {
-                        let media_id = media_id_for_reader.lock().await.clone();
-                        if let Some(media_id) = media_id {
-                            lobby_addr.do_send(RemoveMedia { media_id });
+                        if let Some(media) = &media {
+                            lobby_addr.do_send(RemoveMedia {
+                                media_id: media.id.clone(),
+                            });
                         }
-                        stop.cancel();
                         break;
                     }
                     _ => {}
