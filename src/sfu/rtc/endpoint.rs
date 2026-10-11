@@ -107,4 +107,11 @@ impl EndpointKind {
     pub fn as_string(&self) -> String {
         self.to_string()
     }
+
+    pub(crate) fn channel_label(&self) -> &str {
+        match self {
+            EndpointKind::Publish => "whip",
+            EndpointKind::Subscribe => "whep",
+        }
+    }
 }

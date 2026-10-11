@@ -1,5 +1,5 @@
 use crate::sfu::peer::Peer;
-use crate::sfu::rtc::{EndpointId, EndpointKind};
+use crate::sfu::rtc::EndpointId;
 use actix::{Addr, Message};
 use bytes::{Bytes, BytesMut};
 use derive_more::Display;
@@ -194,15 +194,6 @@ pub struct OnDataChannel {
     pub event: EventType,
     pub endpoint_id: EndpointId,
     pub dc: Arc<dyn WebRtcDataChannel>,
-}
-
-impl EndpointKind {
-    pub(crate) fn channel_label(&self) -> &str {
-        match self {
-            EndpointKind::Publish => "whip",
-            EndpointKind::Subscribe => "whep",
-        }
-    }
 }
 
 pub(crate) fn bytes_to_send_buffer(bytes: Bytes) -> BytesMut {

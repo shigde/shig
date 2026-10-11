@@ -329,7 +329,7 @@ impl Handler<AddMedia> for Peer {
                 }
 
                 let offer = {
-                    let subscribe_endpoint = subscribe_endpoint_arc.lock().await;
+                    let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
                     subscribe_endpoint.create_offer().await.ok()
                 };
                 offer
@@ -382,7 +382,7 @@ impl Handler<RemoveMedia> for Peer {
                     return None;
                 }
                 let offer = {
-                    let subscribe_endpoint = subscribe_endpoint_arc.lock().await;
+                    let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
                     subscribe_endpoint.create_offer().await.ok()
                 };
                 offer

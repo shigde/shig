@@ -6,6 +6,7 @@ use crate::sfu::rtc::sdp::set_track_info;
 use crate::sfu::rtc::{RtcError, RtcResult};
 use std::collections::HashMap;
 use std::sync::Arc;
+use webrtc::data_channel::DataChannel;
 use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::MediaStreamTrack;
@@ -18,6 +19,7 @@ use webrtc::rtp_transceiver::{
 pub struct SubscribeEndpoint {
     endpoint: Endpoint,
     sending_media: HashMap<MediaId, OutboundTrackInfo>,
+    data_channel: Option<Arc<dyn DataChannel>>,
 }
 
 impl SubscribeEndpoint {
@@ -25,6 +27,7 @@ impl SubscribeEndpoint {
         Self {
             endpoint,
             sending_media: HashMap::new(),
+            data_channel: None,
         }
     }
 
@@ -91,7 +94,9 @@ impl SubscribeEndpoint {
         Ok(())
     }
 
-    pub async fn create_offer(&self) -> RtcResult<String> {
+    pub async fn create_offer(&mut self) -> RtcResult<String> {
+        self.ensure_data_channel().await?;
+
         let offer = self
             .endpoint
             .peer_connection
@@ -110,6 +115,25 @@ impl SubscribeEndpoint {
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
 
         Ok(offer.sdp)
+    }
+
+    /// The subscribe endpoint is the WHEP offerer, so it creates the control channel.
+    /// This guarantees an application M-line even before any media is available.
+    async fn ensure_data_channel(&mut self) -> RtcResult<()> {
+        if self.data_channel.is_some() {
+            return Ok(());
+        }
+
+        let channel = self
+            .endpoint
+            .peer_connection
+            .create_data_channel(self.endpoint.id.as_kind().channel_label(), None)
+            .await
+            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+
+        log::info!("created subscribe data channel, endpoint_id={}", self.endpoint.id);
+        self.data_channel = Some(channel);
+        Ok(())
     }
 
     pub async fn accept_answer(&self, sdp: String) -> RtcResult<()> {
