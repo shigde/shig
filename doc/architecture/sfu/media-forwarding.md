@@ -61,11 +61,11 @@ classDiagram
     LobbyRouter --> SubscriberSdpMediaLine : subscribes media
 ```
 
-### Planned Metadata Correction
+### Track Metadata Matching
 
-The current publish endpoint matches an incoming `TrackRemote` to `InboundTrackInfo` only by media kind (`audio` or `video`). That is insufficient when one publisher offers multiple video tracks or multiple audio tracks: arrival order is not an identity.
+`InboundTrackInfo` retains the SDP `a=msid` stream and track IDs. When `TrackRemote` opens, the publish endpoint matches `TrackRemote.track_id()` to the parsed source track ID, with the source stream ID as an additional validation. This makes `purpose`, `muted`, `info`, and the publisher MID attach to the correct track regardless of arrival order.
 
-Before supporting those cases, the SDP parser must retain the `a=msid` stream and track IDs in `InboundTrackInfo`. When `TrackRemote` opens, the publish endpoint must match `TrackRemote.track_id()` to the parsed source track ID, with the source stream ID available as an additional validation. This makes `purpose`, `muted`, `info`, and the publisher MID attach to the correct track regardless of arrival order.
+For an offer without `a=msid`, the publish endpoint uses a media-kind fallback only if exactly one offered track of that kind remains. It refuses to guess when multiple same-kind tracks exist.
 
 The client-side mapping remains unchanged:
 

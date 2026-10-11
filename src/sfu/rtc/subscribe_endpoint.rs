@@ -4,22 +4,27 @@ use crate::sfu::rtc::data_channel::SdpMsgData;
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
 use crate::sfu::rtc::sdp::set_track_info;
 use crate::sfu::rtc::{RtcError, RtcResult};
+use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
 use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodingParameters, RTCRtpEncodingParameters};
 use std::collections::HashMap;
 use std::sync::Arc;
 use webrtc::data_channel::DataChannel;
-use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
-use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::MediaStreamTrack;
+use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::peer_connection::RTCSessionDescription;
-use webrtc::rtp_transceiver::{
-    RTCRtpTransceiverDirection, RTCRtpTransceiverInit,
-};
+use webrtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
+
+struct PendingSubscription {
+    media: Media,
+    track: Arc<TrackLocalStaticRTP>,
+}
 
 /// Actor-owned connection that sends subscribed media to a peer.
 pub struct SubscribeEndpoint {
     endpoint: Endpoint,
     sending_media: HashMap<MediaId, OutboundTrackInfo>,
+    pending_subscriptions: HashMap<MediaId, PendingSubscription>,
     data_channel: Option<Arc<dyn DataChannel>>,
 }
 
@@ -28,6 +33,7 @@ impl SubscribeEndpoint {
         Self {
             endpoint,
             sending_media: HashMap::new(),
+            pending_subscriptions: HashMap::new(),
             data_channel: None,
         }
     }
@@ -80,7 +86,8 @@ impl SubscribeEndpoint {
             ),
         );
 
-        media.subscribe(track).await;
+        self.pending_subscriptions
+            .insert(media.id.clone(), PendingSubscription { media, track });
         Ok(())
     }
 
@@ -97,6 +104,7 @@ impl SubscribeEndpoint {
                     .await
                     .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
                 self.sending_media.remove(&media_id);
+                self.pending_subscriptions.remove(&media_id);
                 return Ok(());
             }
         }
@@ -141,12 +149,15 @@ impl SubscribeEndpoint {
             .await
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
 
-        log::info!("created subscribe data channel, endpoint_id={}", self.endpoint.id);
+        log::info!(
+            "created subscribe data channel, endpoint_id={}",
+            self.endpoint.id
+        );
         self.data_channel = Some(channel);
         Ok(())
     }
 
-    pub async fn accept_answer(&self, sdp: String) -> RtcResult<()> {
+    pub async fn accept_answer(&mut self, sdp: String) -> RtcResult<()> {
         let answer = RTCSessionDescription::answer(sdp)
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
 
@@ -154,10 +165,60 @@ impl SubscribeEndpoint {
             .peer_connection
             .set_remote_description(answer)
             .await
-            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))
+            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+
+        let pending_subscriptions = std::mem::take(&mut self.pending_subscriptions);
+        for (media_id, pending) in pending_subscriptions {
+            if let Err(err) = self.start_subscription(&media_id, &pending).await {
+                self.pending_subscriptions.insert(media_id, pending);
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 
-    pub async fn set_signal_answer(&self, msg: SdpMsgData) -> RtcResult<()> {
+    async fn start_subscription(
+        &self,
+        media_id: &MediaId,
+        pending: &PendingSubscription,
+    ) -> RtcResult<()> {
+        let outbound = self.sending_media.get(media_id).ok_or_else(|| {
+            RtcError::SubscribeEndpoint(format!("missing outbound media {media_id}"))
+        })?;
+        let target_mid = outbound
+            .transceiver
+            .mid()
+            .await
+            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?
+            .ok_or_else(|| {
+                RtcError::SubscribeEndpoint(format!("missing negotiated MID for {media_id}"))
+            })?;
+        let sender = outbound
+            .transceiver
+            .sender()
+            .await
+            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?
+            .ok_or_else(|| {
+                RtcError::SubscribeEndpoint(format!("missing RTP sender for {media_id}"))
+            })?;
+        let parameters = sender
+            .get_parameters()
+            .await
+            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+        let header_extensions = RtpHeaderExtensionTranslator::new(
+            &pending.media.header_extensions,
+            &parameters.rtp_parameters.header_extensions,
+            target_mid,
+        );
+
+        pending
+            .media
+            .subscribe(Arc::clone(&pending.track), header_extensions)
+            .await;
+        Ok(())
+    }
+
+    pub async fn set_signal_answer(&mut self, msg: SdpMsgData) -> RtcResult<()> {
         self.accept_answer(msg.sdp).await
     }
 

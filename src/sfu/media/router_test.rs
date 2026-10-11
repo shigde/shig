@@ -19,6 +19,7 @@ mod tests {
             mid: mid.to_string(),
             src_track_id: "track".into(),
             src_stream_id: "stream".into(),
+            header_extensions: HashMap::new(),
             capability: Default::default(),
             kind: Default::default(),
             ssrc: Default::default(),

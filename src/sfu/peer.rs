@@ -3,10 +3,12 @@ use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
 use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
 use crate::sfu::rtc::{
-    control_data_channel::ControlDataChannel,
-    data_channel::{start_data_channel_reader, DataChannelMsg, DataChannelReader, EventType, OnDataChannel},
     EndpointBuilder, EndpointEvent, EndpointEventHandler, EndpointId, EndpointKind, PortAllocator,
     PublishEndpoint, SubscribeEndpoint,
+    control_data_channel::ControlDataChannel,
+    data_channel::{
+        DataChannelMsg, DataChannelReader, EventType, OnDataChannel, start_data_channel_reader,
+    },
 };
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
@@ -168,7 +170,10 @@ impl Handler<EndpointEvent> for Peer {
                 endpoint_id,
                 data_channel,
             } => {
-                log::debug!("endpoint data channel received, endpoint_id={}", endpoint_id);
+                log::debug!(
+                    "endpoint data channel received, endpoint_id={}",
+                    endpoint_id
+                );
                 let reader = start_data_channel_reader(data_channel, ctx.address(), endpoint_id);
                 self.replace_data_channel_reader(reader);
             }
@@ -212,7 +217,10 @@ impl Handler<PeerCreateSubscribeOffer> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerCreateSubscribeOffer, ctx: &mut Self::Context) -> Self::Result {
-        log::info!("setup subscribe endpoint for peer actor peer_id={}", self.id);
+        log::info!(
+            "setup subscribe endpoint for peer actor peer_id={}",
+            self.id
+        );
         let endpoint_id = EndpointId::new(self.id.clone(), EndpointKind::Subscribe);
         let handler = Arc::new(EndpointEventHandler::new(
             endpoint_id.clone(),
@@ -266,8 +274,15 @@ pub struct PeerReceiveSubscribeAnswer {
 impl Handler<PeerReceiveSubscribeAnswer> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
-    fn handle(&mut self, msg: PeerReceiveSubscribeAnswer, _ctx: &mut Self::Context) -> Self::Result {
-        log::info!("set subscribe endpoint answer for peer actor peer_id={}", self.id);
+    fn handle(
+        &mut self,
+        msg: PeerReceiveSubscribeAnswer,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        log::info!(
+            "set subscribe endpoint answer for peer actor peer_id={}",
+            self.id
+        );
 
         let sdp_answer = msg.answer;
         let subscribe_endpoint = self.subscribe_endpoint.clone();
@@ -276,12 +291,15 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
         Box::pin(
             async move {
                 let Some(subscribe_endpoint) = subscribe_endpoint else {
-                    log::warn!("Peer has no subscribe endpoint for answer, peer_id={}", peer_id);
+                    log::warn!(
+                        "Peer has no subscribe endpoint for answer, peer_id={}",
+                        peer_id
+                    );
                     return Err(PeerError::MissingSubscribeEndpoint());
                 };
 
                 if let Err(err) = {
-                    let subscribe_endpoint = subscribe_endpoint.lock().await;
+                    let mut subscribe_endpoint = subscribe_endpoint.lock().await;
                     subscribe_endpoint.accept_answer(sdp_answer).await
                 } {
                     log::error!("set_answer failed peer_id={}: {:?}", peer_id, err);
@@ -487,7 +505,7 @@ impl Handler<DataChannelMsg> for Peer {
                         }
 
                         if let Err(e) = {
-                            let subscribe_endpoint = subscribe_endpoint_arc.lock().await;
+                            let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
                             subscribe_endpoint.set_signal_answer(msg).await
                         } {
                             log::error!(
@@ -545,7 +563,9 @@ impl Handler<MuteRemoteMedia> for Peer {
             async move {
                 let mid_option = {
                     let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
-                    subscribe_endpoint.get_mid_and_mute(media_id.clone(), mute).await
+                    subscribe_endpoint
+                        .get_mid_and_mute(media_id.clone(), mute)
+                        .await
                 };
 
                 let Some(mid) = mid_option else {

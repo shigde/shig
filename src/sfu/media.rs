@@ -3,17 +3,19 @@ use actix::Message;
 use derive_more::Display;
 use enclose::enc;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::sfu::media::track_info::TrackInfo;
+use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
 use crate::util::id::random_id;
 use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec as RTCRtpCodecCapability, RtpCodecKind};
 use rtc::rtp_transceiver::{PayloadType, SSRC};
 use rtp::packet::Packet;
-use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 
 pub mod router;
 mod router_test;
@@ -39,6 +41,7 @@ pub struct Media {
     #[allow(dead_code)]
     pub src_track_id: String,
     pub src_stream_id: String,
+    pub header_extensions: HashMap<u8, String>,
     pub capability: RTCRtpCodecCapability,
     pub kind: RtpCodecType,
     /// The publisher SSRC is preserved on the subscriber leg for packet forwarding.
@@ -67,6 +70,7 @@ impl Media {
         mid: String,
         src_track_id: String,
         src_stream_id: String,
+        header_extensions: HashMap<u8, String>,
         capability: RTCRtpCodecCapability,
         kind: RtpCodecType,
         ssrc: SSRC,
@@ -82,6 +86,7 @@ impl Media {
             mid,
             src_track_id,
             src_stream_id,
+            header_extensions,
             peer_id,
             kind,
             capability,
@@ -91,7 +96,7 @@ impl Media {
             muted,
             purpose,
             info,
-            payload_type
+            payload_type,
         }
     }
 
@@ -103,19 +108,27 @@ impl Media {
         self.muted
     }
 
-    pub(crate) async fn subscribe(&self, local_track: Arc<TrackLocalStaticRTP>) {
+    pub(crate) async fn subscribe(
+        &self,
+        local_track: Arc<TrackLocalStaticRTP>,
+        header_extensions: RtpHeaderExtensionTranslator,
+    ) {
         let mut rtp_rx = self.rtp_tx.subscribe();
         let publisher_stopped = self.stopped.clone();
 
         let (started_tx, started_rx) = oneshot::channel();
-        tokio::spawn(enc!( (local_track )  async move {
+        tokio::spawn(enc!( (local_track, header_extensions)  async move {
             started_tx.send(()).unwrap();
             loop {
                 tokio::select! {
                     rtp = rtp_rx.recv() => {
                         match rtp {
                             Ok(rtp_packet) => {
-                                let _ = local_track.write_rtp((*rtp_packet).clone()).await;
+                                let mut rtp_packet = (*rtp_packet).clone();
+                                header_extensions.translate(&mut rtp_packet);
+                                if let Err(err) = local_track.write_rtp(rtp_packet).await {
+                                    log::debug!("could not forward RTP to subscriber: {err}");
+                                }
                             },
                             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                                 log::warn!("rtp_tx.recv() skipped {} packets", skipped);

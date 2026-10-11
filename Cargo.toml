@@ -54,6 +54,7 @@ webrtc = { version = "0.21.0" }
 rtc = { version = "0.21.0" }
 rtcp = { version = "0.21.0", package = "rtc-rtcp" }
 rtp = { version = "0.21.0", package = "rtc-rtp" }
+rtc-sdp = { version = "0.21.0" }
 anyhow = "1.0.99"
 bytes = "1.9.0"
 regex = "1.11.1"

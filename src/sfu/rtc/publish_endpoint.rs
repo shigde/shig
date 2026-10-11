@@ -6,10 +6,10 @@ use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
 use crate::sfu::rtc::sdp::parse_offered_track_info;
 use crate::sfu::rtc::{RtcError, RtcResult};
 use actix::Addr;
+use rtc::rtp_transceiver::rtp_sender::RTCRtpCodec;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use rtc::rtp_transceiver::rtp_sender::RTCRtpCodec;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::peer_connection::RTCSessionDescription;
 
@@ -66,9 +66,9 @@ impl PublishEndpoint {
         track: Arc<dyn TrackRemote>,
     ) {
         let kind = track.kind().await;
-        let track_info = self.take_track_info(kind);
         let track_id = track.track_id().await;
         let stream_id = track.stream_id().await;
+        let track_info = self.take_track_info(kind, &track_id, &stream_id);
         let stop = CancellationToken::new();
         let (rtp_tx, _dummy_rx) = broadcast::channel(8192);
         let media_id = Arc::new(tokio::sync::Mutex::new(None));
@@ -99,6 +99,7 @@ impl PublishEndpoint {
                                 track_info.mid.clone(),
                                 track_id.clone(),
                                 stream_id.clone(),
+                                track_info.header_extensions.clone(),
                                 codec,
                                 kind,
                                 packet.header.ssrc,
@@ -133,21 +134,50 @@ impl PublishEndpoint {
     fn take_track_info(
         &mut self,
         kind: RtpCodecType,
+        track_id: &str,
+        stream_id: &str,
     ) -> InboundTrackInfo {
-        let Some(index) = self
+        if let Some(index) = self.offered_track_infos.iter().position(|track_info| {
+            track_info.kind == kind
+                && track_info.source_track_id == track_id
+                && (track_info.source_stream_id.is_empty()
+                    || track_info.source_stream_id == stream_id)
+        }) {
+            return self.offered_track_infos.remove(index);
+        }
+
+        let matching_kind = self
             .offered_track_infos
             .iter()
-            .position(|track_info| track_info.kind == kind)
-        else {
-            log::warn!(
-                "missing offered track metadata, endpoint_id={}, kind={:?}",
-                self.endpoint.id,
-                kind
-            );
-            return InboundTrackInfo::new(kind);
-        };
+            .enumerate()
+            .filter(|(_, track_info)| track_info.kind == kind)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
 
-        self.offered_track_infos.remove(index)
+        if matching_kind.len() == 1 {
+            let index = matching_kind[0];
+            let track_info = &self.offered_track_infos[index];
+            log::warn!(
+                "using single-track metadata fallback, endpoint_id={}, kind={:?}, track_id={}, stream_id={}, offered_track_id={}, offered_stream_id={}",
+                self.endpoint.id,
+                kind,
+                track_id,
+                stream_id,
+                track_info.source_track_id,
+                track_info.source_stream_id,
+            );
+            return self.offered_track_infos.remove(index);
+        }
+
+        log::warn!(
+            "missing unambiguous offered track metadata, endpoint_id={}, kind={:?}, track_id={}, stream_id={}, candidates={}",
+            self.endpoint.id,
+            kind,
+            track_id,
+            stream_id,
+            matching_kind.len(),
+        );
+        InboundTrackInfo::new(kind)
     }
 
     pub async fn shutdown(&self) -> RtcResult<()> {

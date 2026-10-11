@@ -1,3 +1,6 @@
+pub(crate) mod header_extension_translator;
+#[cfg(test)]
+mod header_extension_translator_test;
 pub mod endpoint;
 pub mod endpoint_builder;
 pub mod endpoint_event;

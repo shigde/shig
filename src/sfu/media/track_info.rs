@@ -1,4 +1,5 @@
 use crate::sfu::media::{MediaPurpose, RtpCodecType};
+use std::collections::HashMap;
 use std::sync::Arc;
 use webrtc::rtp_transceiver::RtpTransceiver;
 
@@ -6,6 +7,10 @@ use webrtc::rtp_transceiver::RtpTransceiver;
 pub struct InboundTrackInfo {
     pub mid: String,
     pub kind: RtpCodecType,
+    pub source_stream_id: String,
+    pub source_track_id: String,
+    /// The extmap IDs announced by the publishing peer for this media section.
+    pub header_extensions: HashMap<u8, String>,
     pub purpose: MediaPurpose,
     pub muted: bool,
     pub info: TrackInfo,
@@ -16,6 +21,9 @@ impl InboundTrackInfo {
         Self {
             mid: "".to_string(),
             kind,
+            source_stream_id: "".to_string(),
+            source_track_id: "".to_string(),
+            header_extensions: HashMap::new(),
             purpose: MediaPurpose::PARTICIPANT,
             muted: true,
             info: "".to_string(),
@@ -49,6 +57,5 @@ impl OutboundTrackInfo {
         }
     }
 }
-
 
 pub type TrackInfo = String;
