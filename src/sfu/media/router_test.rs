@@ -21,6 +21,7 @@ mod tests {
             src_stream_id: "stream".into(),
             capability: Default::default(),
             kind: Default::default(),
+            ssrc: Default::default(),
             rtp_tx,
             stopped: Default::default(),
             purpose: Default::default(),

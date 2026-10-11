@@ -101,6 +101,7 @@ impl PublishEndpoint {
                                 stream_id.clone(),
                                 codec,
                                 kind,
+                                packet.header.ssrc,
                                 rtp_tx.clone(),
                                 stop.clone(),
                                 track_info.muted,

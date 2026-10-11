@@ -4,6 +4,7 @@ use crate::sfu::rtc::data_channel::SdpMsgData;
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
 use crate::sfu::rtc::sdp::set_track_info;
 use crate::sfu::rtc::{RtcError, RtcResult};
+use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodingParameters, RTCRtpEncodingParameters};
 use std::collections::HashMap;
 use std::sync::Arc;
 use webrtc::data_channel::DataChannel;
@@ -36,12 +37,21 @@ impl SubscribeEndpoint {
     }
 
     pub async fn add_media(&mut self, media: Media) -> RtcResult<()> {
+        let send_encoding = RTCRtpEncodingParameters {
+            rtp_coding_parameters: RTCRtpCodingParameters {
+                ssrc: Some(media.ssrc),
+                ..Default::default()
+            },
+            active: true,
+            codec: media.capability.clone(),
+            ..Default::default()
+        };
         let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
             media.src_stream_id.clone(),
             media.id.to_string(),
             media.id.to_string(),
             media.kind,
-            vec![],
+            vec![send_encoding.clone()],
         )));
 
         let transceiver = self
@@ -51,7 +61,7 @@ impl SubscribeEndpoint {
                 Arc::clone(&track) as Arc<dyn TrackLocal>,
                 Some(RTCRtpTransceiverInit {
                     direction: RTCRtpTransceiverDirection::Sendonly,
-                    send_encodings: vec![],
+                    send_encodings: vec![send_encoding],
                     streams: vec![],
                 }),
             )

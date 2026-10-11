@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::sfu::media::track_info::TrackInfo;
 use crate::util::id::random_id;
 use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec as RTCRtpCodecCapability, RtpCodecKind};
-use rtc::rtp_transceiver::PayloadType;
+use rtc::rtp_transceiver::{PayloadType, SSRC};
 use rtp::packet::Packet;
 use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_local::TrackLocal;
@@ -41,6 +41,8 @@ pub struct Media {
     pub src_stream_id: String,
     pub capability: RTCRtpCodecCapability,
     pub kind: RtpCodecType,
+    /// The publisher SSRC is preserved on the subscriber leg for packet forwarding.
+    pub ssrc: SSRC,
     pub rtp_tx: RtpSenderChannel,
     stopped: CancellationToken,
 
@@ -67,6 +69,7 @@ impl Media {
         src_stream_id: String,
         capability: RTCRtpCodecCapability,
         kind: RtpCodecType,
+        ssrc: SSRC,
         rtp_tx: broadcast::Sender<Arc<Packet>>,
         stopped: CancellationToken,
         muted: bool,
@@ -82,6 +85,7 @@ impl Media {
             peer_id,
             kind,
             capability,
+            ssrc,
             rtp_tx,
             stopped,
             muted,
