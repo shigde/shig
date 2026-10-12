@@ -185,7 +185,12 @@ impl Media {
             match target.track.write_rtp(packet).await {
                 Ok(()) => {
                     if self.kind == RtpCodecType::Video && target.confirm_rtp_binding() {
-                        self.request_keyframe().await;
+                        log::info!(
+                            "RTP target bound, requesting keyframe, media_id={}, subscriber_peer_id={}",
+                            self.id,
+                            target.peer_id()
+                        );
+                        self.request_keyframe(target.peer_id()).await;
                     }
                 }
                 Err(err) => {
@@ -199,27 +204,39 @@ impl Media {
         }
     }
 
-    pub(crate) async fn request_keyframe(&self) {
+    pub(crate) async fn request_keyframe(&self, subscriber_peer_id: &PeerId) {
         if self.kind != RtpCodecType::Video {
             return;
         }
 
         let Some(source_track) = &self.source_track else {
+            log::info!(
+                "cannot request keyframe without source track, media_id={}, subscriber_peer_id={}",
+                self.id,
+                subscriber_peer_id
+            );
             return;
         };
 
-        if let Err(err) = source_track
+        match source_track
             .write_rtcp(vec![Box::new(PictureLossIndication {
                 sender_ssrc: 0,
                 media_ssrc: self.ssrc,
             })])
             .await
         {
-            log::debug!(
+            Ok(()) => log::info!(
+                "keyframe request queued, media_id={}, publisher_peer_id={}, subscriber_peer_id={}, media_ssrc={}",
+                self.id,
+                self.peer_id,
+                subscriber_peer_id,
+                self.ssrc
+            ),
+            Err(err) => log::info!(
                 "could not request keyframe, media_id={}, publisher_peer_id={}: {err}",
                 self.id,
                 self.peer_id
-            );
+            ),
         }
     }
 

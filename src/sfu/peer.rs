@@ -1,7 +1,9 @@
 use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{PeerError, PeerResult};
 use crate::sfu::lobby::{Lobby, PeerStopped};
-use crate::sfu::media::{AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia};
+use crate::sfu::media::{
+    ActivateMedia, AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia,
+};
 use crate::sfu::rtc::{
     control_data_channel::ControlDataChannel,
     data_channel::{
@@ -15,6 +17,7 @@ use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use webrtc::peer_connection::RTCPeerConnectionState;
 
 pub struct Peer {
     pub id: PeerId,
@@ -29,6 +32,8 @@ pub struct Peer {
 
     control_channel: Arc<Mutex<ControlDataChannel>>,
     data_channel_reader: Option<DataChannelReader>,
+    subscribe_connection_ready: bool,
+    pending_media_activations: Vec<ActivateMedia>,
 }
 
 impl Peer {
@@ -49,6 +54,8 @@ impl Peer {
             subscribe_endpoint: None,
             control_channel: Arc::new(Mutex::new(ControlDataChannel::new(id))),
             data_channel_reader: None,
+            subscribe_connection_ready: false,
+            pending_media_activations: Vec::new(),
         }
     }
 
@@ -61,6 +68,21 @@ impl Peer {
     fn stop_data_channel_reader(&mut self) {
         if let Some(reader) = self.data_channel_reader.take() {
             reader.cancel();
+        }
+    }
+
+    fn activate_media_when_subscribe_ready(&mut self, activations: Vec<ActivateMedia>) {
+        self.pending_media_activations.extend(activations);
+        self.flush_pending_media_activations();
+    }
+
+    fn flush_pending_media_activations(&mut self) {
+        if !self.subscribe_connection_ready {
+            return;
+        }
+
+        for activation in self.pending_media_activations.drain(..) {
+            self.parent_addr.do_send(activation);
         }
     }
 }
@@ -165,6 +187,10 @@ impl Handler<EndpointEvent> for Peer {
                     endpoint_id,
                     state
                 );
+                if endpoint_id.as_kind().is_subscribe() {
+                    self.subscribe_connection_ready = state == RTCPeerConnectionState::Connected;
+                    self.flush_pending_media_activations();
+                }
             }
             EndpointEvent::DataChannel {
                 endpoint_id,
@@ -288,7 +314,6 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
         let subscribe_endpoint = self.subscribe_endpoint.clone();
 
         let peer_id = self.id.clone();
-        let parent_addr = self.parent_addr.clone();
         Box::pin(
             async move {
                 let Some(subscribe_endpoint) = subscribe_endpoint else {
@@ -305,19 +330,21 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
                         .accept_answer(peer_id.clone(), sdp_answer)
                         .await
                 } {
-                    Ok(activations) => {
-                        for activation in activations {
-                            parent_addr.do_send(activation);
-                        }
-                        Ok("".to_string())
-                    }
+                    Ok(activations) => Ok(activations),
                     Err(err) => {
                         log::error!("set_answer failed peer_id={}: {:?}", peer_id, err);
                         Err(err.into())
                     }
                 }
             }
-            .into_actor(self),
+            .into_actor(self)
+            .map(|result, actor, _ctx| match result {
+                Ok(activations) => {
+                    actor.activate_media_when_subscribe_ready(activations);
+                    Ok("".to_string())
+                }
+                Err(err) => Err(err),
+            }),
         )
     }
 }
@@ -501,7 +528,6 @@ impl Handler<DataChannelMsg> for Peer {
                 };
 
                 let control_arc = self.control_channel.clone();
-                let parent_addr = self.parent_addr.clone();
                 Box::pin(
                     async move {
                         let is_answer_stale = {
@@ -511,28 +537,33 @@ impl Handler<DataChannelMsg> for Peer {
 
                         if is_answer_stale {
                             log::info!("ignore staled answer peer_id={}", peer_id);
-                            return;
+                            return Ok(None);
                         }
 
                         match {
                             let mut subscribe_endpoint = subscribe_endpoint_arc.lock().await;
                             subscribe_endpoint.set_signal_answer(msg).await
                         } {
-                            Ok(activations) => {
-                                for activation in activations {
-                                    parent_addr.do_send(activation);
-                                }
-                            }
+                            Ok(activations) => Ok(Some(activations)),
                             Err(e) => {
-                                log::error!(
-                                    "Failed to set signaling answer for peer_id={}: {}",
-                                    peer_id,
-                                    e
-                                );
+                                Err(e)
                             }
                         }
                     }
-                    .into_actor(self),
+                    .into_actor(self)
+                    .map(|result, actor, _ctx| match result {
+                        Ok(Some(activations)) => {
+                            actor.activate_media_when_subscribe_ready(activations);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            log::error!(
+                                "Failed to set signaling answer for peer_id={}: {}",
+                                actor.id,
+                                err
+                            );
+                        }
+                    }),
                 )
             }
             DataChannelMsg::MuteMsg(mute_data) => {
