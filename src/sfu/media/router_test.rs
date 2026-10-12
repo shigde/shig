@@ -163,4 +163,12 @@ mod tests {
 
         assert!(router.activate_target(&media_id, target(peer_b)).is_some());
     }
+
+    #[test]
+    fn test_target_confirms_rtp_binding_once() {
+        let target = target(peer("peer-b"));
+
+        assert!(target.confirm_rtp_binding());
+        assert!(!target.confirm_rtp_binding());
+    }
 }

@@ -353,15 +353,12 @@ impl Handler<ActivateMedia> for Lobby {
 
     fn handle(&mut self, msg: ActivateMedia, _ctx: &mut Self::Context) -> Self::Result {
         let media_id = msg.media_id;
-        let Some(media) = self.router.activate_target(&media_id, msg.target) else {
+        let Some(_) = self.router.activate_target(&media_id, msg.target) else {
             log::debug!("cannot activate missing media route, media_id={}", media_id);
             return;
         };
 
         log::debug!("activated media route, media_id={}", media_id);
-        actix::spawn(async move {
-            media.request_keyframe_after_route_activation().await;
-        });
     }
 }
 

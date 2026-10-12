@@ -4,9 +4,9 @@ use arc_swap::ArcSwap;
 use derive_more::Display;
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::time::{sleep, Duration};
 
 use crate::sfu::media::track_info::TrackInfo;
 use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
@@ -31,6 +31,7 @@ pub(crate) struct ForwardTarget {
     peer_id: PeerId,
     track: Arc<TrackLocalStaticRTP>,
     header_extensions: RtpHeaderExtensionTranslator,
+    rtp_binding_confirmed: Arc<AtomicBool>,
 }
 
 impl ForwardTarget {
@@ -43,11 +44,20 @@ impl ForwardTarget {
             peer_id,
             track,
             header_extensions,
+            rtp_binding_confirmed: Arc::new(AtomicBool::new(false)),
         }
     }
 
     fn peer_id(&self) -> &PeerId {
         &self.peer_id
+    }
+
+    /// The first successful write proves that the peer-connection driver has
+    /// bound this local track to its sender.
+    fn confirm_rtp_binding(&self) -> bool {
+        self.rtp_binding_confirmed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
 }
 
@@ -172,12 +182,19 @@ impl Media {
         for target in targets.iter() {
             let mut packet = packet.clone();
             target.header_extensions.translate(&mut packet);
-            if let Err(err) = target.track.write_rtp(packet).await {
-                log::debug!(
-                    "could not forward RTP, media_id={}, peer_id={}: {err}",
-                    self.id,
-                    target.peer_id()
-                );
+            match target.track.write_rtp(packet).await {
+                Ok(()) => {
+                    if self.kind == RtpCodecType::Video && target.confirm_rtp_binding() {
+                        self.request_keyframe().await;
+                    }
+                }
+                Err(err) => {
+                    log::debug!(
+                        "could not forward RTP, media_id={}, peer_id={}: {err}",
+                        self.id,
+                        target.peer_id()
+                    );
+                }
             }
         }
     }
@@ -206,20 +223,6 @@ impl Media {
         }
     }
 
-    /// `set_remote_description` schedules local-track binding on the peer-connection driver.
-    /// A bounded PLI backoff keeps a keyframe request from racing that asynchronous bind.
-    pub(crate) async fn request_keyframe_after_route_activation(&self) {
-        for delay in [
-            Duration::ZERO,
-            Duration::from_millis(200),
-            Duration::from_millis(800),
-        ] {
-            if !delay.is_zero() {
-                sleep(delay).await;
-            }
-            self.request_keyframe().await;
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]

@@ -93,15 +93,18 @@ Reconciliation replaces the prepared target list when a subscription is activate
 
 ### Route Activation And Keyframes
 
-After the subscriber answer, the peer reports the prepared target to the lobby router. The router adds it to the source `Media` and sends a bounded PLI backoff on the publisher track for video. The first PLI is immediate; two short retries cover the asynchronous local-track bind. This gives a newly connected subscriber a decodable keyframe instead of waiting for the publisher's next periodic keyframe.
+After the subscriber answer, the peer reports the prepared target to the lobby router. The router adds it to the source `Media`. The first successful `write_rtp` confirms that WebRTC.rs has bound that local track to its sender. For video, that write sends one PLI to the source publisher track. This avoids racing the asynchronous binding with a keyframe request.
 
 ```text
 subscriber answer accepted
 -> target becomes active in MediaId route
--> router sends bounded PLI backoff to source publisher track
+-> first successful RTP write confirms the target binding
+-> router sends one PLI to source publisher track
 -> publisher emits keyframe
 -> active targets receive RTP
 ```
+
+The browser's ordinary PLI behavior remains the compatibility fallback. A future Dependency Descriptor optimization may identify a decodable start frame, but forwarding must not depend on that extension because browser support is not universal.
 
 Subscriber PLI and FIR feedback belongs to the same `MediaId` route: once feedback delivery from the subscriber WebRTC leg is enabled, the router relays those keyframe requests to the source publisher track. Ordinary RTCP reports stay on their own WebRTC leg and are not cross-routed.
 
