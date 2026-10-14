@@ -10,6 +10,7 @@
 - [SFU Signaling Metadata](architecture/sfu/signaling-metadata.md)
 - [SFU RTC Event Synchronization](architecture/sfu/rtc-sync.md)
 - [SFU Media Forwarding](architecture/sfu/media-forwarding.md)
+- [SFU Performance](architecture/sfu/performance.md)
 
 ### Admin
 - [Production](admin/production.md)
