@@ -22,7 +22,7 @@ use actix::{
     ResponseActFuture, WrapFuture,
 };
 use derive_more::Display;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 use std::collections::HashMap;
 
 pub struct Lobby {

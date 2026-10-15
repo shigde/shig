@@ -1,12 +1,12 @@
-use bytes::{Bytes, BytesMut};
+use crate::sfu::relay::error::{RelayError, RelayResult};
+use crate::util::stop_guard::StopGuard;
+use bytes::Bytes;
 use moq_mux::container::fmp4;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
-use crate::sfu::relay::error::{RelayError, RelayResult};
-use crate::util::stop_guard::StopGuard;
 
 pub struct HangPublisher {
-    origin: moq_net::OriginProducer,
+    origin: moq_net::origin::Producer,
     name: String,
     pkg_rx: mpsc::Receiver<Bytes>,
     #[allow(dead_code)]
@@ -15,7 +15,7 @@ pub struct HangPublisher {
 
 impl HangPublisher {
     pub fn new(
-        origin: moq_net::OriginProducer,
+        origin: moq_net::origin::Producer,
         name: String,
         pkg_rx: mpsc::Receiver<Bytes>,
         publisher_ready_tx: watch::Sender<bool>,
@@ -28,27 +28,22 @@ impl HangPublisher {
         }
     }
 
-    pub async fn run(mut self, cancel: CancellationToken, stopped: CancellationToken) -> RelayResult<()> {
+    pub async fn run(
+        mut self,
+        cancel: CancellationToken,
+        stopped: CancellationToken,
+    ) -> RelayResult<()> {
         log::info!("hang publisher started");
         let _guard = StopGuard(stopped);
 
-        let mut broadcast = moq_net::Broadcast::new().produce();
-        let catalog = moq_mux::catalog::Producer::new(&mut broadcast)
+        let mut broadcast = self
+            .origin
+            .publish(&self.name, Default::default())
+            .map_err(|e| RelayError::PublisherError(e.to_string()))?;
+        let catalog = moq_mux::catalog::Producer::<()>::new(&mut broadcast, Default::default())
             .map_err(|e| RelayError::PublisherError(e.to_string()))?;
 
-
-        let mut import = fmp4::Import::new(
-            broadcast.clone(),
-            catalog.clone(),
-        );
-
-        self.origin.publish_broadcast(
-            self.name.clone(),
-            broadcast.consume(),
-        );
-
-
-        let mut buffer = BytesMut::new();
+        let mut import = fmp4::Import::new(broadcast.clone(), catalog.reserve());
 
         loop {
             tokio::select! {
@@ -59,11 +54,9 @@ impl HangPublisher {
                 Some(bytes) = self.pkg_rx.recv() => {
                     log::trace!("received fmp4 bytes: {}", bytes.len());
 
-                    buffer.extend_from_slice(&bytes);
-
-                    match import.decode(&mut buffer) {
+                    match import.decode(&bytes) {
                         Ok(_) => {
-                            log::trace!("decoded fmp4 buffer, remaining={}", buffer.len());
+                            log::trace!("decoded fmp4 input");
                         }
                         Err(e) => {
                             log::error!("fmp4 import error: {:?}", e);
@@ -74,7 +67,9 @@ impl HangPublisher {
             }
         }
 
-        import.finish().map_err(|e| RelayError::PublisherError(e.to_string()))?;
+        import
+            .finish()
+            .map_err(|e| RelayError::PublisherError(e.to_string()))?;
         Ok(())
     }
 }

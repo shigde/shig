@@ -54,19 +54,19 @@ advertised_ip = ""
 port_min = 50000
 port_max = 51000
 
-[relay.server]
-listen = "127.0.0.1:4443"
+[relay.listen]
+bind = "127.0.0.1:4443"
 
-[relay.server.tls]
+[relay.listen.tls]
 cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = "/opt/shig/certs/relay/privkey.pem"
+key = ["/opt/shig/certs/relay/privkey.pem"]
 
 [relay.web.http]
 listen = "127.0.0.1:4444"
 
 [relay.auth]
-subscribe = ["live"]
-publish = ["live"]
+public_subscribe = ["live/**"]
+public_publish = ["live/**"]
 ```
 
 ## Webserver
@@ -92,7 +92,7 @@ cert = ""
 key = ""
 ```
 
-This is separate from relay TLS. Relay certificates are configured under `[relay.server.tls]`.
+This is separate from relay TLS. Relay certificates are configured under `[relay.listen.tls]`.
 
 ## Files
 
@@ -214,26 +214,26 @@ port_max = 51000
 
 This is separate from the WebRTC SFU. The SFU handles the conference media, while the relay is used for streaming egress and viewer playback.
 
-`[relay.server]` is the public MoQ/relay listener:
+`[relay.listen]` is the public MoQ/relay listener:
 
 ```toml
-[relay.server]
-listen = "127.0.0.1:4443"
+[relay.listen]
+bind = "127.0.0.1:4443"
 ```
 
 With Nginx stream routing, the relay can listen locally because Nginx forwards public relay traffic on `443` to `127.0.0.1:4443`.
 
 TCP `443` uses SNI routing, so `relay.example.com` can share the public HTTPS port with the web client domains. UDP `443` is forwarded completely to the relay for QUIC/WebTransport.
 
-`[relay.server.tls]` belongs only to the relay. It is separate from `[server.tls]`.
+`[relay.listen.tls]` belongs only to the relay. It is separate from `[server.tls]`.
 
 ```toml
-[relay.server.tls]
+[relay.listen.tls]
 cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = "/opt/shig/certs/relay/privkey.pem"
+key = ["/opt/shig/certs/relay/privkey.pem"]
 ```
 
-`cert` is a list.
+`cert` and `key` are lists. Each certificate chain is paired with the key at the same index.
 
 Optional relay HTTP/Web endpoint:
 
@@ -246,6 +246,10 @@ Relay auth:
 
 ```toml
 [relay.auth]
-subscribe = ["live"]
-publish = ["live"]
+public_subscribe = ["live/**"]
+public_publish = ["live/**"]
 ```
+
+The relay uses `moq-relay 0.17.x` configuration. When migrating an older configuration, rename `[relay.server]` to `[relay.listen]` and its `listen` field to `bind`. Rename `[relay.client]` to `[relay.connect]`. Public access uses patterns: `live/**` grants access to the `live` subtree, while `live` alone names one broadcast. Replace the old `subscribe`/`publish` settings with `public_subscribe`/`public_publish` as shown above.
+
+These public rules allow anonymous access; they do not validate JWTs. Deployments that previously configured relay JWT keys must migrate to the new `[relay.auth].url` authorization service. The service receives session requests and returns grants. An empty auth configuration requires an embedded admissions handler and is not a public-access fallback in Shig.

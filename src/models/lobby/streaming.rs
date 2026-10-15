@@ -7,8 +7,7 @@ use crate::models::error::ApiError;
 use crate::sfu::{PublishLobbyStream, Sfu};
 use actix::Addr;
 use actix_web::web;
-use moq_lite::Path;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 
 pub(crate) async fn publish(
     pool: &web::Data<DbPool>,
@@ -77,5 +76,13 @@ pub(crate) async fn publish(
     Ok(())
 }
 fn internal_publish_token(channel_id: &str, _stream_id: &str) -> AuthToken {
-    AuthToken::unrestricted(Path::new(&format!("live/{}", channel_id)).to_owned())
+    AuthToken::new(
+        &format!("live/{}", channel_id),
+        &moq_auth::Grant::new(
+            ["**".parse().expect("valid publish pattern")]
+                .into_iter()
+                .collect(),
+            Default::default(),
+        ),
+    )
 }

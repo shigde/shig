@@ -14,7 +14,7 @@ use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures_util::future::join_all;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 use std::collections::HashMap;
 
 pub mod config;

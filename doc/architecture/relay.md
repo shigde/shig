@@ -2,6 +2,12 @@
 
 This document describes the livestream egress path from the mixed client stream to multiple viewers.
 
+## Library Versions
+
+The embedded relay uses `moq-relay 0.17.5`, `moq-net 0.3.13`, `moq-mux 0.10.14`, `moq-tokio 0.19.26`, and `moq-auth 0.2.1`. `moq-tokio` replaces the previous `moq-native` dependency. The upstream `Relay` owns listener startup, workers, and graceful shutdown; Shig keeps handles to its cluster and authentication service for internal publishing and discovery.
+
+The selected GStreamer integration will pass compressed frames to `moq-mux` and publish directly into this embedded relay. It will not use `moqsink` or add a local QUIC publishing connection. That pipeline is not implemented yet; the current FFmpeg/fMP4 path below remains in use.
+
 ## Overview
 
 The stream owner mixes local and guest media into one composed stream on the client side. This mixed stream is sent to the SFU via WebRTC ingress.

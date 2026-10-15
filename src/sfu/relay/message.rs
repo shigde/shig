@@ -1,7 +1,7 @@
 use crate::sfu::relay::error::RelayResult;
 use crate::sfu::relay::RelayMediaStream;
 use actix::Message;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 
 #[derive(Message)]
 #[rtype(result = " RelayResult<()>")]
