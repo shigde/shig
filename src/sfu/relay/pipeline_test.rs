@@ -7,7 +7,7 @@ use std::time::Duration;
 
 #[test]
 fn video_group_requests_keyframes_and_bounds_retries() {
-    use super::publisher::VideoGroup;
+    use super::video_group::VideoGroup;
     let start = std::time::Instant::now();
     let mut group = VideoGroup::default();
     assert!(!group.observe(true, 1000, start));
@@ -22,13 +22,37 @@ fn video_group_requests_keyframes_and_bounds_retries() {
 #[test]
 fn large_video_group_requests_keyframe_before_the_library_limit() {
     let start = std::time::Instant::now();
-    let mut group = super::publisher::VideoGroup::default();
+    let mut group = super::video_group::VideoGroup::default();
     assert!(!group.observe(true, 1024, start));
     assert!(group.observe(
         false,
         (moq_net::group::MAX_CACHE_BYTES / 2) as usize,
         start + Duration::from_millis(100)
     ));
+}
+
+#[test]
+fn missing_first_keyframe_is_retried_without_incoming_frames() {
+    let start = std::time::Instant::now();
+    let mut group = super::video_group::VideoGroup::default();
+    group.requested(start);
+    assert!(!group.poll(start + Duration::from_millis(500)));
+    assert!(group.poll(start + Duration::from_secs(1)));
+    assert!(!group.poll(start + Duration::from_millis(1500)));
+    assert!(group.poll(start + Duration::from_secs(2)));
+    assert!(!group.observe(true, 1000, start + Duration::from_millis(2100)));
+    assert!(!group.poll(start + Duration::from_millis(2500)));
+}
+
+#[test]
+fn observed_encoder_delay_advances_the_next_request() {
+    let start = std::time::Instant::now();
+    let mut group = super::video_group::VideoGroup::default();
+    group.requested(start);
+    group.observe(true, 1000, start + Duration::from_millis(500));
+    assert!(!group.poll(start + Duration::from_millis(1400)));
+    // A measured 500 ms response reserves twice that time for the next GOP.
+    assert!(group.poll(start + Duration::from_millis(1500)));
 }
 
 #[tokio::test]
@@ -49,7 +73,7 @@ async fn repeated_video_groups_can_publish_more_than_one_group_limit() {
     delta[0] = 0x31;
     let delta = bytes::Bytes::from(delta);
     let start = std::time::Instant::now();
-    let mut group = super::publisher::VideoGroup::default();
+    let mut group = super::video_group::VideoGroup::default();
     let mut keyframe = true;
     let mut requests = 0;
     for index in 0..200 {

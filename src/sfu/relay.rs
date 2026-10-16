@@ -5,6 +5,7 @@ mod error;
 pub mod message;
 mod pipeline;
 mod publisher;
+mod video_group;
 
 #[cfg(test)]
 mod pipeline_test;

@@ -1,5 +1,6 @@
 use super::error::{RelayError, RelayResult};
 use super::pipeline::{Frame, MediaPipeline, PipelineConfig, VideoCodec};
+use super::video_group::VideoGroup;
 use super::RelayMediaStream;
 use crate::sfu::media::Media;
 use anyhow::{anyhow, bail, Context};
@@ -8,43 +9,6 @@ use moq_mux::import::{AudioFormat, AudioInit, Track, VideoInit};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
-
-// A browser need not produce periodic keyframes on its own. Ask before a GOP
-// can grow into moq-net's bounded group cache; only real keyframes split video.
-#[derive(Default)]
-pub(super) struct VideoGroup {
-    started: Option<Instant>,
-    last_request: Option<Instant>,
-    bytes: u64,
-    frames: usize,
-}
-
-impl VideoGroup {
-    pub fn observe(&mut self, keyframe: bool, bytes: usize, now: Instant) -> bool {
-        if keyframe {
-            self.started = Some(now);
-            self.last_request = None;
-            self.bytes = 0;
-            self.frames = 0;
-        }
-        self.bytes = self.bytes.saturating_add(bytes as u64);
-        self.frames = self.frames.saturating_add(1);
-        let Some(started) = self.started else {
-            return false;
-        };
-        let due = now.duration_since(started) >= Duration::from_secs(2)
-            || self.bytes >= moq_net::group::MAX_CACHE_BYTES / 2
-            || self.frames >= moq_net::group::MAX_GROUP_FRAMES / 2;
-        let retry = self
-            .last_request
-            .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1));
-        if due && retry {
-            self.last_request = Some(now);
-            return true;
-        }
-        false
-    }
-}
 
 pub struct HangPublisher {
     origin: moq_net::origin::Producer,
@@ -165,12 +129,15 @@ impl HangPublisher {
         )?;
         drop(reservation);
         let _ = ready.take().unwrap().send(Ok(()));
+        let mut video_group = VideoGroup::default();
+        video_group.requested(Instant::now());
         tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
             _ = self.video.request_keyframe(&self.video.peer_id) => {}
         }
         let mut video_ready = false;
-        let mut video_group = VideoGroup::default();
+        let mut keyframe_check = tokio::time::interval(Duration::from_millis(500));
+        keyframe_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let result = async {
             loop {
                 tokio::select! {
@@ -180,12 +147,21 @@ impl HangPublisher {
                         changed.context("GStreamer error channel closed")?;
                         bail!("{}", pipeline.failure.borrow().as_deref().unwrap_or("GStreamer stopped"));
                     }
+                    _ = keyframe_check.tick() => {
+                        if video_group.poll(Instant::now()) {
+                            tokio::select! {
+                                _ = cancel.cancelled() => break,
+                                _ = self.video.request_keyframe(&self.video.peer_id) => {}
+                            }
+                        }
+                    }
                     frame = pipeline.frames.recv() => {
                         let frame = frame.context("GStreamer frame channel closed")?;
                         if frame.video {
                             let flags = frame.sample.buffer().context("Missing video buffer")?.flags();
                             if flags.intersects(gstreamer::BufferFlags::DISCONT | gstreamer::BufferFlags::CORRUPTED) && video_ready {
                                 video_ready = false;
+                                video_group.requested(Instant::now());
                                 tokio::select! {
                                     _ = cancel.cancelled() => break,
                                     _ = self.video.request_keyframe(&self.video.peer_id) => {}
@@ -200,7 +176,7 @@ impl HangPublisher {
                             let keyframe = !flags.contains(gstreamer::BufferFlags::DELTA_UNIT);
                             let request = video_group.observe(keyframe, size, Instant::now());
                             publish_frame(&mut video, frame).with_context(|| format!(
-                                "relay video group: frames={}, payload_bytes={}", video_group.frames, video_group.bytes
+                                "relay video group: frames={}, payload_bytes={}", video_group.frames(), video_group.bytes()
                             ))?;
                             if request {
                                 tokio::select! {
