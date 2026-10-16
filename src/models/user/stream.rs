@@ -82,7 +82,12 @@ impl Stream {
                 error_message: "forbidden".to_string(),
             });
         }
-        delete_stream_by_id(&mut conn, stream_dao.stream.id)?;
+        if !delete_stream_by_id(&mut conn, stream_dao.stream.id)? {
+            return Err(ApiError::Conflict {
+                error_message: "Cannot delete a live stream. Stop the stream before deleting it."
+                    .to_string(),
+            });
+        }
         Ok(())
     }
 

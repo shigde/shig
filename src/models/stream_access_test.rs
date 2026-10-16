@@ -176,3 +176,66 @@ async fn visibility_covers_public_apis_and_direct_relay_grants() {
         _ = checking => {}
     }
 }
+
+#[actix_web::test]
+#[ignore = "Requires SHIG_MIGRATION_TEST_DATABASE_URL pointing to a dedicated PostgreSQL test database"]
+async fn deleting_stream_preserves_lobby_and_rejects_live_streams() {
+    let fixture = Fixture::new();
+    let mut conn = fixture.pool.get().unwrap();
+    conn.batch_execute(
+        "INSERT INTO stream_meta_data (stream_id, stream_key, url, protocol, latency_mode, created_at)
+            VALUES (3, 'key', 'https://example.test/stream', 1, 1, now());
+         INSERT INTO lobbies (uuid, user_id, channel_id, stream_id, is_open, created_at)
+            VALUES ('lobby', 2, 2, 3, true, now());
+         UPDATE streams SET is_live = true WHERE id = 3;"
+    ).unwrap();
+    drop(conn);
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(fixture.pool.clone()))
+            .app_data(web::Data::new(fixture.jwt.clone()))
+            .wrap(crate::middleware::auth::Authentication)
+            .service(
+                web::scope("/api/user/stream").service(crate::api::user::stream::delete_stream),
+            ),
+    )
+    .await;
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::delete()
+            .uri("/api/user/stream/other-private")
+            .insert_header(("Authorization", format!("Bearer {}", fixture.token)))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body: serde_json::Value = test::read_body_json(response).await;
+    assert!(body
+        .to_string()
+        .contains("Stop the stream before deleting it"));
+    let mut conn = fixture.pool.get().unwrap();
+    conn.batch_execute(
+        "DO $$ BEGIN
+        ASSERT EXISTS (SELECT 1 FROM streams WHERE id = 3 AND is_live);
+        ASSERT EXISTS (SELECT 1 FROM lobbies WHERE uuid = 'lobby' AND stream_id = 3);
+    END $$; UPDATE streams SET is_live = false WHERE id = 3;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::delete()
+            .uri("/api/user/stream/other-private")
+            .insert_header(("Authorization", format!("Bearer {}", fixture.token)))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut conn = fixture.pool.get().unwrap();
+    conn.batch_execute("DO $$ BEGIN
+        ASSERT NOT EXISTS (SELECT 1 FROM streams WHERE id = 3);
+        ASSERT EXISTS (SELECT 1 FROM lobbies WHERE uuid = 'lobby' AND channel_id = 2 AND stream_id IS NULL AND is_open);
+    END $$;").unwrap();
+}
