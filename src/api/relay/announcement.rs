@@ -21,6 +21,24 @@ async fn announced(state: &RelayState, request: &HttpRequest) -> actix_web::Resu
     let prefix = request.match_info().get("prefix").unwrap_or("");
     let mut admission = state.auth.request(moq_auth::Transport::Http, prefix);
     admission.remote = request.peer_addr();
+    if let Some(header) = request
+        .headers()
+        .get(actix_web::http::header::AUTHORIZATION)
+    {
+        let value = header
+            .to_str()
+            .map_err(|_| ErrorUnauthorized("invalid authorization header"))?;
+        let (scheme, token) = value
+            .split_once(' ')
+            .ok_or_else(|| ErrorUnauthorized("invalid authorization header"))?;
+        if !scheme.eq_ignore_ascii_case("bearer") {
+            return Err(ErrorUnauthorized("invalid authorization scheme"));
+        }
+        admission.token = Some(moq_auth::Token {
+            kind: moq_auth::Token::OUT_OF_BAND,
+            value: token.trim().as_bytes().to_vec(),
+        });
+    }
     if !request.query_string().is_empty() {
         admission.query = Some(request.query_string().to_string());
     }

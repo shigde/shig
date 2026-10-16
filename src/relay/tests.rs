@@ -8,12 +8,9 @@ async fn default_config_uses_current_relay_schema() {
     let parsed: crate::server::ConfigFile =
         toml::from_str(include_str!("../../config/default.toml")).unwrap();
     let config = parsed.relay;
-    config.auth.validate().unwrap();
     assert_eq!(config.listen.bind.unwrap().to_string(), "[::]:4443");
-    let grant = config.auth.public_grant().unwrap();
-    assert!(grant.publish.matches("live/channel/stream"));
-    assert!(grant.subscribe.matches("live/channel/stream"));
-    assert!(!grant.publish.matches("private/channel/stream"));
+    assert!(config.auth.public_grant().is_none());
+    assert!(config.auth.url.is_none());
 }
 
 #[test]

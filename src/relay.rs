@@ -1,5 +1,6 @@
 use crate::relay::config::RelayConfig;
 use crate::relay::state::RelayState;
+use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
 pub mod config;
@@ -11,6 +12,21 @@ mod tests;
 pub struct RelayServer {
     pub state: RelayState,
     relay: moq_relay::Relay,
+    authorization: Option<BoxFuture<'static, anyhow::Result<()>>>,
+}
+
+impl RelayServer {
+    pub fn with_authorizer<F, Fut>(mut self, authorize: F) -> anyhow::Result<Self>
+    where
+        F: FnOnce(moq_relay::auth::Admissions) -> Fut,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let admissions = self.relay.admissions().ok_or_else(|| {
+            anyhow::anyhow!("Embedded authorization requires empty relay.auth settings")
+        })?;
+        self.authorization = Some(Box::pin(authorize(admissions)));
+        Ok(self)
+    }
 }
 
 pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelayServer> {
@@ -33,7 +49,11 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
         web: relay.web().routes(),
     };
 
-    Ok(RelayServer { state, relay })
+    Ok(RelayServer {
+        state,
+        relay,
+        authorization: None,
+    })
 }
 
 pub async fn start_moq_udp_only(
@@ -42,8 +62,19 @@ pub async fn start_moq_udp_only(
 ) -> anyhow::Result<()> {
     let trigger = relay.relay.shutdown_trigger().clone();
     let mut running = Box::pin(relay.relay.run());
+    let authorization = async move {
+        match relay.authorization {
+            Some(authorize) => authorize.await,
+            None => std::future::pending().await,
+        }
+    };
     tokio::select! {
         result = &mut running => result,
+        result = authorization => {
+            trigger.start();
+            let _ = running.await;
+            result.and_then(|()| anyhow::bail!("Relay authorization stopped unexpectedly"))
+        }
         _ = shutdown.cancelled() => {
             trigger.start();
             running.await

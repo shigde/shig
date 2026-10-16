@@ -44,8 +44,7 @@ bind = "[::]:4443"
 listen = "[::]:4443"
 
 [relay.auth]
-public_subscribe = ["live/**"]
-public_publish = ["live/**"]
+# Shig supplies embedded authorization from stream visibility and account login.
 
 [sfu]
 advertised_ip = ""

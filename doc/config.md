@@ -65,8 +65,7 @@ key = ["/opt/shig/certs/relay/privkey.pem"]
 listen = "127.0.0.1:4444"
 
 [relay.auth]
-public_subscribe = ["live/**"]
-public_publish = ["live/**"]
+# Shig supplies account-aware embedded authorization.
 ```
 
 ## Webserver
@@ -246,10 +245,15 @@ Relay auth:
 
 ```toml
 [relay.auth]
-public_subscribe = ["live/**"]
-public_publish = ["live/**"]
+# Leave empty: Shig authorizes streams from the database and account login.
 ```
 
-The relay uses `moq-relay 0.17.x` configuration. When migrating an older configuration, rename `[relay.server]` to `[relay.listen]` and its `listen` field to `bind`. Rename `[relay.client]` to `[relay.connect]`. Public access uses patterns: `live/**` grants access to the `live` subtree, while `live` alone names one broadcast. Replace the old `subscribe`/`publish` settings with `public_subscribe`/`public_publish` as shown above.
+The relay uses `moq-relay 0.17.x` configuration. When migrating an older configuration, rename `[relay.server]` to `[relay.listen]` and its `listen` field to `bind`. Rename `[relay.client]` to `[relay.connect]`.
 
-These public rules allow anonymous access; they do not validate JWTs. Deployments that previously configured relay JWT keys must migrate to the new `[relay.auth].url` authorization service. The service receives session requests and returns grants. An empty auth configuration requires an embedded admissions handler and is not a public-access fallback in Shig.
+Shig installs its own embedded admissions handler. `streams.is_public = true` allows anonymous viewing and preview access; `false` requires a valid login for an active account, not a stream invitation. Publishing, moderation, lobby participation, and editing retain their existing role checks. HTTP preview routes recognize optional Bearer authentication. Anonymous lists omit account-only streams and direct anonymous preview requests return 404.
+
+The MoQ player sends the current account JWT as the `jwt` connection query parameter. Relay grants contain only the accessible broadcasts, with no network publishing permission; the SFU continues publishing internally. Keep relay connections on HTTPS/WebTransport in production and redact JWT query parameters from proxy/access logs. Leases are checked every 30 seconds so expired logins, disabled accounts, and reduced stream visibility close or restrict existing sessions. A token refresh may reconnect playback.
+
+Leave `[relay.auth]` empty. At application startup Shig replaces legacy static public patterns and external auth URLs with this embedded policy and logs a warning, so an older wildcard configuration cannot bypass stream visibility. This is Shig-specific; a standalone `moq-relay` may use different authorization settings.
+
+Static files under `/static`, such as avatar and thumbnail image files, are unchanged by this API/relay policy and remain directly addressable. This policy does not make already-known static image URLs private.

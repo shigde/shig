@@ -33,6 +33,16 @@ sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx postgresql postgresql-client pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad rsync netcat-openbsd
 ```
 
+### Database Updates During Deployment
+
+The server embeds the SQL migrations in its binary and runs pending migrations at startup, before starting the relay and HTTP services. Deploying a newly built release and restarting the service therefore applies database updates automatically. Cargo watches the migration directory so SQL-only changes also rebuild the embedded migrations. If a migration fails, startup exits with an error instead of serving with an incompatible schema.
+
+Migration `2026-10-16-090000_fix_stream_friends_uniqueness` preserves existing invitations and replaces the individual unique indexes on `stream_id` and `user_id` with a unique index on `(stream_id, user_id)`. The primary key and foreign keys are unchanged. Diesel applies the migration in one transaction; index creation takes write locks, so allow for a brief startup maintenance window. Back up the database before deployment.
+
+The down migration restores the old restrictions only if existing data permits it. Once multiple guests belong to one stream or a guest belongs to multiple streams, rollback fails transactionally rather than deleting invitations. Reverting the application binary alone does not revert the database migration.
+
+Migration `2026-10-16-100000_fix_channel_friends_uniqueness` makes the same change for `(channel_id, user_id)` while preserving existing channel memberships. Deploy the updated web client alongside the backend for account-only MoQ playback, since it supplies the login credential to the relay.
+
 Create the runtime user:
 
 ```shell

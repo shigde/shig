@@ -20,6 +20,9 @@ pub mod user_roles;
 pub mod users;
 pub mod verification_tokens;
 
+#[cfg(test)]
+mod migration_test;
+
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PoolError};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};

@@ -51,6 +51,12 @@ Stopping a publication cancels the publisher loop, finishes the MoQ tracks, and 
 
 The embedded `moq_relay::Relay` owns its transport listeners, Web API, and shutdown. `RelayState` provides shared handles for internal publishing and the additional Actix endpoints.
 
+## Visibility
+
+Public streams (`is_public = true`) and their previews are available anonymously. Account-only streams (`false`) and their preview endpoints require a valid login for an active account; no invitation is needed for viewing. Existing publishing and lobby permissions are separate.
+
+The application provides the relay's admission decisions from the database, including the relay's native announcements and fetch routes, so bypassing the Actix API does not bypass visibility. Grants enumerate only accessible broadcast paths and never authorize external publishing. Logged-in players pass their JWT in the relay URL. Authorization runs on connection setup and every 30 seconds for existing leases, not on media packets. The relay serving future owns these lease checks and drops them on shutdown. The web client must be deployed with the backend update for account-only playback.
+
 ## Dependencies
 
 Rust uses `gstreamer` and `gstreamer-app` 0.24 with GStreamer >= 1.24. Required runtime elements are `appsrc`, `appsink`, `rtpjitterbuffer`, `rtpopusdepay`, and the selected video depayloader. H264/H265 also require `h264parse`/`h265parse`; AV1 requires `rtpav1depay` and `av1parse`, which must be provided by the installed plugin set. VP8/VP9/Opus do not require an encoder or decoder in production.
