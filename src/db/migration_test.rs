@@ -113,3 +113,54 @@ fn channel_friends_migration_preserves_memberships_and_enforces_pairs() {
         Ok(())
     });
 }
+
+#[test]
+#[ignore = "Requires SHIG_MIGRATION_TEST_DATABASE_URL pointing to a dedicated PostgreSQL test database"]
+fn view_joins_timestamps_and_migration_rollbacks() {
+    let url = std::env::var("SHIG_MIGRATION_TEST_DATABASE_URL")
+        .expect("dedicated test database URL required");
+    let mut conn = PgConnection::establish(&url).unwrap();
+    conn.test_transaction::<_, Error, _>(|conn| {
+        conn.batch_execute("CREATE SCHEMA view_migration_test; SET LOCAL search_path TO view_migration_test;")?;
+        crate::db::run_migrations(conn).unwrap();
+        conn.batch_execute(
+            "INSERT INTO actors (preferred_username, actor_type, actor_iri, created_at) VALUES
+                ('alice', 'Person', 'https://example.test/alice', now()),
+                ('channel', 'Group', 'https://example.test/channel', now()),
+                ('bob', 'Person', 'https://example.test/bob', now());
+             INSERT INTO users (name, email, user_uuid, user_role_id, password, active, actor_id, created_at, updated_at) VALUES
+                ('alice', 'alice@example.test', 'alice', 2, 'unused', true, 1, now(), '2000-01-01'),
+                ('bob', 'bob@example.test', 'bob', 2, 'unused', true, 3, now(), '2000-01-01');
+             INSERT INTO channels (uuid, user_id, actor_id, name, created_at) VALUES
+                ('channel', 1, 2, 'Channel', now());
+             INSERT INTO actor_images (filename, file_url, on_disk, image_type, actor_id, width, created_at) VALUES
+                ('banner', '/banner', true, 'banner', 3, 1024, now()),
+                ('small', '/small', true, 'actor', 3, 64, now()),
+                ('large', '/large', true, 'actor', 3, 256, now()),
+                ('new', '/avatar', true, 'actor', 3, 256, now());
+             INSERT INTO streams (uuid, user_id, channel_id, title, date, licence, created_at) VALUES
+                ('stream', 2, 1, 'Stream', now(), 1, now());
+             DO $$ BEGIN
+                ASSERT (SELECT count(*) FROM active_users WHERE user_uuid = 'bob') = 1;
+                ASSERT (SELECT avatar FROM active_users WHERE user_uuid = 'bob') = '/avatar';
+                ASSERT (SELECT count(*) FROM stream_previews WHERE uuid = 'stream') = 1;
+                ASSERT (SELECT owner_avatar FROM stream_previews WHERE uuid = 'stream') = '/avatar';
+                ASSERT (SELECT channel_uuid FROM stream_previews WHERE uuid = 'stream') = 'channel';
+                ASSERT (SELECT avatar IS NULL FROM active_users WHERE user_uuid = 'alice');
+             END $$;
+             UPDATE users SET name = 'Bob updated' WHERE user_uuid = 'bob';
+             DO $$ BEGIN
+                ASSERT (SELECT updated_at > '2000-01-01' FROM users WHERE user_uuid = 'bob');
+             END $$;
+             UPDATE users SET name = 'Bob explicit', updated_at = '2001-01-01' WHERE user_uuid = 'bob';
+             DO $$ BEGIN
+                ASSERT (SELECT updated_at = '2001-01-01' FROM users WHERE user_uuid = 'bob');
+             END $$;"
+        )?;
+        // Exercise every down migration, including the repaired historical ones.
+        use diesel_migrations::MigrationHarness;
+        conn.revert_all_migrations(crate::db::MIGRATIONS).unwrap();
+        crate::db::run_migrations(conn).unwrap();
+        Ok(())
+    });
+}
