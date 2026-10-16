@@ -13,10 +13,3 @@ pub struct StartRelayMediaStream {
 #[derive(Message)]
 #[rtype(result = " RelayResult<()>")]
 pub struct StopRelayMediaStream {}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct RelayFailed {
-    pub source: &'static str,
-    pub error: String,
-}

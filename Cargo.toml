@@ -76,3 +76,5 @@ libc = "0.2.180"
 hex = "0.4.3"
 moq-net = "0.3.13"
 moq-mux = "0.10.14"
+gstreamer = { version = "0.24", features = ["v1_24"] }
+gstreamer-app = { version = "0.24", features = ["v1_24"] }

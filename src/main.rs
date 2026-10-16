@@ -11,7 +11,6 @@ mod relay;
 mod server;
 mod sfu;
 mod util;
-mod worker;
 
 use crate::db::fixtures::insert_fixtures;
 use crate::db::{build_pool, run_migrations};

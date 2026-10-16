@@ -26,9 +26,11 @@ See [firewall](firewall.md).
 
 Install server packages:
 
+The relay requires GStreamer >= 1.24 and its RTP plugins. Use Ubuntu 24.04 or a compatible distribution providing that version. Release binaries are built on Ubuntu 24.04 and require compatible system libraries on the deployment host; they are not standalone static binaries.
+
 ```shell
 sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx postgresql postgresql-client ffmpeg rsync netcat-openbsd
+sudo apt install -y nginx certbot python3-certbot-nginx postgresql postgresql-client pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad rsync netcat-openbsd
 ```
 
 Create the runtime user:

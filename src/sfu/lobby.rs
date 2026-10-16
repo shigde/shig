@@ -16,9 +16,8 @@ use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
 use crate::sfu::rtc::PortAllocator;
 use crate::sfu::{LobbyStopped, Sfu};
-use crate::worker::manager::WorkerManager;
 use actix::{
-    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, Handler, Message,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, AtomicResponse, Context, Handler, Message,
     ResponseActFuture, WrapFuture,
 };
 use derive_more::Display;
@@ -50,11 +49,10 @@ impl Lobby {
         parent_addr: Addr<Sfu>,
         db_actor_addr: Addr<DbActor>,
         relay_state: RelayState,
-        worker_manager: Addr<WorkerManager>,
         port_allocator: PortAllocator,
     ) -> Self {
         let relay_addr =
-            RelayActor::new(relay_state, worker_manager.clone(), stream_uuid.clone()).start();
+            RelayActor::new(relay_state, stream_uuid.clone()).start();
 
         Self {
             id: uuid,
@@ -308,18 +306,26 @@ impl Handler<TimeoutPeer> for Lobby {
 pub struct LobbyShutdown {}
 
 impl Handler<LobbyShutdown> for Lobby {
-    type Result = ();
+    type Result = AtomicResponse<Self, ()>;
 
-    fn handle(&mut self, _msg: LobbyShutdown, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: LobbyShutdown, _ctx: &mut Self::Context) -> Self::Result {
         self.shutting_down = true;
 
         for (_, addr) in self.peers.iter() {
             addr.do_send(PeerShutdown {});
         }
 
-        if self.peers.is_empty() {
-            self.stop(ctx);
-        }
+        let relay = self.relay_addr.clone();
+        // The SFU waits for this reply before terminating its runtime. Pause peer-stop
+        // handling until the relay has joined its GStreamer teardown.
+        AtomicResponse::new(Box::pin(
+            async move { let _ = relay.send(StopRelayMediaStream {}).await; }
+                .into_actor(self)
+                .map(|(), actor, ctx| {
+                    actor.streaming = false;
+                    if actor.peers.is_empty() { actor.stop(ctx); }
+                }),
+        ))
     }
 }
 

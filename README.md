@@ -9,13 +9,15 @@
 For a local development setup:
 
 ```sh
-brew install postgresql ffmpeg
+brew install postgresql gstreamer
 cargo install diesel_cli --no-default-features --features postgres
 createdb shig
 echo DATABASE_URL=postgres://postgres@localhost:5432/shig > .env
 diesel migration run
 cargo run -- --config config/dev.toml
 ```
+
+Livestream publishing uses an in-process GStreamer pipeline (>= 1.24), not FFmpeg. See [Relay Architecture](doc/architecture/relay.md) for required plugins and Linux packages.
 
 ## Install
 

@@ -1,117 +1,72 @@
 # Relay Architecture
 
-This document describes the livestream egress path from the mixed client stream to multiple viewers.
-
-## Library Versions
-
-The embedded relay uses `moq-relay 0.17.5`, `moq-net 0.3.13`, `moq-mux 0.10.14`, `moq-tokio 0.19.26`, and `moq-auth 0.2.1`. `moq-tokio` replaces the previous `moq-native` dependency. The upstream `Relay` owns listener startup, workers, and graceful shutdown; Shig keeps handles to its cluster and authentication service for internal publishing and discovery.
-
-The selected GStreamer integration will pass compressed frames to `moq-mux` and publish directly into this embedded relay. It will not use `moqsink` or add a local QUIC publishing connection. That pipeline is not implemented yet; the current FFmpeg/fMP4 path below remains in use.
-
-## Overview
-
-The stream owner mixes local and guest media into one composed stream on the client side. This mixed stream is sent to the SFU via WebRTC ingress.
-
-The SFU forwards the stream media into the relay pipeline. The relay pipeline packages the media as fragmented MP4/CMAF and publishes it over Media over QUIC. Viewers subscribe to the published stream through the relay.
-
-Current viewer playback latency target:
-
-```text
-750 ms
-```
+The stream owner mixes guest and local video/audio in the browser and publishes the composed stream through WebRTC. GStreamer depayloads its RTP packets in the Shig process. `moq-mux` publishes the compressed frames directly into the embedded relay origin. There is no FFmpeg process, local UDP forwarding, fMP4 intermediate, or second QUIC publishing connection.
 
 ## Components
 
 ```mermaid
-flowchart LR
-    subgraph OwnerClient["Stream Owner Client"]
-        Mixer["Canvas and Audio Mixer"]
-        WebRTCIngress["WebRTC Ingress Sender"]
+flowchart TB
+    Client["Browser mixer"] --> Endpoint["Publish Endpoint"]
+    Endpoint --> Media["Relay track RTP channels"]
+    Actor["RelayActor: owns publisher lifecycle"] -.-> Publisher["HangPublisher: async task"]
+    Publisher -.-> Pipeline
+    subgraph Pipeline["GStreamer pipeline: native streaming threads"]
+        direction LR
+        Input["appsrc: audio / video RTP"] --> Jitter["RTP jitter buffers"]
+        Jitter --> Depay["Codec depayloaders"]
+        Depay --> Output["appsink: compressed frames"]
     end
-
-    subgraph ShigServer["Shig Server"]
-        SFU["SFU"]
-        RelayWorker["Relay Worker"]
-        FFmpeg["FFmpeg Packager"]
-        MoQRelay["Media over QUIC Relay"]
-    end
-
-    subgraph Viewers["Viewer Clients"]
-        ViewerA["Viewer A"]
-        ViewerB["Viewer B"]
-        ViewerN["Viewer N"]
-    end
-
-    Mixer --> WebRTCIngress
-    WebRTCIngress --> SFU
-    SFU --> RelayWorker
-    RelayWorker --> FFmpeg
-    FFmpeg --> MoQRelay
-    MoQRelay --> ViewerA
-    MoQRelay --> ViewerB
-    MoQRelay --> ViewerN
+    Media --> Input
+    Output --> Frames["Bounded sample queue"]
+    Frames --> Publisher
+    Publisher --> Mux["moq-mux: tracks and catalog"]
+    Mux --> Origin["Internal MoQ origin"]
+    Origin --> Relay["Embedded MoQ relay"]
+    Relay --> Player["Viewer player"]
 ```
 
-## Stream Owner Path
+`RelayActor` remains the Actix owner. The publisher is an async task, not a second actor. It subscribes to both track channels before starting the pipeline. Startup completes only after the pipeline and MoQ track importers have been created. GStreamer initialization and teardown run on Tokio's blocking pool; GStreamer manages its own streaming threads. The task holds only a weak address to its owning actor.
 
-The stream owner creates a mixed stream in the client:
+## Media Path
 
-- video is rendered into a canvas mixer
-- audio is mixed through the Web Audio graph
-- the resulting MediaStream is sent as the livestream source
+Video codec, RTP payload type, clock rate, and fmtp parameters come from the received track. The adapter supports VP8, VP9, H264, H265, and AV1 when their GStreamer plugins are installed. H264/H265 parsers output Annex B access units; VP8/VP9 output whole compressed frames. Audio is Opus at a 48 kHz RTP clock, with the negotiated channel count. Unsupported codecs fail explicitly instead of being interpreted as H264. Nothing is decoded, mixed, or re-encoded on the server.
 
-The mixed stream enters Shig through WebRTC:
+Both paths use a 50 ms RTP jitter buffer. The appsrc arrival timestamps share the pipeline running clock; GStreamer derives frame timestamps from the RTP clocks. This is not full RTCP Sender Report based A/V clock synchronization. Live playback and long-running audio/video synchronization must also be checked with the browser.
 
-```text
-Client Mixer -> WebRTC Ingress -> SFU
+The publisher requests a video keyframe after startup. Delta frames are withheld until GStreamer marks a complete keyframe. A discontinuity after startup resets this gate and requests another keyframe. `moq-mux` creates video groups at keyframes; audio groups are explicitly closed after each Opus frame so late viewers do not subscribe to an unbounded audio group.
+
+Browsers are not assumed to generate periodic video keyframes. While frames arrive, the publisher requests the next keyframe when the current group reaches two seconds, half of moq-net's 32 MiB byte limit, or half of its 8192-frame limit. Unanswered requests are retried at most once per second, and an actual keyframe resets the counters. Delta frames never start a new group. These requests reduce the risk of hitting the hard limit; an encoder that ignores PLI can still exceed it. Video write errors include the group's frame and payload-byte counts; audio errors are labeled separately.
+
+## Buffer Ownership and Limits
+
+The RTP adapter serializes the header separately and wraps the existing reference-counted payload as GStreamer memory. It does not marshal and copy the entire RTP packet into a new contiguous buffer. Each appsink callback queues an owned sample without blocking. The publisher wraps the readable mapped frame in `Bytes::from_owner`, retaining GStreamer's allocation until MoQ releases it.
+
+This avoids additional payload copies at our Rust/GStreamer boundaries, but is not a claim that depayloading, buffer mapping, parsers, or transport encryption never copy internally.
+
+Each appsrc input queue is limited by a 4 MiB high-water check. The shared output queue holds at most 128 samples. Overflow, RTP broadcast lag, pipeline errors, and closed channels terminate the publication with an error. They do not silently discard arbitrary compressed frames or block the SFU receive loop. These are queue limits, not a strict total pipeline memory budget.
+
+## Shutdown
+
+Stopping a publication cancels the publisher loop, finishes the MoQ tracks, and sets the pipeline to `Null` on the blocking pool. The actor's stop handler waits for task completion. During SFU shutdown the lobby waits for this teardown before replying, so the runtime does not exit first. Dropping the actor also cancels its task. Completion messages identify the running instance so an old shutdown cannot clear a newly started publication. Other broadcasts and the embedded relay remain running.
+
+The embedded `moq_relay::Relay` owns its transport listeners, Web API, and shutdown. `RelayState` provides shared handles for internal publishing and the additional Actix endpoints.
+
+## Dependencies
+
+Rust uses `gstreamer` and `gstreamer-app` 0.24 with GStreamer >= 1.24. Required runtime elements are `appsrc`, `appsink`, `rtpjitterbuffer`, `rtpopusdepay`, and the selected video depayloader. H264/H265 also require `h264parse`/`h265parse`; AV1 requires `rtpav1depay` and `av1parse`, which must be provided by the installed plugin set. VP8/VP9/Opus do not require an encoder or decoder in production.
+
+On macOS:
+
+```sh
+brew install gstreamer
 ```
 
-## SFU to Relay
+On a Debian/Ubuntu release providing GStreamer >= 1.24:
 
-The SFU receives the WebRTC media tracks and exposes them to the relay worker.
-
-The relay worker forwards RTP packets to FFmpeg over local UDP sockets:
-
-```text
-SFU RTP -> Relay Worker -> UDP localhost -> FFmpeg
+```sh
+sudo apt install pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
 ```
 
-FFmpeg packages the incoming media into fragmented MP4/CMAF:
+The real-RTP tests additionally use VP8/VP9 and H264 encoders. H264 test generation requires the `x264enc` plugin (`gstreamer1.0-plugins-ugly` on Debian/Ubuntu).
 
-```text
-H.264 video copy
-Opus audio -> AAC
-fMP4 / CMAF fragments
-```
-
-The current fragment duration is approximately:
-
-```text
-250 ms
-```
-
-## Media over QUIC Publishing
-
-After FFmpeg creates CMAF fragments, the relay publishes them as Media over QUIC groups.
-
-Viewers do not connect to the SFU directly for livestream playback. They connect to the relay:
-
-```text
-Viewer -> Media over QUIC Relay -> live stream groups
-```
-
-Multiple viewers can subscribe to the same published stream.
-
-## Viewer Playback
-
-The web client uses the MoQ player with a current playback latency target of 750 ms.
-This value gives the player enough buffer to avoid frequent late group skips while keeping the stream close to live.
-
-Lower values reduce latency but make playback more sensitive to:
-
-- network jitter
-- QUIC scheduling
-- browser scheduling
-- decode timing
-- fragment arrival timing
-
+The MoQ libraries are `moq-relay 0.17.5`, `moq-net 0.3.13`, `moq-mux 0.10.14`, `moq-tokio 0.19.26`, and `moq-auth 0.2.1`. Playback uses the existing player's configured latency; the SDK announcement polling remains separate from the player's relay connection.

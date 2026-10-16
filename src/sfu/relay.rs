@@ -1,12 +1,13 @@
 use crate::sfu::media::Media;
 
 pub mod actor;
-pub mod message;
 mod error;
-mod port_allocator;
-mod rtp_forwarder;
-mod actor_supervisor;
+pub mod message;
+mod pipeline;
 mod publisher;
+
+#[cfg(test)]
+mod pipeline_test;
 
 #[derive(Clone)]
 pub struct RelayMediaStream {

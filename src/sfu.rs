@@ -8,8 +8,6 @@ use crate::sfu::lobby::{
     LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
 use crate::sfu::rtc::PortAllocator;
-use crate::worker::manager::WorkerManager;
-use crate::worker::message::ShutdownWorkers;
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
@@ -33,7 +31,6 @@ pub struct Sfu {
     shutting_down: bool,
     db_actor: Addr<DbActor>,
     relay_state: RelayState,
-    worker_manager: Addr<WorkerManager>,
     port_allocator: PortAllocator,
 }
 
@@ -45,7 +42,6 @@ impl Sfu {
     ) -> Sfu {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
-        let worker_manager = WorkerManager::new().start();
         let port_allocator = PortAllocator::new(config.port_min, config.port_max);
         Sfu {
             config,
@@ -53,7 +49,6 @@ impl Sfu {
             relay_state,
             shutting_down: false,
             db_actor,
-            worker_manager,
             port_allocator,
         }
     }
@@ -104,7 +99,6 @@ impl Handler<PublishLobby> for Sfu {
                     ctx.address(),
                     self.db_actor.clone(),
                     self.relay_state.clone(),
-                    self.worker_manager.clone(),
                     self.port_allocator.clone(),
                 )
                 .start();
@@ -310,7 +304,6 @@ impl Handler<Shutdown> for Sfu {
         let lobbies: Vec<_> = self.lobbies.values().cloned().collect();
         let lobby_ids: Vec<_> = self.lobbies.keys().cloned().collect();
         let db_actor = self.db_actor.clone();
-        let worker = self.worker_manager.clone();
 
         Box::pin(
             async move {
@@ -324,7 +317,6 @@ impl Handler<Shutdown> for Sfu {
                     let _ = db_actor.send(SetLobbyOffline { lobby_uuid }).await;
                 }
 
-                let _ = worker.send(ShutdownWorkers).await;
             }
             .into_actor(self)
             .map(|_, _act, ctx| {
