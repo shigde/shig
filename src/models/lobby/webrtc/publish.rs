@@ -3,6 +3,7 @@ use crate::db::channels::read::find_channel_by_uuid;
 use crate::db::lobbies::read::find_lobby_by_channel_id;
 use crate::db::stream_friends::read::is_stream_friend;
 use crate::db::streams::read::find_stream_by_uuid;
+use crate::db::users::read::find_user_by_id;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
@@ -51,11 +52,13 @@ pub(crate) async fn whip(
     } else {
         PeerRole::Guest
     };
+    let host_uuid = find_user_by_id(&mut conn, db_lobby.user_id)?.user_uuid;
     let answer = match sfu_addr
         .send(PublishLobby {
             lobby_uuid: db_lobby.uuid.clone(),
             stream_uuid: db_stream.uuid.clone(),
             user_uuid: user.user_uuid.clone(),
+            host_uuid,
             offer,
             role,
         })

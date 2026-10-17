@@ -479,7 +479,7 @@ impl Handler<PublishStream> for Lobby {
                 );
             };
 
-            let media_stream = self.router.get_media_stream();
+            let media_stream = self.router.get_media_stream(&PeerId::new(&self.host_uuid));
 
             if media_stream.audio.is_none() && media_stream.video.is_none() {
                 return Box::pin(

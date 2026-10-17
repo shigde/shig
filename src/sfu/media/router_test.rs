@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::sfu::media::router::Router;
-    use crate::sfu::media::{ForwardTarget, Media, MediaId};
+    use crate::sfu::media::{ForwardTarget, Media, MediaId, MediaPurpose, RtpCodecType};
     use crate::sfu::peer::PeerId;
     use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
     use rtc::media_stream::MediaStreamTrack;
@@ -67,6 +67,44 @@ mod tests {
     }
 
     // --- Tests --------------------------------------------------------------
+
+    #[test]
+    fn relay_uses_only_host_tracks_and_survives_guest_removal() {
+        let host = peer("host");
+        let guest = peer("guest-first");
+        let mut router = Router::new();
+        for (owner, prefix) in [(&guest, "guest"), (&host, "host")] {
+            for (kind, suffix) in [(RtpCodecType::Audio, "audio"), (RtpCodecType::Video, "video")] {
+                let mut track = media(&format!("{prefix}-{suffix}"), owner, suffix);
+                track.kind = kind;
+                track.purpose = MediaPurpose::STREAM;
+                router.medias.insert(track.id.clone(), track);
+            }
+        }
+        let selected = router.get_media_stream(&host);
+        assert_eq!(selected.audio.unwrap().peer_id, host);
+        assert_eq!(selected.video.unwrap().peer_id, host);
+        router.remove_medias_of_peer(&guest);
+        let selected = router.get_media_stream(&host);
+        assert_eq!(selected.audio.unwrap().peer_id, host);
+        assert_eq!(selected.video.unwrap().peer_id, host);
+        router.remove_medias_of_peer(&host);
+        let selected = router.get_media_stream(&host);
+        assert!(selected.audio.is_none());
+        assert!(selected.video.is_none());
+    }
+
+    #[test]
+    fn relay_does_not_fall_back_to_guest_tracks_when_host_is_missing() {
+        let mut router = Router::new();
+        let mut track = media("guest-video", &peer("guest"), "0");
+        track.kind = RtpCodecType::Video;
+        track.purpose = MediaPurpose::STREAM;
+        router.medias.insert(track.id.clone(), track);
+        let selected = router.get_media_stream(&peer("host"));
+        assert!(selected.audio.is_none());
+        assert!(selected.video.is_none());
+    }
 
     #[test]
     fn test_media_lookup_by_id() {

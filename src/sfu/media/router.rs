@@ -48,14 +48,14 @@ impl Router {
             .find(|m| &m.peer_id == peer_id && m.mid == mid)
     }
 
-    pub fn get_media_stream(&self) -> RelayMediaStream {
+    pub fn get_media_stream(&self, host: &PeerId) -> RelayMediaStream {
         let mut stream = RelayMediaStream {
             audio: None,
             video: None,
         };
 
         for media in self.medias.values() {
-            if media.purpose == MediaPurpose::STREAM {
+            if &media.peer_id == host && media.purpose == MediaPurpose::STREAM {
                 match media.kind {
                     RtpCodecType::Audio => stream.audio = Some(media.clone()),
                     RtpCodecType::Video => stream.video = Some(media.clone()),

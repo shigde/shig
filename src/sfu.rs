@@ -79,6 +79,7 @@ pub struct PublishLobby {
     pub lobby_uuid: String,
     pub stream_uuid: String,
     pub user_uuid: String,
+    pub host_uuid: String,
     pub role: peer::PeerRole,
 }
 
@@ -94,7 +95,7 @@ impl Handler<PublishLobby> for Sfu {
                 let lobby_addr = Lobby::new(
                     msg.lobby_uuid.clone(),
                     msg.stream_uuid.clone(),
-                    msg.user_uuid.clone(),
+                    msg.host_uuid.clone(),
                     self.config.clone(),
                     ctx.address(),
                     self.db_actor.clone(),

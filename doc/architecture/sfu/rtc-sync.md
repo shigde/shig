@@ -8,6 +8,8 @@ This document explains the synchronization boundary used by the RTC endpoint eve
 
 When the peer stops, the lobby removes its media routes, subscriptions, and participant record. If the host leaves, the relay publisher stops, but other peers remain in the lobby. The lobby closes only after the last peer has left; its existing shutdown path then marks it offline in the database. These checks run on connection events, not on media packets.
 
+The host identity comes from the lobby owner in the database, not from whichever peer joins first. Relay input is selected only from that host's `STREAM` tracks. A guest leaving must neither stop the relay publisher nor replace its input with another guest's tracks.
+
 ## Context
 
 WebRTC.rs owns the peer connection driver. The driver can emit events from async runtime tasks that are not the same task or actor context that created the endpoint.
