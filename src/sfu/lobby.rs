@@ -339,8 +339,18 @@ impl Handler<PeerStopped> for Lobby {
     type Result = ();
 
     fn handle(&mut self, msg: PeerStopped, ctx: &mut Self::Context) -> Self::Result {
-        self.peers.remove(&msg.id);
+        if self.peers.remove(&msg.id).is_none() {
+            return;
+        }
+        let medias = self.router.get_medias_of_peer(&msg.id);
+        for media in medias {
+            self.remove_media(media.id);
+        }
         self.router.remove_targets_for_peer(&msg.id);
+        if msg.id.as_str() == self.host_uuid && self.streaming {
+            self.streaming = false;
+            self.relay_addr.do_send(StopRelayMediaStream {});
+        }
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
         self.db_actor_addr.do_send(RemoveParticipant {
             lobby_uuid: self.id.clone(),

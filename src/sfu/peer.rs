@@ -12,12 +12,17 @@ use crate::sfu::rtc::{
     EndpointBuilder, EndpointEvent, EndpointEventHandler, EndpointId, EndpointKind, PortAllocator,
     PublishEndpoint, SubscribeEndpoint,
 };
-use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, WrapFuture};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, SpawnHandle, WrapFuture};
 use actix::{ActorFutureExt, ResponseActFuture};
 use derive_more::Display;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use webrtc::peer_connection::RTCPeerConnectionState;
+
+#[cfg(test)]
+#[path = "peer_lifecycle_test.rs"]
+mod lifecycle_tests;
 
 pub struct Peer {
     pub id: PeerId,
@@ -34,6 +39,8 @@ pub struct Peer {
     data_channel_reader: Option<DataChannelReader>,
     subscribe_connection_ready: bool,
     pending_media_activations: Vec<ActivateMedia>,
+    disconnect_timers: [Option<SpawnHandle>; 2],
+    shutting_down: bool,
 }
 
 impl Peer {
@@ -56,6 +63,8 @@ impl Peer {
             data_channel_reader: None,
             subscribe_connection_ready: false,
             pending_media_activations: Vec::new(),
+            disconnect_timers: [None, None],
+            shutting_down: false,
         }
     }
 
@@ -146,6 +155,9 @@ impl Handler<EndpointEvent> for Peer {
     type Result = ();
 
     fn handle(&mut self, msg: EndpointEvent, ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down {
+            return;
+        }
         match msg {
             EndpointEvent::NegotiationNeeded { endpoint_id } => {
                 log::debug!("endpoint negotiation needed, endpoint_id={}", endpoint_id);
@@ -190,6 +202,30 @@ impl Handler<EndpointEvent> for Peer {
                 if endpoint_id.as_kind().is_subscribe() {
                     self.subscribe_connection_ready = state == RTCPeerConnectionState::Connected;
                     self.flush_pending_media_activations();
+                }
+                let index = if endpoint_id.as_kind().is_publish() { 0 } else { 1 };
+                match state {
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => {
+                        ctx.notify(PeerShutdown {});
+                    }
+                    RTCPeerConnectionState::Disconnected => {
+                        if self.disconnect_timers[index].is_none() {
+                            self.disconnect_timers[index] = Some(ctx.run_later(
+                                Duration::from_secs(20),
+                                move |actor, ctx| {
+                                    actor.disconnect_timers[index] = None;
+                                    log::info!("peer disconnect timeout, peer_id={}", actor.id);
+                                    ctx.notify(PeerShutdown {});
+                                },
+                            ));
+                        }
+                    }
+                    RTCPeerConnectionState::Connected => {
+                        if let Some(timer) = self.disconnect_timers[index].take() {
+                            ctx.cancel_future(timer);
+                        }
+                    }
+                    _ => {}
                 }
             }
             EndpointEvent::DataChannel {
@@ -649,7 +685,16 @@ pub struct PeerShutdown {}
 impl Handler<PeerShutdown> for Peer {
     type Result = ResponseActFuture<Self, ()>;
 
-    fn handle(&mut self, _msg: PeerShutdown, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: PeerShutdown, ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down {
+            return Box::pin(async {}.into_actor(self));
+        }
+        self.shutting_down = true;
+        for timer in &mut self.disconnect_timers {
+            if let Some(timer) = timer.take() {
+                ctx.cancel_future(timer);
+            }
+        }
         log::info!("shutting down peer actor peer_id={}", self.id);
         self.stop_data_channel_reader();
 

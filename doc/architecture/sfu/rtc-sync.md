@@ -2,6 +2,12 @@
 
 This document explains the synchronization boundary used by the RTC endpoint event handler.
 
+## Connection Loss and Cleanup
+
+`Failed` or `Closed` on either endpoint shuts down the owning peer. `Disconnected` allows 20 seconds for recovery; reconnecting the same endpoint cancels its timer. Publish and subscribe endpoints have independent timers. Shutdown is idempotent and closes both endpoints and the control-channel reader.
+
+When the peer stops, the lobby removes its media routes, subscriptions, and participant record. If the host leaves, the relay publisher stops, but other peers remain in the lobby. The lobby closes only after the last peer has left; its existing shutdown path then marks it offline in the database. These checks run on connection events, not on media packets.
+
 ## Context
 
 WebRTC.rs owns the peer connection driver. The driver can emit events from async runtime tasks that are not the same task or actor context that created the endpoint.
