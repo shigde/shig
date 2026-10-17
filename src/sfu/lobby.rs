@@ -1,7 +1,7 @@
 use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
-use crate::sfu::db::message::{AddParticipant, RemoveParticipant};
+use crate::sfu::db::message::{AddParticipant, RemoveParticipant, SetLobbyOnline};
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{LobbyError, LobbyResult};
 use crate::sfu::media::router::Router;
@@ -147,15 +147,28 @@ impl Handler<Publish> for Lobby {
         self.peers.insert(peer_id.clone(), peer_addr.clone());
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
 
-        self.db_actor_addr.do_send(AddParticipant {
-            lobby_uuid,
-            stream_uuid,
-            user_uuid,
-        });
-
+        let db_actor = self.db_actor_addr.clone();
         let offer = msg.offer.clone();
         let failed_peer_addr = peer_addr.clone();
         let fut = async move {
+            // The next WHEP/leave request reads these records directly from the database.
+            db_actor
+                .send(SetLobbyOnline {
+                    lobby_uuid: lobby_uuid.clone(),
+                    stream_uuid: stream_uuid.clone(),
+                })
+                .await
+                .map_err(LobbyError::MailboxError)?
+                .map_err(LobbyError::PersistenceError)?;
+            db_actor
+                .send(AddParticipant {
+                    lobby_uuid,
+                    stream_uuid,
+                    user_uuid,
+                })
+                .await
+                .map_err(LobbyError::MailboxError)?
+                .map_err(LobbyError::PersistenceError)?;
             let result = peer_addr.send(PeerCreatePublishAnswer { offer }).await;
 
             match result {

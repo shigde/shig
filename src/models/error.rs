@@ -94,7 +94,8 @@ impl From<SfuError> for ApiError {
                     error_message: "SFU is unavailable".to_owned(),
                 }
             }
-            SfuError::LobbyError(LobbyError::PeerInternalError(PeerError::InternalRtc(_)))
+            SfuError::LobbyError(LobbyError::PersistenceError(_))
+            | SfuError::LobbyError(LobbyError::PeerInternalError(PeerError::InternalRtc(_)))
             | SfuError::LobbyError(LobbyError::StreamingError(_)) => {
                 ApiError::InternalServerError {
                     error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_owned(),
@@ -125,6 +126,15 @@ mod tests {
         let error = ApiError::from(SfuError::LobbyNotExists());
 
         assert!(error.is_status_code(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn maps_lobby_persistence_failure_to_internal_server_error() {
+        let error = ApiError::from(SfuError::LobbyError(LobbyError::PersistenceError(
+            "database write failed".to_owned(),
+        )));
+
+        assert!(error.is_status_code(StatusCode::INTERNAL_SERVER_ERROR));
     }
 }
 

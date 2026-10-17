@@ -1,7 +1,7 @@
 use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
-use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
+use crate::sfu::db::message::SetLobbyOffline;
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
@@ -88,7 +88,6 @@ impl Handler<PublishLobby> for Sfu {
 
     fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
         let lobby_uuid = msg.lobby_uuid.clone();
-        let stream_uuid = msg.stream_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
@@ -105,10 +104,6 @@ impl Handler<PublishLobby> for Sfu {
                 .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
                 metrics::set_active_lobbies(self.lobbies.len());
-                self.db_actor.do_send(SetLobbyOnline {
-                    lobby_uuid: lobby_uuid.clone(),
-                    stream_uuid: stream_uuid.clone(),
-                });
                 lobby_addr.clone()
             }
             Some(lobby_addr) => lobby_addr.clone(),

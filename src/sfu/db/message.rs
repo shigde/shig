@@ -1,7 +1,7 @@
 use actix::Message;
 
 #[derive(Message)]
-#[rtype(result = "Result<(), diesel::result::Error>")]
+#[rtype(result = "Result<(), String>")]
 pub struct SetLobbyOnline {
     pub lobby_uuid: String,
     pub stream_uuid: String,
@@ -14,7 +14,7 @@ pub struct SetLobbyOffline {
 }
 
 #[derive(Message)]
-#[rtype(result = "Result<(), diesel::result::Error>")]
+#[rtype(result = "Result<(), String>")]
 pub struct AddParticipant {
     pub lobby_uuid: String,
     pub stream_uuid: String,

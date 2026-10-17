@@ -19,6 +19,8 @@ pub type LobbyResult<T> = Result<T, LobbyError>;
 
 #[derive(Debug, Display)]
 pub enum LobbyError {
+    #[display(fmt = "Lobby persistence failed: {}", _0)]
+    PersistenceError(String),
     MailboxError(actix::MailboxError),
     PeerInternalError(PeerError),
     #[display(fmt = "Peer already exist: {}", _0)]

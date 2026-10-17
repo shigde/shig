@@ -18,7 +18,7 @@ impl DbActor {
         Self { pool }
     }
 
-    fn set_lobby_online_state(&mut self, lobby_uuid: &str, stream_uuid: &str) -> Result<(), Error> {
+    fn set_lobby_online_state(&mut self, lobby_uuid: &str, stream_uuid: &str) -> Result<(), String> {
         match self.pool.get() {
             Ok(mut conn) => {
                 if let Err(e) = update_lobby_online_state(&mut conn, lobby_uuid, stream_uuid) {
@@ -28,6 +28,7 @@ impl DbActor {
                         stream_uuid,
                         e
                     );
+                    return Err(e.to_string());
                 }
             }
             Err(e) => {
@@ -36,6 +37,7 @@ impl DbActor {
                     "Failed to get DB connection to set online state {:?}",
                     e
                 );
+                return Err(e.to_string());
             }
         };
 
@@ -69,7 +71,7 @@ impl DbActor {
         lobby_uuid: &str,
         stream_uuid: &str,
         user_uuid: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<(), String> {
         match self.pool.get() {
             Ok(mut conn) => {
                 if let Err(e) = insert_new_stream_participant(&mut conn, stream_uuid, user_uuid) {
@@ -80,6 +82,7 @@ impl DbActor {
                         user_uuid,
                         e
                     );
+                    return Err(e.to_string());
                 }
             }
             Err(e) => {
@@ -90,6 +93,7 @@ impl DbActor {
                     user_uuid,
                     e
                 );
+                return Err(e.to_string());
             }
         };
 
@@ -138,7 +142,7 @@ impl Actor for DbActor {
 }
 
 impl Handler<SetLobbyOnline> for DbActor {
-    type Result = Result<(), Error>;
+    type Result = Result<(), String>;
 
     fn handle(&mut self, msg: SetLobbyOnline, _: &mut SyncContext<Self>) -> Self::Result {
         log::info!("set lobby online lobby_uuid={}, stream_uuid={}", msg.lobby_uuid.as_str(), msg.stream_uuid.as_str());
@@ -156,7 +160,7 @@ impl Handler<SetLobbyOffline> for DbActor {
 }
 
 impl Handler<AddParticipant> for DbActor {
-    type Result = Result<(), Error>;
+    type Result = Result<(), String>;
 
     fn handle(&mut self, msg: AddParticipant, _: &mut SyncContext<Self>) -> Self::Result {
         log::info!(
