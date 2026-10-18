@@ -19,6 +19,7 @@ pub enum EndpointEvent {
     },
     IceCandidate {
         endpoint_id: EndpointId,
+        #[allow(dead_code)]
         event: RTCPeerConnectionIceEvent,
     },
     IceCandidateError {

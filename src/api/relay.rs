@@ -1,7 +1,6 @@
 pub mod announcement;
 pub mod tls;
 pub mod media;
-pub mod auth;
 
 // List of available Streams / Broadcasts
 // GET /announced (+ prefix)

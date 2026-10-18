@@ -30,11 +30,13 @@ impl EndpointBuilder {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_dedicated_reactor_pool_size(mut self, size: usize) -> Self {
         self.dedicated_reactor_pool_size = size;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_data_channel_send_buffer_limit(mut self, bytes: usize) -> Self {
         self.data_channel_send_buffer_limit = bytes;
         self

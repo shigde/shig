@@ -40,10 +40,12 @@ impl PortAllocator {
         })
     }
 
+    #[allow(dead_code)]
     pub fn available(&self) -> usize {
         self.inner.lock().unwrap().free.len()
     }
 
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         let inner = self.inner.lock().unwrap();
         (inner.end - inner.start + 1) as usize

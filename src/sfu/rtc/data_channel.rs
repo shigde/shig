@@ -76,6 +76,7 @@ pub struct MuteMsgData {
     pub mute: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) async fn create_data_channel(
     peer_addr: Addr<Peer>,
     endpoint_id: EndpointId,

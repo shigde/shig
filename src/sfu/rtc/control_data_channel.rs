@@ -38,6 +38,7 @@ impl ControlDataChannel {
         self.send_dcm_bin(DataChannelMsg::OfferMsg(msg)).await
     }
 
+    #[allow(dead_code)]
     pub async fn send_answer(&mut self, answer: String, number: u64) -> anyhow::Result<()> {
         log::info!("signaling answer, peer_id={}", self.id);
         let msg = DataChannelMsg::AnswerMsg(SdpMsgData {

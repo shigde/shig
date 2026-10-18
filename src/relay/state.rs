@@ -8,10 +8,13 @@ use tower::ServiceExt;
 pub struct RelayState {
     pub auth: moq_relay::auth::Auth,
     pub cluster: moq_relay::cluster::Cluster,
+    #[allow(dead_code)]
     pub web: axum::Router,
 }
 
 impl RelayState {
+    // this method is used to forward http requests to the web server in fingerprint api
+    #[allow(dead_code)]
     pub async fn forward_http(&self, uri: String) -> actix_web::Result<HttpResponse> {
         let request = Request::builder()
             .uri(uri)

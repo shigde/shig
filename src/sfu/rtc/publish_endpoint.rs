@@ -26,6 +26,7 @@ impl PublishEndpoint {
         }
     }
 
+    #[allow(dead_code)]
     pub fn id(&self) -> &EndpointId {
         &self.endpoint.id
     }

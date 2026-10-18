@@ -75,6 +75,7 @@ impl EndpointId {
         }
     }
 
+    #[allow(dead_code)]
     pub fn as_string(&self) -> String {
         self.to_string()
     }
@@ -104,6 +105,7 @@ impl EndpointKind {
         matches!(self, EndpointKind::Subscribe)
     }
 
+    #[allow(dead_code)]
     pub fn as_string(&self) -> String {
         self.to_string()
     }
