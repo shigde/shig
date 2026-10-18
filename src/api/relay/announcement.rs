@@ -1,54 +1,64 @@
-use crate::api::relay::auth::AuthQuery;
 use crate::relay::state::RelayState;
-use actix_web::error::ErrorUnauthorized;
-use actix_web::{get, web, HttpResponse};
-use moq_relay::{AuthError, AuthParams};
+use actix_web::{error::ErrorUnauthorized, get, web, HttpRequest, HttpResponse};
 
 #[get("/announced")]
 pub async fn get_root(
     state: web::Data<RelayState>,
-    query: web::Query<AuthQuery>,
+    request: HttpRequest,
 ) -> actix_web::Result<HttpResponse> {
-    get_announced_inner(state, String::new(), query.into_inner()).await
+    announced(&state, &request).await
 }
 
 #[get("/announced/{prefix:.*}")]
 pub async fn get_prefix(
     state: web::Data<RelayState>,
-    path: web::Path<String>,
-    query: web::Query<AuthQuery>,
+    request: HttpRequest,
 ) -> actix_web::Result<HttpResponse> {
-    get_announced_inner(state, path.into_inner(), query.into_inner()).await
+    announced(&state, &request).await
 }
 
-async fn get_announced_inner(
-    state: web::Data<RelayState>,
-    prefix: String,
-    query: AuthQuery,
-) -> actix_web::Result<HttpResponse> {
-    let params = AuthParams {
-        path: prefix,
-        jwt: query.jwt,
-    };
-
-    let token = state
+async fn announced(state: &RelayState, request: &HttpRequest) -> actix_web::Result<HttpResponse> {
+    let prefix = request.match_info().get("prefix").unwrap_or("");
+    let mut admission = state.auth.request(moq_auth::Transport::Http, prefix);
+    admission.remote = request.peer_addr();
+    if let Some(header) = request
+        .headers()
+        .get(actix_web::http::header::AUTHORIZATION)
+    {
+        let value = header
+            .to_str()
+            .map_err(|_| ErrorUnauthorized("invalid authorization header"))?;
+        let (scheme, token) = value
+            .split_once(' ')
+            .ok_or_else(|| ErrorUnauthorized("invalid authorization header"))?;
+        if !scheme.eq_ignore_ascii_case("bearer") {
+            return Err(ErrorUnauthorized("invalid authorization scheme"));
+        }
+        admission.token = Some(moq_auth::Token {
+            kind: moq_auth::Token::OUT_OF_BAND,
+            value: token.trim().as_bytes().to_vec(),
+        });
+    }
+    if !request.query_string().is_empty() {
+        admission.query = Some(request.query_string().to_string());
+    }
+    let lease = state
         .auth
-        .verify(&params)
+        .admit(admission)
         .await
-        .map_err(|_: AuthError| ErrorUnauthorized("invalid token"))?;
-
-    let Some(mut origin) = state.cluster.subscriber(&token) else {
+        .map_err(|_| ErrorUnauthorized("invalid token"))?;
+    let Some(origin) = state.cluster.subscriber(lease.token()) else {
+        lease.close("unauthorized", Default::default());
         return Err(ErrorUnauthorized("unauthorized"));
     };
-
+    let mut announcements = origin.consume().announced();
     let mut broadcasts = Vec::new();
-
-    while let Some((suffix, active)) = origin.try_announced() {
-        if active.is_some() {
-            broadcasts.push(suffix.to_string());
+    while let Some(update) = announcements.try_next() {
+        if update.kind.is_active() {
+            broadcasts.push(update.prefix.to_string());
         }
     }
-
+    lease.close("done", Default::default());
     Ok(HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")
         .body(broadcasts.join("\n")))

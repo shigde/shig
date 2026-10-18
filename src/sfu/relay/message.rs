@@ -1,7 +1,7 @@
 use crate::sfu::relay::error::RelayResult;
 use crate::sfu::relay::RelayMediaStream;
 use actix::Message;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 
 #[derive(Message)]
 #[rtype(result = " RelayResult<()>")]
@@ -13,10 +13,3 @@ pub struct StartRelayMediaStream {
 #[derive(Message)]
 #[rtype(result = " RelayResult<()>")]
 pub struct StopRelayMediaStream {}
-
-#[derive(Message)]
-#[rtype(result = "()")]
-pub struct RelayFailed {
-    pub source: &'static str,
-    pub error: String,
-}

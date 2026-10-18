@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: shig-server
+    scheme: https
+    metrics_path: /metrics
+    tls_config:
+      insecure_skip_verify: true
+    static_configs:
+      - targets:
+          - host.docker.internal:8080

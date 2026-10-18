@@ -1,5 +1,5 @@
-use crate::sfu::media::error::MediaError;
 use crate::sfu::peer::PeerId;
+use crate::sfu::rtc::RtcError;
 use derive_more::Display;
 
 pub type SfuResult<T> = Result<T, SfuError>;
@@ -19,6 +19,12 @@ pub type LobbyResult<T> = Result<T, LobbyError>;
 
 #[derive(Debug, Display)]
 pub enum LobbyError {
+    #[display(fmt = "Waiting for host")]
+    HostAbsent,
+    #[display(fmt = "Lobby is closing")]
+    Closing,
+    #[display(fmt = "Lobby persistence failed: {}", _0)]
+    PersistenceError(String),
     MailboxError(actix::MailboxError),
     PeerInternalError(PeerError),
     #[display(fmt = "Peer already exist: {}", _0)]
@@ -33,14 +39,16 @@ pub type PeerResult<T> = Result<T, PeerError>;
 
 #[derive(Debug, Display)]
 pub enum PeerError {
-    #[display(fmt = "Peer internal error: {}", _0)]
-    InternalMedia(MediaError),
+    #[display(fmt = "Peer RTC error: {}", _0)]
+    InternalRtc(String),
+    #[display(fmt = "Peer has no subscribe endpoint")]
+    MissingSubscribeEndpoint(),
     #[allow(dead_code)]
     PeerAlreadyStarted(),
 }
 
-impl From<MediaError> for PeerError {
-    fn from(e: MediaError) -> Self {
-        PeerError::InternalMedia(e)
+impl From<RtcError> for PeerError {
+    fn from(e: RtcError) -> Self {
+        PeerError::InternalRtc(e.to_string())
     }
 }

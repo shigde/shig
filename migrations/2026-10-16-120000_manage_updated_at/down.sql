@@ -1,0 +1,13 @@
+DROP TRIGGER set_updated_at ON actors;
+DROP TRIGGER set_updated_at ON users;
+DROP TRIGGER set_updated_at ON instances;
+DROP TRIGGER set_updated_at ON channels;
+DROP TRIGGER set_updated_at ON actor_images;
+DROP TRIGGER set_updated_at ON verification_tokens;
+DROP TRIGGER set_updated_at ON streams;
+DROP TRIGGER set_updated_at ON stream_meta_data;
+DROP TRIGGER set_updated_at ON stream_participants;
+DROP TRIGGER set_updated_at ON stream_thumbnails;
+DROP TRIGGER set_updated_at ON lobbies;
+DROP TRIGGER set_updated_at ON channel_friends;
+DROP TRIGGER set_updated_at ON stream_friends;

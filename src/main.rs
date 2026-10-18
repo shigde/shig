@@ -4,13 +4,13 @@ mod api;
 mod db;
 mod federation;
 mod files;
+mod metrics;
 mod middleware;
 mod models;
 mod relay;
 mod server;
 mod sfu;
 mod util;
-mod worker;
 
 use crate::db::fixtures::insert_fixtures;
 use crate::db::{build_pool, run_migrations};
@@ -39,6 +39,7 @@ struct Cli {
 
 fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    metrics::init();
     let cli = Cli::parse();
 
     let filename = &cli.config[..];
@@ -81,10 +82,27 @@ fn main() {
         }
 
         // relay server
-        let relay_server = new_relay_server(server_cfg.relay.clone())
-            .await
-            .unwrap_or_else(|e| {
-                log::error!("failed to init relay server: {:?}", e);
+        // Shig visibility is decided from the database, never by anonymous
+        // wildcard grants in a legacy relay configuration.
+        let mut relay_config = server_cfg.relay.clone();
+        if relay_config.auth.public_grant().is_some() || relay_config.auth.url.is_some() {
+            log::warn!(
+                "Using Shig stream authorization instead of static/external relay.auth grants"
+            );
+        }
+        relay_config.auth = Default::default();
+        let relay_server = new_relay_server(relay_config).await.unwrap_or_else(|e| {
+            log::error!("failed to init relay server: {:?}", e);
+            exit(1);
+        });
+        let access_pool = pool.clone();
+        let access_jwt = server_cfg.jwt.clone();
+        let relay_server = relay_server
+            .with_authorizer(move |admissions| {
+                crate::models::stream_access::authorize_relay(admissions, access_pool, access_jwt)
+            })
+            .unwrap_or_else(|error| {
+                log::error!("failed to configure relay access control: {error}");
                 exit(1);
             });
         let relay_state = relay_server.state.clone();
@@ -104,11 +122,16 @@ fn main() {
             signal::ctrl_c().await.expect("Failed to listen for ctrl-c");
             log::info!("Shutdown signal received!");
 
-            // stop sfu
-            sfu_addr_cp
-                .send(Shutdown {})
-                .await
-                .expect("Failed shut down sfu");
+            // The SFU may already have been stopped independently.
+            match sfu_addr_cp.send(Shutdown {}).await {
+                Ok(()) => log::info!("SFU shutdown completed"),
+                Err(actix::MailboxError::Closed) => {
+                    log::info!("SFU was already stopped before process shutdown")
+                }
+                Err(error) => {
+                    log::error!("SFU shutdown request failed; continuing shutdown: {error}")
+                }
+            }
 
             // stop relay
             shutdown_token.cancel();
@@ -139,7 +162,7 @@ fn main() {
 
         let ((), (), ()) = tokio::join!(
             async {
-                let  _ = web_server.await;
+                let _ = web_server.await;
                 log::info!("Actix web server was closed");
             },
             async {

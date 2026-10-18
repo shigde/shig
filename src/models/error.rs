@@ -2,6 +2,7 @@ use crate::db::error::{DbError, DbErrorKind};
 use crate::files::error::{FileError, FileErrorKind};
 use crate::models::http::response::Body;
 use crate::models::http::{MESSAGE_INTERNAL_SERVER_ERROR, MESSAGE_NOT_FOUND};
+use crate::sfu::error::{LobbyError, PeerError, SfuError};
 use actix_web::{
     error,
     http::{header::ContentType, StatusCode},
@@ -35,6 +36,9 @@ pub enum ApiError {
 
     #[display(fmt = "{error_message}")]
     NotAcceptable { error_message: String },
+
+    #[display(fmt = "{error_message}")]
+    ServiceUnavailable { error_message: String },
 }
 
 impl ApiError {
@@ -57,12 +61,93 @@ impl error::ResponseError for ApiError {
             ApiError::Forbidden { .. } => StatusCode::FORBIDDEN,
             ApiError::Conflict { .. } => StatusCode::CONFLICT,
             ApiError::NotAcceptable { .. } => StatusCode::NOT_ACCEPTABLE,
+            ApiError::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
     fn error_response(&self) -> HttpResponse {
         HttpResponse::build(self.status_code())
             .insert_header(ContentType::json())
             .json(Body::new(&self.to_string(), String::from("")))
+    }
+}
+
+impl From<SfuError> for ApiError {
+    fn from(error: SfuError) -> Self {
+        match error {
+            SfuError::LobbyError(LobbyError::HostAbsent) => ApiError::Conflict {
+                error_message: "Waiting for host".to_owned(),
+            },
+            SfuError::LobbyError(LobbyError::Closing) => ApiError::Conflict {
+                error_message: "Lobby is closing".to_owned(),
+            },
+            SfuError::LobbyAlreadyStarted() => ApiError::Conflict {
+                error_message: "Lobby is already started".to_owned(),
+            },
+            SfuError::LobbyNotExists() | SfuError::LobbyError(LobbyError::PeerNotExists(_)) => {
+                ApiError::NotFound {
+                    error_message: "Lobby peer does not exist".to_owned(),
+                }
+            }
+            SfuError::LobbyError(LobbyError::PeerAlreadyExists(_))
+            | SfuError::LobbyError(LobbyError::PeerInternalError(PeerError::PeerAlreadyStarted()))
+            | SfuError::LobbyError(LobbyError::PeerInternalError(
+                PeerError::MissingSubscribeEndpoint(),
+            )) => ApiError::Conflict {
+                error_message: "Peer already has an incompatible endpoint state".to_owned(),
+            },
+            SfuError::LobbyMailboxError(_) | SfuError::LobbyError(LobbyError::MailboxError(_)) => {
+                ApiError::ServiceUnavailable {
+                    error_message: "SFU is unavailable".to_owned(),
+                }
+            }
+            SfuError::LobbyError(LobbyError::PersistenceError(_))
+            | SfuError::LobbyError(LobbyError::PeerInternalError(PeerError::InternalRtc(_)))
+            | SfuError::LobbyError(LobbyError::StreamingError(_)) => {
+                ApiError::InternalServerError {
+                    error_message: MESSAGE_INTERNAL_SERVER_ERROR.to_owned(),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiError;
+    use crate::sfu::error::{LobbyError, SfuError};
+    use crate::sfu::peer::PeerId;
+    use actix_web::http::StatusCode;
+
+    #[test]
+    fn maps_existing_peer_to_conflict() {
+        let error = ApiError::from(SfuError::LobbyError(LobbyError::PeerAlreadyExists(
+            PeerId::new("peer"),
+        )));
+
+        assert!(error.is_status_code(StatusCode::CONFLICT));
+    }
+
+    #[test]
+    fn maps_missing_lobby_to_not_found() {
+        let error = ApiError::from(SfuError::LobbyNotExists());
+
+        assert!(error.is_status_code(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn maps_lobby_persistence_failure_to_internal_server_error() {
+        let error = ApiError::from(SfuError::LobbyError(LobbyError::PersistenceError(
+            "database write failed".to_owned(),
+        )));
+
+        assert!(error.is_status_code(StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    #[test]
+    fn host_absence_has_a_distinct_retryable_response() {
+        let error = ApiError::from(SfuError::LobbyError(LobbyError::HostAbsent));
+        assert!(error.is_status_code(StatusCode::CONFLICT));
+        assert_eq!(error.to_string(), "Waiting for host");
     }
 }
 

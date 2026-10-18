@@ -1,8 +1,7 @@
-use crate::sfu::media::{Media, MediaId, MediaPurpose};
+use crate::sfu::media::{ForwardTarget, Media, MediaId, MediaPurpose, RtpCodecType};
 use crate::sfu::peer::PeerId;
 use crate::sfu::relay::RelayMediaStream;
 use std::collections::HashMap;
-use webrtc::rtp_transceiver::rtp_codec::RTPCodecType;
 
 pub struct Router {
     pub medias: HashMap<MediaId, Media>,
@@ -49,21 +48,36 @@ impl Router {
             .find(|m| &m.peer_id == peer_id && m.mid == mid)
     }
 
-    pub fn get_media_stream(&self) -> RelayMediaStream {
+    pub fn get_media_stream(&self, host: &PeerId) -> RelayMediaStream {
         let mut stream = RelayMediaStream {
             audio: None,
             video: None,
         };
 
         for media in self.medias.values() {
-            if media.purpose == MediaPurpose::STREAM {
+            if &media.peer_id == host && media.purpose == MediaPurpose::STREAM {
                 match media.kind {
-                    RTPCodecType::Audio => stream.audio = Some(media.clone()),
-                    RTPCodecType::Video => stream.video = Some(media.clone()),
+                    RtpCodecType::Audio => stream.audio = Some(media.clone()),
+                    RtpCodecType::Video => stream.video = Some(media.clone()),
                     _ => continue,
                 }
             }
         }
         stream
+    }
+
+    pub(crate) fn activate_target(
+        &self,
+        media_id: &MediaId,
+        target: ForwardTarget,
+    ) -> Option<Media> {
+        let media = self.medias.get(media_id)?;
+        media.add_target(target).then(|| media.clone())
+    }
+
+    pub(crate) fn remove_targets_for_peer(&self, peer_id: &PeerId) {
+        for media in self.medias.values() {
+            media.remove_targets_for_peer(peer_id);
+        }
     }
 }

@@ -35,8 +35,8 @@ smtp_pass = ""
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
 
-[relay.server]
-listen = "[::]:4443"
+[relay.listen]
+bind = "[::]:4443"
 
 [relay.web.http]
 # Listen for HTTP and WebSocket (TCP) connections on the given address.
@@ -44,8 +44,7 @@ listen = "[::]:4443"
 listen = "[::]:4443"
 
 [relay.auth]
-subscribe = ["live"]
-publish = ["live"]
+# Shig supplies embedded authorization from stream visibility and account login.
 
 [sfu]
 advertised_ip = ""

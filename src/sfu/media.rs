@@ -1,34 +1,65 @@
 use crate::sfu::peer::PeerId;
 use actix::Message;
+use arc_swap::ArcSwap;
 use derive_more::Display;
-use enclose::enc;
 use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{broadcast, oneshot};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::broadcast;
 
 use crate::sfu::media::track_info::TrackInfo;
+use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
 use crate::util::id::random_id;
-use webrtc::rtp::packet::Packet;
-use webrtc::rtp_transceiver::PayloadType;
-use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTPCodecType};
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::track::track_local::TrackLocalWriter;
+use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec as RTCRtpCodecCapability, RtpCodecKind};
+use rtc::rtp_transceiver::{PayloadType, SSRC};
+use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
+use rtp::packet::Packet;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
+use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_remote::TrackRemote;
 
-pub mod connector;
-pub mod control_data_channel;
-pub mod data_channel;
-mod data_channel_test;
-pub mod error;
-pub mod message;
-pub mod receiver;
 pub mod router;
 mod router_test;
-mod sdp;
-pub mod sender;
-mod track_info;
+pub(crate) mod track_info;
 
-pub(crate) type RtpSenderChannel = broadcast::Sender<Arc<Packet>>;
+pub(crate) type RtpCodecType = RtpCodecKind;
+pub(crate) type RelayRtpChannel = broadcast::Sender<Arc<Packet>>;
+
+#[derive(Clone)]
+pub(crate) struct ForwardTarget {
+    peer_id: PeerId,
+    track: Arc<TrackLocalStaticRTP>,
+    header_extensions: RtpHeaderExtensionTranslator,
+    rtp_binding_confirmed: Arc<AtomicBool>,
+}
+
+impl ForwardTarget {
+    pub(crate) fn new(
+        peer_id: PeerId,
+        track: Arc<TrackLocalStaticRTP>,
+        header_extensions: RtpHeaderExtensionTranslator,
+    ) -> Self {
+        Self {
+            peer_id,
+            track,
+            header_extensions,
+            rtp_binding_confirmed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn peer_id(&self) -> &PeerId {
+        &self.peer_id
+    }
+
+    /// The first successful write proves that the peer-connection driver has
+    /// bound this local track to its sender.
+    fn confirm_rtp_binding(&self) -> bool {
+        self.rtp_binding_confirmed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
 
 /**
  * The Media object is centrally managed in the lobby.
@@ -47,10 +78,14 @@ pub struct Media {
     #[allow(dead_code)]
     pub src_track_id: String,
     pub src_stream_id: String,
+    pub header_extensions: HashMap<u8, String>,
     pub capability: RTCRtpCodecCapability,
-    pub kind: RTPCodecType,
-    pub rtp_tx: RtpSenderChannel,
-    stopped: CancellationToken,
+    pub kind: RtpCodecType,
+    /// The publisher SSRC is preserved on the subscriber leg for packet forwarding.
+    pub ssrc: SSRC,
+    source_track: Option<Arc<dyn TrackRemote>>,
+    targets: Arc<ArcSwap<Vec<ForwardTarget>>>,
+    pub relay_rtp_tx: RelayRtpChannel,
 
     // This is the muted state of a media track.
     // The state change is based on DataChannel messages. The MID is used as the identifier of
@@ -73,10 +108,12 @@ impl Media {
         mid: String,
         src_track_id: String,
         src_stream_id: String,
+        header_extensions: HashMap<u8, String>,
         capability: RTCRtpCodecCapability,
-        kind: RTPCodecType,
-        rtp_tx: broadcast::Sender<Arc<Packet>>,
-        stopped: CancellationToken,
+        kind: RtpCodecType,
+        ssrc: SSRC,
+        source_track: Option<Arc<dyn TrackRemote>>,
+        relay_rtp_tx: RelayRtpChannel,
         muted: bool,
         purpose: MediaPurpose,
         info: TrackInfo,
@@ -87,15 +124,18 @@ impl Media {
             mid,
             src_track_id,
             src_stream_id,
+            header_extensions,
             peer_id,
             kind,
             capability,
-            rtp_tx,
-            stopped,
+            ssrc,
+            source_track,
+            targets: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            relay_rtp_tx,
             muted,
             purpose,
             info,
-            payload_type
+            payload_type,
         }
     }
 
@@ -103,34 +143,103 @@ impl Media {
         self.muted = muted;
     }
 
-    pub(crate) async fn subscribe(&self, local_track: Arc<TrackLocalStaticRTP>) {
-        let mut rtp_rx = self.rtp_tx.subscribe();
-        let publisher_stopped = self.stopped.clone();
+    pub(crate) fn muted(&self) -> bool {
+        self.muted
+    }
 
-        let (started_tx, started_rx) = oneshot::channel();
-        tokio::spawn(enc!( (local_track )  async move {
-            started_tx.send(()).unwrap();
-            loop {
-                tokio::select! {
-                    rtp = rtp_rx.recv() => {
-                        match rtp {
-                            Ok(rtp_packet) => {
-                                let _ = local_track.write_rtp(&rtp_packet).await;
-                            },
-                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                                log::warn!("rtp_tx.recv() skipped {} packets", skipped);
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    _ = publisher_stopped.cancelled() => {
-                        break;
+    pub(crate) fn add_target(&self, target: ForwardTarget) -> bool {
+        let current = self.targets.load_full();
+        if current
+            .iter()
+            .any(|existing| existing.peer_id() == target.peer_id())
+        {
+            return false;
+        }
+
+        let mut next = Vec::with_capacity(current.len() + 1);
+        next.extend(current.iter().cloned());
+        next.push(target);
+        self.targets.store(Arc::new(next));
+        true
+    }
+
+    pub(crate) fn remove_targets_for_peer(&self, peer_id: &PeerId) {
+        let current = self.targets.load_full();
+        if !current.iter().any(|target| target.peer_id() == peer_id) {
+            return;
+        }
+
+        let next = current
+            .iter()
+            .filter(|target| target.peer_id() != peer_id)
+            .cloned()
+            .collect();
+        self.targets.store(Arc::new(next));
+    }
+
+    pub(crate) async fn forward_rtp(&self, packet: Packet) {
+        let targets = self.targets.load();
+        for target in targets.iter() {
+            let mut packet = packet.clone();
+            target.header_extensions.translate(&mut packet);
+            match target.track.write_rtp(packet).await {
+                Ok(()) => {
+                    if self.kind == RtpCodecType::Video && target.confirm_rtp_binding() {
+                        log::info!(
+                            "RTP target bound, requesting keyframe, media_id={}, subscriber_peer_id={}",
+                            self.id,
+                            target.peer_id()
+                        );
+                        self.request_keyframe(target.peer_id()).await;
                     }
                 }
+                Err(err) => {
+                    log::debug!(
+                        "could not forward RTP, media_id={}, peer_id={}: {err}",
+                        self.id,
+                        target.peer_id()
+                    );
+                }
             }
-        }));
-        let _ = started_rx.await;
+        }
     }
+
+    pub(crate) async fn request_keyframe(&self, subscriber_peer_id: &PeerId) {
+        if self.kind != RtpCodecType::Video {
+            return;
+        }
+
+        let Some(source_track) = &self.source_track else {
+            log::info!(
+                "cannot request keyframe without source track, media_id={}, subscriber_peer_id={}",
+                self.id,
+                subscriber_peer_id
+            );
+            return;
+        };
+
+        match source_track
+            .write_rtcp(vec![Box::new(PictureLossIndication {
+                sender_ssrc: 0,
+                media_ssrc: self.ssrc,
+            })])
+            .await
+        {
+            Ok(()) => log::info!(
+                "keyframe request queued, media_id={}, publisher_peer_id={}, subscriber_peer_id={}, media_ssrc={}",
+                self.id,
+                self.peer_id,
+                subscriber_peer_id,
+                self.ssrc
+            ),
+            Err(err) => log::info!(
+                "could not request keyframe, media_id={}, publisher_peer_id={}: {err}",
+                self.id,
+                self.peer_id
+            ),
+        }
+    }
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
@@ -138,7 +247,7 @@ pub struct MediaId(String);
 
 impl MediaId {
     pub fn from(peer_id: PeerId) -> Self {
-        let id_string = format!("{}-{}", random_id(6), peer_id);
+        let id_string = format!("{}-{}", random_id(5), peer_id);
         log::trace!("MediaId: ({}", id_string);
         Self(id_string)
     }
@@ -178,6 +287,13 @@ pub struct RemoveMedia {
 
 #[derive(Message)]
 #[rtype(result = "()")]
+pub(crate) struct ActivateMedia {
+    pub media_id: MediaId,
+    pub target: ForwardTarget,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct MuteMedia {
     pub peer_id: PeerId,
     pub mid: String,
@@ -204,7 +320,7 @@ impl Default for MediaPurpose {
 }
 
 impl MediaPurpose {
-    fn from_option_str(s: Option<&str>) -> MediaPurpose {
+    pub(crate) fn from_option_str(s: Option<&str>) -> MediaPurpose {
         match s {
             Some("1") => MediaPurpose::PARTICIPANT,
             Some("2") => MediaPurpose::STREAM,
@@ -212,7 +328,7 @@ impl MediaPurpose {
         }
     }
 
-    fn to_string(&self) -> String {
+    pub(crate) fn to_string(&self) -> String {
         let s = match self {
             MediaPurpose::PARTICIPANT => "1",
             MediaPurpose::STREAM => "2",

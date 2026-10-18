@@ -54,19 +54,18 @@ advertised_ip = ""
 port_min = 50000
 port_max = 51000
 
-[relay.server]
-listen = "127.0.0.1:4443"
+[relay.listen]
+bind = "127.0.0.1:4443"
 
-[relay.server.tls]
+[relay.listen.tls]
 cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = "/opt/shig/certs/relay/privkey.pem"
+key = ["/opt/shig/certs/relay/privkey.pem"]
 
 [relay.web.http]
 listen = "127.0.0.1:4444"
 
 [relay.auth]
-subscribe = ["live"]
-publish = ["live"]
+# Shig supplies account-aware embedded authorization.
 ```
 
 ## Webserver
@@ -92,7 +91,7 @@ cert = ""
 key = ""
 ```
 
-This is separate from relay TLS. Relay certificates are configured under `[relay.server.tls]`.
+This is separate from relay TLS. Relay certificates are configured under `[relay.listen.tls]`.
 
 ## Files
 
@@ -199,6 +198,8 @@ smtp_port = 25
 
 `[sfu]` configures the Selective Forwarding Unit.
 
+`host_grace_seconds` defaults to `120`. When the host disconnects, existing guests can wait for this duration before the lobby closes. New guests can join only while the host is connected. See [Host Presence and Lobby Lifetime](architecture/sfu/host-presence.md).
+
 The SFU handles the live WebRTC conference media between participants. The current config block exists so SFU-specific options can be added without mixing them into the webserver or relay config.
 
 ```toml
@@ -214,26 +215,26 @@ port_max = 51000
 
 This is separate from the WebRTC SFU. The SFU handles the conference media, while the relay is used for streaming egress and viewer playback.
 
-`[relay.server]` is the public MoQ/relay listener:
+`[relay.listen]` is the public MoQ/relay listener:
 
 ```toml
-[relay.server]
-listen = "127.0.0.1:4443"
+[relay.listen]
+bind = "127.0.0.1:4443"
 ```
 
 With Nginx stream routing, the relay can listen locally because Nginx forwards public relay traffic on `443` to `127.0.0.1:4443`.
 
 TCP `443` uses SNI routing, so `relay.example.com` can share the public HTTPS port with the web client domains. UDP `443` is forwarded completely to the relay for QUIC/WebTransport.
 
-`[relay.server.tls]` belongs only to the relay. It is separate from `[server.tls]`.
+`[relay.listen.tls]` belongs only to the relay. It is separate from `[server.tls]`.
 
 ```toml
-[relay.server.tls]
+[relay.listen.tls]
 cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = "/opt/shig/certs/relay/privkey.pem"
+key = ["/opt/shig/certs/relay/privkey.pem"]
 ```
 
-`cert` is a list.
+`cert` and `key` are lists. Each certificate chain is paired with the key at the same index.
 
 Optional relay HTTP/Web endpoint:
 
@@ -246,6 +247,15 @@ Relay auth:
 
 ```toml
 [relay.auth]
-subscribe = ["live"]
-publish = ["live"]
+# Leave empty: Shig authorizes streams from the database and account login.
 ```
+
+The relay uses `moq-relay 0.17.x` configuration. When migrating an older configuration, rename `[relay.server]` to `[relay.listen]` and its `listen` field to `bind`. Rename `[relay.client]` to `[relay.connect]`.
+
+Shig installs its own embedded admissions handler. `streams.is_public = true` allows anonymous viewing and preview access; `false` requires a valid login for an active account, not a stream invitation. Publishing, moderation, lobby participation, and editing retain their existing role checks. HTTP preview routes recognize optional Bearer authentication. Anonymous lists omit account-only streams and direct anonymous preview requests return 404.
+
+The MoQ player sends the current account JWT as the `jwt` connection query parameter. Relay grants contain only the accessible broadcasts, with no network publishing permission; the SFU continues publishing internally. Keep relay connections on HTTPS/WebTransport in production and redact JWT query parameters from proxy/access logs. Leases are checked every 30 seconds so expired logins, disabled accounts, and reduced stream visibility close or restrict existing sessions. A token refresh may reconnect playback.
+
+Leave `[relay.auth]` empty. At application startup Shig replaces legacy static public patterns and external auth URLs with this embedded policy and logs a warning, so an older wildcard configuration cannot bypass stream visibility. This is Shig-specific; a standalone `moq-relay` may use different authorization settings.
+
+Static files under `/static`, such as avatar and thumbnail image files, are unchanged by this API/relay policy and remain directly addressable. This policy does not make already-known static image URLs private.

@@ -1,0 +1,13 @@
+SELECT diesel_manage_updated_at('actors');
+SELECT diesel_manage_updated_at('users');
+SELECT diesel_manage_updated_at('instances');
+SELECT diesel_manage_updated_at('channels');
+SELECT diesel_manage_updated_at('actor_images');
+SELECT diesel_manage_updated_at('verification_tokens');
+SELECT diesel_manage_updated_at('streams');
+SELECT diesel_manage_updated_at('stream_meta_data');
+SELECT diesel_manage_updated_at('stream_participants');
+SELECT diesel_manage_updated_at('stream_thumbnails');
+SELECT diesel_manage_updated_at('lobbies');
+SELECT diesel_manage_updated_at('channel_friends');
+SELECT diesel_manage_updated_at('stream_friends');

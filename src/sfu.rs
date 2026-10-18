@@ -1,18 +1,18 @@
+use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
-use crate::sfu::db::message::{SetLobbyOffline, SetLobbyOnline};
+use crate::sfu::db::message::SetLobbyOffline;
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
     LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
-use crate::worker::manager::WorkerManager;
-use crate::worker::message::ShutdownWorkers;
+use crate::sfu::rtc::PortAllocator;
 use actix::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures_util::future::join_all;
-use moq_relay::AuthToken;
+use moq_relay::auth::Token as AuthToken;
 use std::collections::HashMap;
 
 pub mod config;
@@ -23,6 +23,7 @@ mod media;
 mod message;
 pub mod peer;
 mod relay;
+mod rtc;
 
 pub struct Sfu {
     config: SfuConfig,
@@ -30,7 +31,7 @@ pub struct Sfu {
     shutting_down: bool,
     db_actor: Addr<DbActor>,
     relay_state: RelayState,
-    worker_manager: Addr<WorkerManager>,
+    port_allocator: PortAllocator,
 }
 
 impl Sfu {
@@ -41,14 +42,14 @@ impl Sfu {
     ) -> Sfu {
         let lobbies = Box::new(HashMap::new());
         let db_actor = SyncArbiter::start(1, move || DbActor::new(pool.clone()));
-        let worker_manager = WorkerManager::new().start();
+        let port_allocator = PortAllocator::new(config.port_min, config.port_max);
         Sfu {
             config,
             lobbies,
             relay_state,
             shutting_down: false,
             db_actor,
-            worker_manager,
+            port_allocator,
         }
     }
 }
@@ -78,6 +79,7 @@ pub struct PublishLobby {
     pub lobby_uuid: String,
     pub stream_uuid: String,
     pub user_uuid: String,
+    pub host_uuid: String,
     pub role: peer::PeerRole,
 }
 
@@ -85,27 +87,29 @@ impl Handler<PublishLobby> for Sfu {
     type Result = ResponseActFuture<Self, SfuResult<String>>;
 
     fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down {
+            return Box::pin(fut::err(SfuError::LobbyError(crate::sfu::error::LobbyError::Closing)));
+        }
         let lobby_uuid = msg.lobby_uuid.clone();
-        let stream_uuid = msg.stream_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
+                if matches!(msg.role, peer::PeerRole::Guest) {
+                    return Box::pin(fut::err(SfuError::LobbyError(crate::sfu::error::LobbyError::HostAbsent)));
+                }
                 let lobby_addr = Lobby::new(
                     msg.lobby_uuid.clone(),
                     msg.stream_uuid.clone(),
-                    msg.user_uuid.clone(),
+                    msg.host_uuid.clone(),
                     self.config.clone(),
                     ctx.address(),
                     self.db_actor.clone(),
                     self.relay_state.clone(),
-                    self.worker_manager.clone(),
+                    self.port_allocator.clone(),
                 )
                 .start();
                 self.lobbies.insert(lobby_uuid.clone(), lobby_addr.clone());
-                self.db_actor.do_send(SetLobbyOnline {
-                    lobby_uuid: lobby_uuid.clone(),
-                    stream_uuid: stream_uuid.clone(),
-                });
+                metrics::set_active_lobbies(self.lobbies.len());
                 lobby_addr.clone()
             }
             Some(lobby_addr) => lobby_addr.clone(),
@@ -149,6 +153,28 @@ pub struct SubscribeLobby {
     pub answer: Option<String>,
     pub lobby_uuid: String,
     pub user_uuid: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "Result<bool, actix::MailboxError>")]
+pub struct HostPresence {
+    pub lobby_uuid: String,
+    pub stream_uuid: String,
+}
+
+impl Handler<HostPresence> for Sfu {
+    type Result = ResponseFuture<Result<bool, actix::MailboxError>>;
+
+    fn handle(&mut self, msg: HostPresence, _: &mut Self::Context) -> Self::Result {
+        let lobby = self.lobbies.get(&msg.lobby_uuid).cloned();
+        let closing = self.shutting_down;
+        Box::pin(async move {
+            match lobby {
+                Some(lobby) if !closing => lobby.send(lobby::HostPresence { stream_uuid: msg.stream_uuid }).await,
+                _ => Ok(false),
+            }
+        })
+    }
 }
 
 impl Handler<SubscribeLobby> for Sfu {
@@ -300,7 +326,8 @@ impl Handler<Shutdown> for Sfu {
         self.shutting_down = true;
 
         let lobbies: Vec<_> = self.lobbies.values().cloned().collect();
-        let worker = self.worker_manager.clone();
+        let lobby_ids: Vec<_> = self.lobbies.keys().cloned().collect();
+        let db_actor = self.db_actor.clone();
 
         Box::pin(
             async move {
@@ -310,7 +337,10 @@ impl Handler<Shutdown> for Sfu {
 
                 let _ = join_all(lobby_shutdowns).await;
 
-                let _ = worker.send(ShutdownWorkers).await;
+                for lobby_uuid in lobby_ids {
+                    let _ = db_actor.send(SetLobbyOffline { lobby_uuid }).await;
+                }
+
             }
             .into_actor(self)
             .map(|_, _act, ctx| {
@@ -331,6 +361,8 @@ impl Handler<LobbyStopped> for Sfu {
 
     fn handle(&mut self, msg: LobbyStopped, ctx: &mut Context<Self>) {
         self.lobbies.remove(&msg.id);
+        metrics::set_active_lobbies(self.lobbies.len());
+        metrics::remove_active_lobby_peers(&msg.id);
         self.db_actor.do_send(SetLobbyOffline {
             lobby_uuid: msg.id.to_string(),
         });

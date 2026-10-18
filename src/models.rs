@@ -5,3 +5,4 @@ pub mod http;
 pub mod lobby;
 pub mod mail;
 pub mod user;
+pub mod stream_access;

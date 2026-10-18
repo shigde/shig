@@ -3,6 +3,7 @@ use crate::db::channels::read::find_channel_by_uuid;
 use crate::db::lobbies::read::find_lobby_by_channel_id;
 use crate::db::stream_friends::read::is_stream_friend;
 use crate::db::streams::read::find_stream_by_uuid;
+use crate::db::users::read::find_user_by_id;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
@@ -51,24 +52,30 @@ pub(crate) async fn whip(
     } else {
         PeerRole::Guest
     };
+    let host_uuid = find_user_by_id(&mut conn, db_lobby.user_id)?.user_uuid;
     let answer = match sfu_addr
         .send(PublishLobby {
             lobby_uuid: db_lobby.uuid.clone(),
             stream_uuid: db_stream.uuid.clone(),
             user_uuid: user.user_uuid.clone(),
+            host_uuid,
             offer,
             role,
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
-            let error_message = format!(
-                "SFU error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
+        Ok(Ok(answer)) => answer,
+
+        Ok(Err(error)) => {
+            log::error!(
+                "SFU error on join lobby, channel_uuid={}, stream_uuid={}, user_uuid={}: {}",
+                channel_uuid,
+                stream_uuid,
+                user.user_uuid,
+                error
             );
-            log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            return Err(error.into());
+        }
 
         Err(e) => {
             let error_message = format!(
@@ -76,7 +83,7 @@ pub(crate) async fn whip(
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            return Err(ApiError::InternalServerError { error_message });
+            return Err(ApiError::ServiceUnavailable { error_message });
         }
     };
 

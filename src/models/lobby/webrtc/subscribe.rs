@@ -63,21 +63,24 @@ pub(crate) async fn whep_offer(
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
-            let error_message = format!(
-                "SFU error on offer, channel_uuid= {}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
+        Ok(Ok(answer)) => answer,
+        Ok(Err(error)) => {
+            log::error!(
+                "SFU error on offer, channel_uuid={}, stream_uuid={}, user_uuid={}: {}",
+                channel_uuid,
+                stream_uuid,
+                user.user_uuid,
+                error
             );
-            log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            return Err(error.into());
+        }
         Err(e) => {
             let error_message = format!(
                 "internal message error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            return Err(ApiError::InternalServerError { error_message });
+            return Err(ApiError::ServiceUnavailable { error_message });
         }
     };
 
@@ -137,21 +140,24 @@ pub(crate) async fn whep_answer(
         })
         .await
     {
-        Ok(result) => result.unwrap_or_else(|e| {
-            let error_message = format!(
-                "SFU error on answer, channel_uuid= {}, stream_uuid={}, user_uuid={}",
-                channel_uuid, stream_uuid, user.user_uuid
+        Ok(Ok(answer)) => answer,
+        Ok(Err(error)) => {
+            log::error!(
+                "SFU error on answer, channel_uuid={}, stream_uuid={}, user_uuid={}: {}",
+                channel_uuid,
+                stream_uuid,
+                user.user_uuid,
+                error
             );
-            log::error!("{}: {}", error_message.as_str(), e);
-            error_message
-        }),
+            return Err(error.into());
+        }
         Err(e) => {
             let error_message = format!(
                 "internal message error on join lobby, channel_uuid= {}, stream_uuid={}, user_uuid={}",
                 channel_uuid, stream_uuid, user.user_uuid
             );
             log::error!("{}: {}", error_message.as_str(), e);
-            return Err(ApiError::InternalServerError { error_message });
+            return Err(ApiError::ServiceUnavailable { error_message });
         }
     };
 

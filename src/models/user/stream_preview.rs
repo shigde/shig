@@ -1,4 +1,6 @@
-use crate::db::stream_previews::read::{find_all_stream_previews, find_all_stream_previews_by_channel, find_stream_preview_by_uuid};
+use crate::db::stream_previews::read::{
+    find_all_stream_previews, find_all_stream_previews_by_channel, find_stream_preview_by_uuid,
+};
 use crate::db::stream_previews::StreamPreview as StreamPreviewDAO;
 use crate::db::DbPool;
 use crate::models::error::ApiError;
@@ -33,22 +35,30 @@ impl StreamPreview {
     pub(crate) fn fetch(
         pool: &Data<DbPool>,
         stream_uuid: String,
+        authenticated: bool,
     ) -> Result<StreamPreview, ApiError> {
         let mut conn = pool.get()?;
-        let stream = find_stream_preview_by_uuid(&mut conn, stream_uuid)?;
+        let stream = find_stream_preview_by_uuid(&mut conn, stream_uuid, authenticated)?;
         Ok(Self::from_dao(stream))
     }
 
-    pub(crate) fn fetch_all(pool: &Data<DbPool>) -> Result<Vec<StreamPreview>, ApiError> {
+    pub(crate) fn fetch_all(
+        pool: &Data<DbPool>,
+        authenticated: bool,
+    ) -> Result<Vec<StreamPreview>, ApiError> {
         let mut conn = pool.get()?;
-        let streams = find_all_stream_previews(&mut conn)?;
+        let streams = find_all_stream_previews(&mut conn, authenticated)?;
         let return_list = streams.into_iter().map(|x| Self::from_dao(x)).collect();
         Ok(return_list)
     }
 
-    pub(crate) fn fetch_all_by_channel(pool: &Data<DbPool>, channel_uuid: String,) -> Result<Vec<StreamPreview>, ApiError> {
+    pub(crate) fn fetch_all_by_channel(
+        pool: &Data<DbPool>,
+        channel_uuid: String,
+        authenticated: bool,
+    ) -> Result<Vec<StreamPreview>, ApiError> {
         let mut conn = pool.get()?;
-        let streams = find_all_stream_previews_by_channel(&mut conn, channel_uuid)?;
+        let streams = find_all_stream_previews_by_channel(&mut conn, channel_uuid, authenticated)?;
         let return_list = streams.into_iter().map(|x| Self::from_dao(x)).collect();
         Ok(return_list)
     }

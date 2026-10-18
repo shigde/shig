@@ -72,7 +72,12 @@ where
             }
         }
 
-        if !authenticate_pass {
+        // Public routes allow anonymous callers, but must still recognize and
+        // validate an explicitly supplied login for account-only streams.
+        if !authenticate_pass
+            || (req.path().starts_with("/api/pub/") && req.headers().contains_key(AUTHORIZATION))
+        {
+            authenticate_pass = false;
             if let Some(pool) = req.app_data::<Data<DbPool>>() {
                 info!("Connecting to database...");
                 if let Some(jwt_config) = req.app_data::<Data<JWTConfig>>() {
