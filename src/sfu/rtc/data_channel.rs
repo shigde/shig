@@ -20,6 +20,16 @@ pub enum DataChannelMsg {
     AnswerMsg(SdpMsgData),
     #[serde(rename = "3")]
     MuteMsg(MuteMsgData),
+    #[serde(rename = "4")]
+    HostStatus(HostStatus),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostStatus {
+    Present,
+    Waiting,
+    Closed,
 }
 
 impl DataChannelMsg {

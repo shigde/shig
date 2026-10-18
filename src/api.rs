@@ -84,6 +84,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(lobby::participant_leave)
                     .service(lobby::participants_list)
                     .service(lobby::is_online)
+                    .service(lobby::host_presence)
                     .service(lobby::start_streaming)
                     .service(lobby::stop_streaming),
             )

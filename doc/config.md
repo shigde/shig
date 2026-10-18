@@ -198,6 +198,8 @@ smtp_port = 25
 
 `[sfu]` configures the Selective Forwarding Unit.
 
+`host_grace_seconds` defaults to `120`. When the host disconnects, existing guests can wait for this duration before the lobby closes. New guests can join only while the host is connected. See [Host Presence and Lobby Lifetime](architecture/sfu/host-presence.md).
+
 The SFU handles the live WebRTC conference media between participants. The current config block exists so SFU-specific options can be added without mixing them into the webserver or relay config.
 
 ```toml

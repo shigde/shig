@@ -19,6 +19,26 @@ pub mod macros;
 pub mod streaming;
 pub mod webrtc;
 
+pub(crate) async fn is_host_present(
+    pool: &web::Data<DbPool>,
+    channel_uuid: String,
+    stream_uuid: String,
+    user: Principal,
+    sfu_addr: web::Data<Addr<Sfu>>,
+) -> Result<bool, ApiError> {
+    // Keep the same channel/stream and invitation checks as the existing lobby endpoint.
+    is_lobby_online(pool, channel_uuid.clone(), stream_uuid.clone(), user).await?;
+    let lobby_uuid = {
+        let mut conn = pool.get()?;
+        let channel = find_channel_by_uuid(&mut conn, channel_uuid)?;
+        find_lobby_by_channel_id(&mut conn, channel.id)?.uuid
+    };
+    sfu_addr.send(crate::sfu::HostPresence { lobby_uuid, stream_uuid })
+        .await
+        .map_err(|_| ApiError::ServiceUnavailable { error_message: "SFU is unavailable".into() })?
+        .map_err(|_| ApiError::ServiceUnavailable { error_message: "Lobby is unavailable".into() })
+}
+
 pub(crate) async fn leave_lobby(
     pool: &web::Data<DbPool>,
     channel_uuid: String,

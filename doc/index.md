@@ -11,6 +11,7 @@
 - [SFU RTC Event Synchronization](architecture/sfu/rtc-sync.md)
 - [SFU Media Forwarding](architecture/sfu/media-forwarding.md)
 - [SFU Performance](architecture/sfu/performance.md)
+- [SFU Host Presence and Lobby Lifetime](architecture/sfu/host-presence.md)
 
 ### Admin
 - [Production](admin/production.md)

@@ -87,10 +87,16 @@ impl Handler<PublishLobby> for Sfu {
     type Result = ResponseActFuture<Self, SfuResult<String>>;
 
     fn handle(&mut self, msg: PublishLobby, ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down {
+            return Box::pin(fut::err(SfuError::LobbyError(crate::sfu::error::LobbyError::Closing)));
+        }
         let lobby_uuid = msg.lobby_uuid.clone();
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
+                if matches!(msg.role, peer::PeerRole::Guest) {
+                    return Box::pin(fut::err(SfuError::LobbyError(crate::sfu::error::LobbyError::HostAbsent)));
+                }
                 let lobby_addr = Lobby::new(
                     msg.lobby_uuid.clone(),
                     msg.stream_uuid.clone(),
@@ -147,6 +153,28 @@ pub struct SubscribeLobby {
     pub answer: Option<String>,
     pub lobby_uuid: String,
     pub user_uuid: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "Result<bool, actix::MailboxError>")]
+pub struct HostPresence {
+    pub lobby_uuid: String,
+    pub stream_uuid: String,
+}
+
+impl Handler<HostPresence> for Sfu {
+    type Result = ResponseFuture<Result<bool, actix::MailboxError>>;
+
+    fn handle(&mut self, msg: HostPresence, _: &mut Self::Context) -> Self::Result {
+        let lobby = self.lobbies.get(&msg.lobby_uuid).cloned();
+        let closing = self.shutting_down;
+        Box::pin(async move {
+            match lobby {
+                Some(lobby) if !closing => lobby.send(lobby::HostPresence { stream_uuid: msg.stream_uuid }).await,
+                _ => Ok(false),
+            }
+        })
+    }
 }
 
 impl Handler<SubscribeLobby> for Sfu {

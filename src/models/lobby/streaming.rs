@@ -57,7 +57,7 @@ pub(crate) async fn publish(
         auth_token = Some(token);
     }
 
-    let _ = sfu_addr
+    sfu_addr
         .send(PublishLobbyStream {
             publishing,
             lobby_uuid: db_lobby.uuid.clone(),
@@ -71,7 +71,7 @@ pub(crate) async fn publish(
             );
             log::error!("{}: {}", error_message, e);
             ApiError::InternalServerError { error_message }
-        })?;
+        })??;
 
     Ok(())
 }

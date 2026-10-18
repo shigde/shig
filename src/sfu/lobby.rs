@@ -10,7 +10,7 @@ use crate::sfu::media::{
 };
 use crate::sfu::peer::{
     Peer, PeerCreatePublishAnswer, PeerCreateSubscribeOffer, PeerId, PeerReceiveSubscribeAnswer,
-    PeerRole, PeerShutdown,
+    PeerRole, PeerShutdown, SendHostStatus,
 };
 use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
@@ -23,6 +23,12 @@ use actix::{
 use derive_more::Display;
 use moq_relay::auth::Token as AuthToken;
 use std::collections::HashMap;
+use std::time::Duration;
+use crate::sfu::rtc::data_channel::HostStatus;
+
+#[cfg(test)]
+#[path = "lobby_lifecycle_test.rs"]
+mod lifecycle_tests;
 
 pub struct Lobby {
     id: String,
@@ -38,6 +44,9 @@ pub struct Lobby {
     router: Router,
     shutting_down: bool,
     streaming: bool,
+    host_present: bool,
+    host_leaving: bool,
+    host_timer: Option<actix::SpawnHandle>,
 }
 
 impl Lobby {
@@ -67,6 +76,9 @@ impl Lobby {
             router: Router::new(),
             shutting_down: false,
             streaming: false,
+            host_present: false,
+            host_leaving: false,
+            host_timer: None,
         }
     }
 
@@ -93,6 +105,65 @@ impl Lobby {
                     });
                 }
             }
+        }
+    }
+
+    fn set_host_presence(&mut self, present: bool, ctx: &mut Context<Self>) {
+        if self.shutting_down || self.host_present == present { return; }
+        self.host_present = present;
+        if let Some(timer) = self.host_timer.take() { ctx.cancel_future(timer); }
+        let status = if present { HostStatus::Present } else { HostStatus::Waiting };
+        for peer in self.peers.values() { peer.do_send(SendHostStatus(status)); }
+        if !present {
+            // Also cancel a relay start that has not returned its result yet.
+            self.streaming = false;
+            self.relay_addr.do_send(StopRelayMediaStream {});
+            self.host_timer = Some(ctx.run_later(
+                Duration::from_secs(self.sfu_config.host_grace_seconds),
+                |actor, ctx| {
+                    actor.host_timer = None;
+                    if !actor.host_present { ctx.notify(LobbyShutdown {}); }
+                },
+            ));
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "bool")]
+pub struct HostPresence { pub stream_uuid: String }
+
+impl Handler<HostPresence> for Lobby {
+    type Result = bool;
+    fn handle(&mut self, msg: HostPresence, _: &mut Self::Context) -> bool {
+        !self.shutting_down && self.stream_uuid == msg.stream_uuid && self.host_present
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerPresence { pub id: PeerId, pub present: bool }
+
+impl Handler<PeerPresence> for Lobby {
+    type Result = ();
+    fn handle(&mut self, msg: PeerPresence, ctx: &mut Self::Context) {
+        if msg.id.as_str() == self.host_uuid && self.peers.contains_key(&msg.id) && !self.host_leaving {
+            self.set_host_presence(msg.present, ctx);
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerControlReady { pub id: PeerId }
+
+impl Handler<PeerControlReady> for Lobby {
+    type Result = ();
+    fn handle(&mut self, msg: PeerControlReady, _: &mut Self::Context) {
+        if let Some(peer) = self.peers.get(&msg.id) {
+            let status = if self.shutting_down { HostStatus::Closed }
+                else if self.host_present { HostStatus::Present } else { HostStatus::Waiting };
+            peer.do_send(SendHostStatus(status));
         }
     }
 }
@@ -124,6 +195,13 @@ impl Handler<Publish> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
     fn handle(&mut self, msg: Publish, ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down {
+            return Box::pin(async { Err(LobbyError::Closing) }.into_actor(self));
+        }
+        let guest = msg.user_uuid != self.host_uuid;
+        if guest && !self.host_present {
+            return Box::pin(async { Err(LobbyError::HostAbsent) }.into_actor(self));
+        }
         let peer_id = PeerId::new(msg.user_uuid.clone());
         let user_uuid = msg.user_uuid.clone();
         let lobby_uuid = self.id.clone();
@@ -135,6 +213,7 @@ impl Handler<Publish> for Lobby {
                 async move { Err(LobbyError::PeerAlreadyExists(peer_id)) }.into_actor(self),
             );
         }
+        if !guest { self.host_leaving = false; }
 
         let peer_addr = Peer::new(
             peer_id.clone(),
@@ -181,7 +260,10 @@ impl Handler<Publish> for Lobby {
         }
         .into_actor(self);
 
-        Box::pin(fut.map(move |result, _actor, _ctx| {
+        Box::pin(fut.map(move |mut result, actor, _ctx| {
+            if result.is_ok() && (actor.shutting_down || (guest && !actor.host_present)) {
+                result = Err(if actor.shutting_down { LobbyError::Closing } else { LobbyError::HostAbsent });
+            }
             if let Err(ref error) = result {
                 log::warn!(
                     "publish setup failed; shutting down peer, peer_id={}, error={}",
@@ -213,6 +295,9 @@ impl Handler<Subscribe> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<String>>;
 
     fn handle(&mut self, msg: Subscribe, _ctx: &mut Self::Context) -> Self::Result {
+        if self.shutting_down || (msg.user_uuid != self.host_uuid && !self.host_present) {
+            return Box::pin(async { Err(LobbyError::HostAbsent) }.into_actor(self));
+        }
         let peer_id = PeerId::new(msg.user_uuid.clone());
 
         let peer_addr = match self.peers.get(&peer_id) {
@@ -257,7 +342,11 @@ impl Handler<Subscribe> for Lobby {
         }
         .into_actor(self);
 
-        Box::pin(fut.map(move |result, _actor, _ctx| {
+        let guest = msg.user_uuid != self.host_uuid;
+        Box::pin(fut.map(move |mut result, actor, _ctx| {
+            if result.is_ok() && (actor.shutting_down || (guest && !actor.host_present)) {
+                result = Err(if actor.shutting_down { LobbyError::Closing } else { LobbyError::HostAbsent });
+            }
             if let Err(ref error) = result {
                 log::warn!(
                     "subscribe setup failed; shutting down peer, peer_id={}, error={}",
@@ -280,12 +369,16 @@ pub struct LeavePeer {
 impl Handler<LeavePeer> for Lobby {
     type Result = LobbyResult<()>;
 
-    fn handle(&mut self, msg: LeavePeer, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: LeavePeer, ctx: &mut Self::Context) -> Self::Result {
         let peer_id = PeerId::new(msg.user_uuid.clone());
 
         let Some(peer_add) = self.peers.get(&peer_id).cloned() else {
             return Err(LobbyError::PeerNotExists(peer_id));
         };
+        if msg.user_uuid == self.host_uuid {
+            self.host_leaving = true;
+            self.set_host_presence(false, ctx);
+        }
 
         // remove all medias
         let medias = self.router.get_medias_of_peer(&peer_id);
@@ -321,11 +414,13 @@ pub struct LobbyShutdown {}
 impl Handler<LobbyShutdown> for Lobby {
     type Result = AtomicResponse<Self, ()>;
 
-    fn handle(&mut self, _msg: LobbyShutdown, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: LobbyShutdown, ctx: &mut Self::Context) -> Self::Result {
         self.shutting_down = true;
+        self.host_present = false;
+        if let Some(timer) = self.host_timer.take() { ctx.cancel_future(timer); }
 
         for (_, addr) in self.peers.iter() {
-            addr.do_send(PeerShutdown {});
+            addr.do_send(SendHostStatus(HostStatus::Closed));
         }
 
         let relay = self.relay_addr.clone();
@@ -360,9 +455,9 @@ impl Handler<PeerStopped> for Lobby {
             self.remove_media(media.id);
         }
         self.router.remove_targets_for_peer(&msg.id);
-        if msg.id.as_str() == self.host_uuid && self.streaming {
-            self.streaming = false;
-            self.relay_addr.do_send(StopRelayMediaStream {});
+        if msg.id.as_str() == self.host_uuid {
+            self.host_leaving = true;
+            self.set_host_presence(false, ctx);
         }
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
         self.db_actor_addr.do_send(RemoveParticipant {
@@ -483,6 +578,9 @@ impl Handler<PublishStream> for Lobby {
     type Result = ResponseActFuture<Self, LobbyResult<()>>;
 
     fn handle(&mut self, msg: PublishStream, _ctx: &mut Self::Context) -> Self::Result {
+        if msg.publishing && (!self.host_present || self.shutting_down) {
+            return Box::pin(async { Err(LobbyError::HostAbsent) }.into_actor(self));
+        }
         let relay_addr = self.relay_addr.clone();
         if msg.publishing {
             let Some(auth_token) = msg.auth_token else {
@@ -535,6 +633,10 @@ impl Handler<PublishStream> for Lobby {
                 .into_actor(self)
                 .map(|result, actor, _ctx| {
                     if result.is_ok() {
+                        if !actor.host_present || actor.shutting_down {
+                            actor.relay_addr.do_send(StopRelayMediaStream {});
+                            return Err(LobbyError::HostAbsent);
+                        }
                         actor.streaming = true;
                     }
                     result

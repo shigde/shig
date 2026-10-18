@@ -1,6 +1,7 @@
 use crate::sfu::config::SfuConfig;
 use crate::sfu::error::{PeerError, PeerResult};
-use crate::sfu::lobby::{Lobby, PeerStopped};
+use crate::sfu::lobby::{Lobby, PeerStopped, PeerPresence, PeerControlReady};
+use crate::sfu::rtc::data_channel::HostStatus;
 use crate::sfu::media::{
     ActivateMedia, AddMedia, Media, MuteMedia, MuteRemoteMedia, RemoveMedia,
 };
@@ -38,6 +39,7 @@ pub struct Peer {
     control_channel: Arc<Mutex<ControlDataChannel>>,
     data_channel_reader: Option<DataChannelReader>,
     subscribe_connection_ready: bool,
+    publish_connection_ready: bool,
     pending_media_activations: Vec<ActivateMedia>,
     disconnect_timers: [Option<SpawnHandle>; 2],
     shutting_down: bool,
@@ -62,6 +64,7 @@ impl Peer {
             control_channel: Arc::new(Mutex::new(ControlDataChannel::new(id))),
             data_channel_reader: None,
             subscribe_connection_ready: false,
+            publish_connection_ready: false,
             pending_media_activations: Vec::new(),
             disconnect_timers: [None, None],
             shutting_down: false,
@@ -202,6 +205,14 @@ impl Handler<EndpointEvent> for Peer {
                 if endpoint_id.as_kind().is_subscribe() {
                     self.subscribe_connection_ready = state == RTCPeerConnectionState::Connected;
                     self.flush_pending_media_activations();
+                } else {
+                    self.publish_connection_ready = state == RTCPeerConnectionState::Connected;
+                }
+                if matches!(self.role, PeerRole::Host) && !self.shutting_down {
+                    self.parent_addr.do_send(PeerPresence {
+                        id: self.id.clone(),
+                        present: self.publish_connection_ready && self.subscribe_connection_ready,
+                    });
                 }
                 let index = if endpoint_id.as_kind().is_publish() { 0 } else { 1 };
                 match state {
@@ -512,6 +523,9 @@ impl Handler<OnDataChannel> for Peer {
             return Box::pin(async move {}.into_actor(self));
         }
 
+        let parent = self.parent_addr.clone();
+        let peer_id = self.id.clone();
+
         Box::pin(
             async move {
                 match event {
@@ -519,6 +533,7 @@ impl Handler<OnDataChannel> for Peer {
                         log::info!("Publish DataChannel open: attach to control");
                         let mut control = control_arc.lock().await;
                         let _ = control.set_dc(dc).await;
+                        parent.do_send(PeerControlReady { id: peer_id });
                     }
                     EventType::Closed => {
                         log::info!("Publish DataChannel close: remove from control");
@@ -538,6 +553,7 @@ impl Handler<DataChannelMsg> for Peer {
     fn handle(&mut self, msg: DataChannelMsg, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = self.id.clone();
         match msg {
+            DataChannelMsg::HostStatus(_) => Box::pin(async {}.into_actor(self)),
             DataChannelMsg::OfferMsg(msg) => {
                 Box::pin(
                     async move {
@@ -737,6 +753,26 @@ impl Handler<PeerShutdown> for Peer {
 pub enum PeerRole {
     Host,
     Guest,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SendHostStatus(pub HostStatus);
+
+impl Handler<SendHostStatus> for Peer {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: SendHostStatus, _: &mut Self::Context) -> Self::Result {
+        let control = self.control_channel.clone();
+        Box::pin(async move {
+            // A broken control channel must never prevent connection cleanup.
+            let _ = tokio::time::timeout(Duration::from_secs(1), async {
+                control.lock().await.send_host_status(msg.0).await
+            }).await;
+        }.into_actor(self).map(move |(), _, ctx| {
+            if msg.0 == HostStatus::Closed { ctx.notify(PeerShutdown {}); }
+        }))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]

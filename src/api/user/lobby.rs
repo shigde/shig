@@ -7,6 +7,18 @@ use crate::models::lobby;
 use crate::models::lobby::{fetch_all_participants, is_lobby_online, leave_lobby};
 use actix_web::{delete, get, post, web, HttpRequest, HttpResponse};
 
+#[get("/{channel_uuid}/stream/{stream_uuid}/lobby/host")]
+pub async fn host_presence(
+    pool: web::Data<DbPool>,
+    sfu_addr: web::Data<actix::Addr<crate::sfu::Sfu>>,
+    path: web::Path<(String, String)>,
+    session: web::ReqData<Session>,
+) -> Result<HttpResponse, ApiError> {
+    let (channel_uuid, stream_uuid) = path.into_inner();
+    let present = lobby::is_host_present(&pool, channel_uuid, stream_uuid, session.principal.clone(), sfu_addr).await?;
+    Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, present)))
+}
+
 #[get("/{channel_uuid}/stream/{stream_uuid}/lobby/online")]
 pub async fn is_online(
     _req: HttpRequest,

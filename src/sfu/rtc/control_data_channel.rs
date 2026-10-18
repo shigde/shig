@@ -1,6 +1,6 @@
 use crate::sfu::peer::PeerId;
 use crate::sfu::rtc::data_channel::{
-    bytes_to_send_buffer, DataChannelMsg, MuteMsgData, SdpMsgData,
+    bytes_to_send_buffer, DataChannelMsg, HostStatus, MuteMsgData, SdpMsgData,
 };
 use std::collections::VecDeque;
 use std::mem;
@@ -15,6 +15,10 @@ pub struct ControlDataChannel {
 }
 
 impl ControlDataChannel {
+    pub async fn send_host_status(&mut self, status: HostStatus) -> anyhow::Result<()> {
+        self.send_dcm_bin(DataChannelMsg::HostStatus(status)).await
+    }
+
     pub fn new(id: PeerId) -> Self {
         Self {
             id,

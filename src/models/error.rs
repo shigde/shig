@@ -74,6 +74,12 @@ impl error::ResponseError for ApiError {
 impl From<SfuError> for ApiError {
     fn from(error: SfuError) -> Self {
         match error {
+            SfuError::LobbyError(LobbyError::HostAbsent) => ApiError::Conflict {
+                error_message: "Waiting for host".to_owned(),
+            },
+            SfuError::LobbyError(LobbyError::Closing) => ApiError::Conflict {
+                error_message: "Lobby is closing".to_owned(),
+            },
             SfuError::LobbyAlreadyStarted() => ApiError::Conflict {
                 error_message: "Lobby is already started".to_owned(),
             },
@@ -135,6 +141,13 @@ mod tests {
         )));
 
         assert!(error.is_status_code(StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    #[test]
+    fn host_absence_has_a_distinct_retryable_response() {
+        let error = ApiError::from(SfuError::LobbyError(LobbyError::HostAbsent));
+        assert!(error.is_status_code(StatusCode::CONFLICT));
+        assert_eq!(error.to_string(), "Waiting for host");
     }
 }
 
