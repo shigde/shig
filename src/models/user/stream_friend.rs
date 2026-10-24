@@ -12,6 +12,7 @@ use crate::models::error::ApiError;
 use crate::models::user::friend_role::FriendRole;
 use crate::util::domain::split_domain_name;
 use actix_web::web::Data;
+use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -96,7 +97,17 @@ impl StreamFriend {
         };
 
         let role = FriendRole::Guest;
-        let _guest = insert_new_stream_friend(&mut conn, user.id, stream.id, role.into())?;
+        conn.transaction::<_, ApiError, _>(|conn| {
+            use crate::db::schema::{stream_friends, streams};
+            streams::table.find(stream.id).select(streams::id).for_update().first::<i32>(conn)?;
+            let exists: bool = diesel::select(diesel::dsl::exists(stream_friends::table
+                .filter(stream_friends::stream_id.eq(stream.id))
+                .filter(stream_friends::user_id.eq(user.id)))).get_result(conn)?;
+            if exists { return Ok(()); }
+            let guest = insert_new_stream_friend(conn, user.id, stream.id, role.into())?;
+            crate::messages::repository::invitation(conn, user.id, stream.id, guest.id, &principal.name, &stream.title)?;
+            Ok(())
+        })?;
 
         Ok(StreamFriend::from_active_user(user))
     }

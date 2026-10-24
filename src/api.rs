@@ -52,6 +52,12 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     )
     .service(
         web::scope("/api")
+            .service(web::scope("/messages")
+                .service(crate::messages::api::list).service(crate::messages::api::counts)
+                .service(crate::messages::api::read_all).service(crate::messages::api::read))
+            .service(web::scope("/notifications")
+                .service(crate::notifications::api::list).service(crate::notifications::api::counts)
+                .service(crate::notifications::api::read_all).service(crate::notifications::api::read))
             .service(
                 web::scope("/admin")
                     .service(admin::monitoring)

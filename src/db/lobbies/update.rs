@@ -53,6 +53,12 @@ pub fn update_lobby_offline_state(
     use crate::db::schema::lobbies::dsl::lobbies;
     use crate::db::schema::lobbies::dsl::uuid;
 
+    conn.transaction(|conn| {
+    // A subsequent host session must be able to generate a fresh start notification.
+    diesel::sql_query("INSERT INTO notification_stream_state (stream_id) SELECT stream_id FROM lobbies WHERE uuid=$1 AND stream_id IS NOT NULL ON CONFLICT DO NOTHING")
+        .bind::<diesel::sql_types::Text, _>(lobby_uuid).execute(conn)?;
+    diesel::sql_query("UPDATE notification_stream_state SET live = false WHERE stream_id IN (SELECT stream_id FROM lobbies WHERE uuid = $1)")
+        .bind::<diesel::sql_types::Text, _>(lobby_uuid).execute(conn)?;
     let affected =  diesel::update(lobbies.filter(uuid.eq(lobby_uuid)))
         .set((
             is_open.eq(false),
@@ -65,4 +71,5 @@ pub fn update_lobby_offline_state(
     }
 
     Ok(())
+    })
 }

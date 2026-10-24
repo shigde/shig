@@ -42,7 +42,7 @@ pub(crate) async fn publish(
         });
     }
 
-    if !db_lobby.is_open {
+    if !db_lobby.is_open || db_lobby.stream_id != Some(db_stream.id) {
         return Err(ApiError::Forbidden {
             error_message: format!(
                 "Streaming can't start, Lobby is not open, channel_uuid={}, stream_uuid={}, user_uuid={}",
@@ -73,6 +73,7 @@ pub(crate) async fn publish(
             ApiError::InternalServerError { error_message }
         })??;
 
+    crate::notifications::repository::stream_state(&mut conn, db_stream.id, publishing, &user.name, &db_stream.title)?;
     Ok(())
 }
 fn internal_publish_token(channel_id: &str, _stream_id: &str) -> AuthToken {

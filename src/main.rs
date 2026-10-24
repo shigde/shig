@@ -1,6 +1,11 @@
 extern crate core;
 
 mod api;
+mod inbox;
+#[cfg(test)]
+mod inbox_test;
+mod messages;
+mod notifications;
 mod db;
 mod federation;
 mod files;

@@ -236,6 +236,44 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    messages (id) {
+        id -> Varchar,
+        recipient_id -> Int4,
+        stream_id -> Nullable<Int4>,
+        event_key -> Text,
+        title -> Text,
+        body -> Text,
+        created_at -> Timestamptz,
+        read_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    notifications (id) {
+        id -> Varchar,
+        recipient_id -> Int4,
+        stream_id -> Nullable<Int4>,
+        event_key -> Text,
+        title -> Text,
+        body -> Text,
+        created_at -> Timestamptz,
+        read_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    notification_stream_state (stream_id) {
+        stream_id -> Int4,
+        live -> Bool,
+    }
+}
+
+diesel::joinable!(messages -> users (recipient_id));
+diesel::joinable!(messages -> streams (stream_id));
+diesel::joinable!(notifications -> users (recipient_id));
+diesel::joinable!(notifications -> streams (stream_id));
+diesel::joinable!(notification_stream_state -> streams (stream_id));
 diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channel_friends -> channels (channel_id));
 diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
@@ -260,6 +298,9 @@ diesel::joinable!(users -> user_roles (user_role_id));
 diesel::joinable!(verification_tokens -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    messages,
+    notifications,
+    notification_stream_state,
     actor_images,
     actors,
     channel_friends,
