@@ -5,6 +5,7 @@
 - [Configuration](config.md)
 
 ### Architecture
+- [Demand-driven Batch Polling](architecture/polling.md)
 - [MoQ Relay Architecture](architecture/relay.md)
 - [SFU Signaling](architecture/sfu/signaling.md)
 - [SFU Signaling Metadata](architecture/sfu/signaling-metadata.md)

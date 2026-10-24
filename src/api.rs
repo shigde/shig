@@ -1,3 +1,4 @@
+pub mod poll;
 pub mod admin;
 pub mod auth;
 pub mod federation;
@@ -52,6 +53,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     )
     .service(
         web::scope("/api")
+            .service(poll::poll)
             .service(web::scope("/messages")
                 .service(crate::messages::api::list).service(crate::messages::api::counts)
                 .service(crate::messages::api::read_all).service(crate::messages::api::read))

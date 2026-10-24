@@ -19,6 +19,16 @@ pub async fn get_prefix(
 
 async fn announced(state: &RelayState, request: &HttpRequest) -> actix_web::Result<HttpResponse> {
     let prefix = request.match_info().get("prefix").unwrap_or("");
+    Ok(HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(announced_prefix(state, request, prefix).await?))
+}
+
+pub(crate) async fn announced_prefix(
+    state: &RelayState,
+    request: &HttpRequest,
+    prefix: &str,
+) -> actix_web::Result<String> {
     let mut admission = state.auth.request(moq_auth::Transport::Http, prefix);
     admission.remote = request.peer_addr();
     if let Some(header) = request
@@ -59,7 +69,5 @@ async fn announced(state: &RelayState, request: &HttpRequest) -> actix_web::Resu
         }
     }
     lease.close("done", Default::default());
-    Ok(HttpResponse::Ok()
-        .content_type("text/plain; charset=utf-8")
-        .body(broadcasts.join("\n")))
+    Ok(broadcasts.join("\n"))
 }
