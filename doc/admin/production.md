@@ -21,4 +21,5 @@ Replace domains, usernames, passwords, tokens, and paths where needed. The examp
 - [postgress](postgress.md)
 - [certificate renewal](certificate-renewal.md)
 - [verification](verification.md)
+- [Relay UDP Buffers and Timestamp Diagnostics](relay-diagnostics.md)
 - [trouble-shouting](trouble-shouting.md)

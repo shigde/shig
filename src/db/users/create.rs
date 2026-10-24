@@ -11,7 +11,7 @@ use crate::db::users::{User, USER_EMAIL_ALREADY_EXIST, USER_NAME_ALREADY_EXIST};
 use crate::db::channels::create::insert_new_channel;
 use crate::db::instances::Instance;
 use crate::db::users::delete::delete_user_by_email;
-use crate::db::verification_tokens::create::insert_new_verification_token;
+use crate::db::verification_tokens::create::{insert_new_verification_token, insert_verified_signup};
 use crate::db::verification_tokens::SIGN_UP_VERIFICATION_TOKEN;
 use crate::util::domain::{build_default_channel_name, build_domain_name};
 use crate::util::iri::build_actor_iri;
@@ -131,8 +131,10 @@ pub fn create_new_user(
                 .map_err(|e| -> String { format!("insert new lobby: {}", e) })?;
         }
 
-        // In case of not default active user send a verification email
-        if !is_active {
+        // Default accounts are provisioned as active and verified in this transaction.
+        if is_active {
+            insert_verified_signup(conn, user.id)?;
+        } else {
             let _ = insert_new_verification_token(conn, user.id, SIGN_UP_VERIFICATION_TOKEN)
                 .map_err(|e| -> String { format!("insert new verification token: {}", e) })?;
         }

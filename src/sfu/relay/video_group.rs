@@ -13,6 +13,12 @@ pub(super) struct VideoGroup {
 }
 
 impl VideoGroup {
+    pub fn reset(&mut self) {
+        self.started = None;
+        self.bytes = 0;
+        self.frames = 0;
+    }
+
     pub fn frames(&self) -> usize {
         self.frames
     }

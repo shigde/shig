@@ -1,4 +1,3 @@
-use crate::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::SetLobbyOffline;
@@ -20,6 +19,7 @@ pub mod db;
 pub mod error;
 pub mod lobby;
 mod media;
+pub(crate) mod metrics;
 mod message;
 pub mod peer;
 mod relay;

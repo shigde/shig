@@ -134,6 +134,9 @@ pub fn verify_refresh_token(
     }
     let user =
         User::from_uuid(&mut conn, token_data.claims.uuid.clone()).map_err(|_| "Invalid token")?;
+    if !user.active {
+        return Err("Invalid token".to_string());
+    }
     Ok(user)
 }
 

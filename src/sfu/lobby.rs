@@ -1,4 +1,4 @@
-use crate::metrics;
+use crate::sfu::metrics;
 use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant, SetLobbyOnline};

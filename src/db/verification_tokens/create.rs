@@ -19,12 +19,26 @@ pub fn insert_new_verification_token(
     user_id: i32,
     kind: &str,
 ) -> DbResult<VerificationToken> {
+    insert_verification_token(conn, user_id, kind, false)
+}
+
+/// Trusted provisioning (default accounts), without an email confirmation step.
+pub fn insert_verified_signup(conn: &mut PgConnection, user_id: i32) -> DbResult<VerificationToken> {
+    insert_verification_token(conn, user_id, super::SIGN_UP_VERIFICATION_TOKEN, true)
+}
+
+fn insert_verification_token(
+    conn: &mut PgConnection,
+    user_id: i32,
+    kind: &str,
+    verified: bool,
+) -> DbResult<VerificationToken> {
     let token = Uuid::new_v4().to_string();
     let new_verify_token = NewVerificationToken {
         user_id,
         kind,
         token: token.as_str(),
-        verified: false,
+        verified,
         created_at: Utc::now().naive_utc(),
     };
 

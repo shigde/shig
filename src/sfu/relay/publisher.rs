@@ -1,6 +1,7 @@
 use super::error::{RelayError, RelayResult};
 use super::pipeline::{Frame, MediaPipeline, PipelineConfig, VideoCodec};
 use super::video_group::VideoGroup;
+use super::video_recovery::{VideoOutcome, VideoRecovery};
 use super::RelayMediaStream;
 use crate::sfu::media::Media;
 use anyhow::{anyhow, bail, Context};
@@ -135,7 +136,7 @@ impl HangPublisher {
             _ = cancel.cancelled() => return Ok(()),
             _ = self.video.request_keyframe(&self.video.peer_id) => {}
         }
-        let mut video_ready = false;
+        let mut video_recovery = VideoRecovery::default();
         let mut keyframe_check = tokio::time::interval(Duration::from_millis(500));
         keyframe_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let result = async {
@@ -159,25 +160,21 @@ impl HangPublisher {
                         let frame = frame.context("GStreamer frame channel closed")?;
                         if frame.video {
                             let flags = frame.sample.buffer().context("Missing video buffer")?.flags();
-                            if flags.intersects(gstreamer::BufferFlags::DISCONT | gstreamer::BufferFlags::CORRUPTED) && video_ready {
-                                video_ready = false;
-                                video_group.requested(Instant::now());
-                                tokio::select! {
-                                    _ = cancel.cancelled() => break,
-                                    _ = self.video.request_keyframe(&self.video.peer_id) => {}
-                                }
-                            }
-                            if flags.contains(gstreamer::BufferFlags::CORRUPTED)
-                                || (!video_ready && flags.contains(gstreamer::BufferFlags::DELTA_UNIT)) {
-                                continue;
-                            }
-                            video_ready = true;
                             let size = frame.sample.buffer().unwrap().size();
                             let keyframe = !flags.contains(gstreamer::BufferFlags::DELTA_UNIT);
-                            let request = video_group.observe(keyframe, size, Instant::now());
-                            publish_frame(&mut video, frame).with_context(|| format!(
+                            let now = Instant::now();
+                            let outcome = video_recovery.publish(&mut video, frame, &self.name,
+                                video_group.frames(), video_group.bytes(), now).with_context(|| format!(
                                 "relay video group: frames={}, payload_bytes={}", video_group.frames(), video_group.bytes()
                             ))?;
+                            let request = match outcome {
+                                VideoOutcome::Published => video_group.observe(keyframe, size, now),
+                                VideoOutcome::Dropped => continue,
+                                VideoOutcome::Resync => {
+                                    video_group.reset();
+                                    video_group.poll(now)
+                                }
+                            };
                             if request {
                                 tokio::select! {
                                     _ = cancel.cancelled() => break,

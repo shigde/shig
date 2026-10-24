@@ -143,6 +143,8 @@ Do not change permissions on `/etc/letsencrypt` if Nginx already uses those file
 
 See [config](../config.md#relay) for the relay certificate paths used by `/opt/shig/config.toml`.
 
+Set up [automatic certificate renewal](certificate-renewal.md) so renewed originals are copied to Shig and the relay is restarted. That page also documents the deployed `/opt/shig/certs/` path variant and the daily root cronjob.
+
 ### systemd
 
 Create or edit the service:

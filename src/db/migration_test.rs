@@ -164,3 +164,93 @@ fn view_joins_timestamps_and_migration_rollbacks() {
         Ok(())
     });
 }
+
+const VERIFY_DEFAULTS_UP: &str = include_str!("../../migrations/2026-10-24-100000_verify_default_accounts/up.sql");
+const VERIFY_DEFAULTS_DOWN: &str = include_str!("../../migrations/2026-10-24-100000_verify_default_accounts/down.sql");
+
+#[test]
+#[ignore = "Requires SHIG_MIGRATION_TEST_DATABASE_URL pointing to a dedicated PostgreSQL test database"]
+fn default_account_verification_migration_is_scoped_and_reversible() {
+    let url = std::env::var("SHIG_MIGRATION_TEST_DATABASE_URL").unwrap();
+    let mut conn = PgConnection::establish(&url).unwrap();
+    conn.test_transaction::<_, Error, _>(|conn| {
+        conn.batch_execute("CREATE SCHEMA default_verification_test; SET LOCAL search_path TO default_verification_test, public;")?;
+        crate::db::run_migrations(conn).unwrap();
+        conn.batch_execute(
+            "INSERT INTO actors (preferred_username, actor_type, actor_iri, created_at) VALUES ('instance', 'Application', 'http://localhost', now());
+             INSERT INTO instances (actor_id, is_home, domain, tls, created_at) VALUES (1, true, 'localhost:4200', false, now());
+             INSERT INTO actors (preferred_username, actor_type, actor_iri, instance_id, created_at) VALUES
+                ('admin', 'Person', 'http://localhost/admin', 1, now()),
+                ('user', 'Person', 'http://localhost/user', 1, now()),
+                ('alice', 'Person', 'http://localhost/alice', 1, now()),
+                ('admin', 'Person', 'http://remote/admin', NULL, now());
+             INSERT INTO users (name, email, user_uuid, user_role_id, password, active, actor_id, created_at) VALUES
+                ('admin@localhost:4200', 'admin@localhost.de', 'default-admin', 1, 'unchanged', false, 2, now()),
+                ('user@localhost:4200', 'user@localhost.de', 'default-user', 2, 'unchanged', true, 3, now()),
+                ('alice@localhost:4200', 'alice@example.test', 'alice', 2, 'unchanged', true, 4, now()),
+                ('admin@remote.test', 'admin@remote.test', 'remote-admin', 1, 'unchanged', true, 5, now());
+             INSERT INTO verification_tokens (user_id, kind, token, verified, created_at) VALUES
+                (3, 'sign_up', 'actual-email-verification', true, now());"
+        )?;
+        conn.batch_execute(VERIFY_DEFAULTS_UP)?;
+        conn.batch_execute(VERIFY_DEFAULTS_UP)?;
+        conn.batch_execute(
+            "DO $$ BEGIN
+               ASSERT (SELECT count(*) FROM verification_tokens WHERE token LIKE 'default-account-verified:%') = 2;
+               ASSERT (SELECT bool_and(verified) FROM verification_tokens WHERE user_id IN (1, 2));
+               ASSERT NOT (SELECT active FROM users WHERE user_uuid = 'default-admin');
+               ASSERT (SELECT active FROM users WHERE user_uuid = 'default-user');
+               ASSERT (SELECT bool_and(password = 'unchanged') FROM users);
+               ASSERT NOT EXISTS (SELECT 1 FROM verification_tokens WHERE user_id = 4);
+             END $$;"
+        )?;
+        conn.batch_execute(VERIFY_DEFAULTS_DOWN)?;
+        conn.batch_execute("DO $$ BEGIN ASSERT (SELECT count(*) FROM verification_tokens) = 1; ASSERT (SELECT verified FROM verification_tokens WHERE token = 'actual-email-verification'); END $$;")?;
+        Ok(())
+    });
+}
+
+#[test]
+#[ignore = "Requires SHIG_MIGRATION_TEST_DATABASE_URL pointing to a dedicated PostgreSQL test database"]
+fn newly_provisioned_defaults_are_verified_without_changing_regular_signup() {
+    let url = std::env::var("SHIG_MIGRATION_TEST_DATABASE_URL").unwrap();
+    let mut conn = PgConnection::establish(&url).unwrap();
+    conn.test_transaction::<_, Error, _>(|conn| {
+        conn.batch_execute("CREATE SCHEMA default_provisioning_test; SET LOCAL search_path TO default_provisioning_test, public;")?;
+        crate::db::run_migrations(conn).unwrap();
+        conn.batch_execute(
+            "INSERT INTO actors (preferred_username, actor_type, actor_iri, created_at) VALUES ('instance', 'Application', 'http://localhost', now());
+             INSERT INTO instances (actor_id, is_home, domain, tls, created_at) VALUES (1, true, 'localhost:4200', false, now());"
+        )?;
+        let cfg = crate::federation::FederationConfig { enable: true, domain: "localhost:4200".into(), instance: "test".into(), token: "unused".into(), tls: false };
+        crate::db::fixtures::create_standard_users(conn, cfg.clone()).unwrap();
+        crate::db::fixtures::create_standard_users(conn, cfg.clone()).unwrap();
+        let page = crate::db::users::admin::list(conn, "", 0).unwrap();
+        assert_eq!(page.total, 2);
+        assert!(page.users.iter().all(|user| user.active && user.verified));
+        let admin = page.users.iter().find(|user| user.name.starts_with("admin@")).unwrap();
+        let actor = crate::db::users::User::from_uuid(conn, admin.uuid.clone()).unwrap();
+        let target = page.users.iter().find(|user| user.name.starts_with("user@")).unwrap();
+        use crate::db::users::admin::{set_role, RoleChange};
+        assert_eq!(set_role(conn, actor.id, &target.uuid, 1).unwrap(), RoleChange::Updated);
+        assert_eq!(crate::db::active_users::read::find_active_user_by_uuid(conn, &target.uuid).unwrap().user_role_id, 1);
+        assert_eq!(set_role(conn, actor.id, &target.uuid, 2).unwrap(), RoleChange::Updated);
+        assert_eq!(crate::db::active_users::read::find_active_user_by_uuid(conn, &target.uuid).unwrap().user_role_id, 2);
+        let former_admin = crate::db::users::User::from_uuid(conn, target.uuid.clone()).unwrap();
+        assert_eq!(set_role(conn, former_admin.id, &admin.uuid, 2).unwrap(), RoleChange::Forbidden);
+        assert_eq!(set_role(conn, actor.id, &actor.user_uuid, 2).unwrap(), RoleChange::Forbidden);
+        assert_eq!(set_role(conn, actor.id, "missing", 1).unwrap(), RoleChange::NotFound);
+        assert!(crate::db::users::admin::set_active(conn, &admin.uuid, false).unwrap());
+        crate::db::fixtures::create_standard_users(conn, cfg).unwrap();
+        let page = crate::db::users::admin::list(conn, "admin@", 0).unwrap();
+        assert!(!page.users[0].active);
+        assert!(page.users[0].verified);
+        crate::db::users::create::create_new_user(conn, "alice", "alice@example.test", "test", crate::db::user_roles::Role::User, false).unwrap();
+        let page = crate::db::users::admin::list(conn, "alice", 0).unwrap();
+        assert_eq!(page.total, 1);
+        assert!(!page.users[0].active);
+        assert!(!page.users[0].verified);
+        conn.batch_execute("DO $$ BEGIN ASSERT (SELECT count(*) FROM verification_tokens WHERE kind = 'sign_up' AND verified) = 2; END $$;")?;
+        Ok(())
+    });
+}

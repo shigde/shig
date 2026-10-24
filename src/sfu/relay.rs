@@ -6,6 +6,10 @@ pub mod message;
 mod pipeline;
 mod publisher;
 mod video_group;
+mod video_recovery;
+
+#[cfg(test)]
+mod video_recovery_test;
 
 #[cfg(test)]
 mod pipeline_test;

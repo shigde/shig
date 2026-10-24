@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod auth;
 pub mod federation;
 pub mod user;
@@ -35,7 +36,7 @@ pub const IGNORE_ROUTES: [&str; 9] = [
 
 #[get("/metrics")]
 async fn metrics() -> impl Responder {
-    match crate::metrics::render() {
+    match crate::sfu::metrics::render() {
         Ok(body) => HttpResponse::Ok()
             .content_type("text/plain; version=0.0.4; charset=utf-8")
             .body(body),
@@ -51,6 +52,13 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     )
     .service(
         web::scope("/api")
+            .service(
+                web::scope("/admin")
+                    .service(admin::monitoring)
+                    .service(admin::list_users)
+                    .service(admin::set_user_active)
+                    .service(admin::set_user_role),
+            )
             .service(
                 web::scope("/pub")
                     .service(
