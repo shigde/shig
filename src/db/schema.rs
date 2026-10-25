@@ -76,6 +76,7 @@ diesel::table! {
         public -> Bool,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        display_name -> Varchar,
     }
 }
 

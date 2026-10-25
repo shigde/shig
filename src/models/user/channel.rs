@@ -23,6 +23,8 @@ pub struct Channel {
     // user name@domain
     pub user: String,
     pub name: String,
+    #[serde(default)]
+    pub display_name: String,
     pub description: String,
     pub support: String,
     pub public: bool,
@@ -45,6 +47,7 @@ impl Channel {
             uuid: channel.uuid,
             user: user.name,
             name: channel.name,
+            display_name: channel.display_name,
             description: channel.description.unwrap_or("".to_string()),
             support: channel.support.unwrap_or("".to_string()),
             public: channel.public,
@@ -55,6 +58,7 @@ impl Channel {
     pub fn get_channel_update(&self) -> ChannelUpdate {
         ChannelUpdate {
             name: self.name.clone(),
+            display_name: self.display_name.trim().to_string(),
             description: Some(self.description.clone()),
             support: Some(self.support.clone()),
             public: self.public,
@@ -80,6 +84,11 @@ impl ChannelForm {
             return Err(ApiError::Forbidden {
                 error_message: "forbidden".to_string(),
             });
+        }
+
+        let display_name = self.channel.display_name.trim();
+        if display_name.chars().count() > 100 {
+            return Err(ApiError::BadRequest { error_message: "Display name must be at most 100 characters".into() });
         }
 
         let image_upload: ImageUpload;
@@ -138,14 +147,18 @@ impl ChannelForm {
             banner_name = image_upload.file_url.to_string();
         }
 
-        // Update channel
-        update(
-            &mut conn,
-            current_channel.id,
-            self.channel.get_channel_update(),
-        )?;
+        // Display names are editable; the channel identity is not.
+        let mut changes = self.channel.get_channel_update();
+        changes.name = current_channel.name.clone();
+        if display_name.is_empty() {
+            changes.display_name = current_channel.display_name.clone();
+        }
+        update(&mut conn, current_channel.id, changes.clone())?;
 
         let mut new_channel = self.channel.to_owned();
+        new_channel.name = current_channel.name;
+        new_channel.display_name = changes.display_name;
+        new_channel.uuid = current_channel.uuid;
         new_channel.banner_name = banner_name;
 
         Ok(new_channel)

@@ -26,6 +26,7 @@ pub struct Channel {
     pub public: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub display_name: String,
 }
 
 impl Channel {

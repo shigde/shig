@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[diesel(table_name = crate::db::schema::channels)]
 pub struct ChannelUpdate {
     pub name: String,
+    pub display_name: String,
     pub description: Option<String>,
     pub support: Option<String>,
     pub public: bool,
