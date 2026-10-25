@@ -37,6 +37,8 @@ pub struct Stream {
     pub is_public: bool,
     pub owner_uuid: String,
     pub channel_uuid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_uuids: Option<Vec<String>>,
 }
 
 impl Stream {
@@ -121,6 +123,7 @@ impl Stream {
             is_public: dao.stream.is_public,
             owner_uuid: owner_uuid.to_string(),
             channel_uuid: channel_uuid.to_string(),
+            guest_uuids: None,
         }
     }
 }
