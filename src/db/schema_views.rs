@@ -37,5 +37,6 @@ diesel::table! {
         owner_avatar -> Nullable<Varchar>,
         channel_name -> Varchar,
         channel_uuid -> Varchar,
+        channel_display_name -> Varchar,
     }
 }

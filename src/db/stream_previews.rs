@@ -23,4 +23,5 @@ pub struct StreamPreview {
     pub owner_avatar: Option<String>,
     pub channel_name: String,
     pub channel_uuid: String,
+    pub channel_display_name: String,
 }

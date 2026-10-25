@@ -29,6 +29,7 @@ pub struct StreamPreview {
     pub owner_avatar: String,
     pub channel_name: String,
     pub channel_uuid: String,
+    pub channel_display_name: String,
 }
 
 impl StreamPreview {
@@ -83,6 +84,7 @@ impl StreamPreview {
             owner_avatar: dao.owner_avatar.unwrap_or("".to_string()),
             channel_name: dao.channel_name,
             channel_uuid: dao.channel_uuid,
+            channel_display_name: dao.channel_display_name,
         }
     }
 }
