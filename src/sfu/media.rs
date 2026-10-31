@@ -19,9 +19,17 @@ use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_remote::TrackRemote;
 
+pub mod config;
+pub mod media_service;
+pub mod recording;
 pub mod router;
-mod router_test;
 pub(crate) mod track_info;
+
+pub use media_service::MediaService;
+pub use recording::Recording;
+
+#[cfg(test)]
+mod router_test;
 
 pub(crate) type RtpCodecType = RtpCodecKind;
 pub(crate) type RelayRtpChannel = broadcast::Sender<Arc<Packet>>;

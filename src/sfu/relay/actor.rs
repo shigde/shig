@@ -69,7 +69,7 @@ impl Handler<StartRelayMediaStream> for RelayActor {
                     .into_actor(self),
             );
         };
-        let publisher = match HangPublisher::new(origin, self.stream_uuid.clone(), msg.media_stream)
+        let publisher = match HangPublisher::new(self.relay_state.media.clone(), origin, self.stream_uuid.clone(), msg.media_stream)
         {
             Ok(publisher) => publisher,
             Err(err) => return Box::pin(async { Err(err) }.into_actor(self)),

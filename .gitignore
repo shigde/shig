@@ -32,3 +32,6 @@ config/prod.toml
 .env
 database.db
 /.rest
+
+# Private media recordings
+/recordings/

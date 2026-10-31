@@ -6,6 +6,7 @@ use tower::ServiceExt;
 /// Shared relay handles; upstream owns authentication and certificate rotation.
 #[derive(Clone)]
 pub struct RelayState {
+    pub media: crate::sfu::media::MediaService,
     pub auth: moq_relay::auth::Auth,
     pub cluster: moq_relay::cluster::Cluster,
     #[allow(dead_code)]

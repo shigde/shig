@@ -28,6 +28,7 @@ use std::fs;
 use std::process::exit;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
+use crate::sfu::media::MediaService;
 
 #[derive(Parser)]
 #[command(name = "Shig Server")]
@@ -95,10 +96,11 @@ fn main() {
             );
         }
         relay_config.auth = Default::default();
-        let relay_server = new_relay_server(relay_config).await.unwrap_or_else(|e| {
+        let mut relay_server = new_relay_server(relay_config).await.unwrap_or_else(|e| {
             log::error!("failed to init relay server: {:?}", e);
             exit(1);
         });
+        relay_server.state.media = MediaService::with_htdocs(server_cfg.media.clone(), &server_cfg.files.htdocs);
         let access_pool = pool.clone();
         let access_jwt = server_cfg.jwt.clone();
         let relay_server = relay_server

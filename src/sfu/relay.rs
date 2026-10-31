@@ -3,7 +3,7 @@ use crate::sfu::media::Media;
 pub mod actor;
 mod error;
 pub mod message;
-mod pipeline;
+pub(crate) mod pipeline;
 mod publisher;
 mod video_group;
 mod video_recovery;

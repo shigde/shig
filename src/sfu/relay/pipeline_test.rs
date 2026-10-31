@@ -277,6 +277,7 @@ async fn publisher_delivers_frames_and_can_stop_and_restart() {
         let video = media(true);
         let audio = media(false);
         let publisher = super::publisher::HangPublisher::new(
+            Default::default(),
             origin.clone(),
             "test".into(),
             super::RelayMediaStream {

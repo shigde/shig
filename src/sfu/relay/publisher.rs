@@ -12,6 +12,7 @@ use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
 pub struct HangPublisher {
+    media: crate::sfu::media::MediaService,
     origin: moq_net::origin::Producer,
     name: String,
     audio: Media,
@@ -23,6 +24,7 @@ pub struct HangPublisher {
 
 impl HangPublisher {
     pub fn new(
+        media: crate::sfu::media::MediaService,
         origin: moq_net::origin::Producer,
         name: String,
         stream: RelayMediaStream,
@@ -53,6 +55,7 @@ impl HangPublisher {
         let audio_rx = audio.relay_rtp_tx.subscribe();
         let video_rx = video.relay_rtp_tx.subscribe();
         Ok(Self {
+            media,
             origin,
             name,
             audio,
@@ -85,7 +88,12 @@ impl HangPublisher {
             }
         };
         let mut ready = Some(ready);
+        // Register the real publisher, rather than relying on a stale database live flag.
+        if let Err(error) = self.media.live_started(&self.name).await {
+            log::error!("Recording registration failed for {}: {error:#}", self.name);
+        }
         let result = self.publish(&mut pipeline, &cancel, &mut ready).await;
+        self.media.live_stopped(&self.name).await;
         if let Some(ready) = ready.take() {
             let _ = ready.send(Err(RelayError::PublisherError(
                 result

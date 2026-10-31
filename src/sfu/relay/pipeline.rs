@@ -10,7 +10,7 @@ const INPUT_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const FRAME_QUEUE_SIZE: usize = 128;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum VideoCodec {
+pub(crate) enum VideoCodec {
     Vp8,
     Vp9,
     H264,

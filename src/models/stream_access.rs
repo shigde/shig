@@ -47,14 +47,14 @@ fn decide(request: &Request, pool: &DbPool, jwt: &JWTConfig) -> Result<Grant, Ap
                 error_message: "Invalid relay login".into(),
             }
         })?;
-        verify_auth_token(&data, &web::Data::new(pool.clone())).map_err(|_| {
+        let session = verify_auth_token(&data, &web::Data::new(pool.clone())).map_err(|_| {
             ApiError::Unauthorized {
                 error_message: "Invalid relay login".into(),
             }
         })?;
-        true
+        Some(session.principal.id)
     } else {
-        false
+        None
     };
     let mut conn = pool.get()?;
     let mut query = streams::table
@@ -63,7 +63,7 @@ fn decide(request: &Request, pool: &DbPool, jwt: &JWTConfig) -> Result<Grant, Ap
         .filter(users::active.eq(true))
         .select((channels::uuid, streams::uuid))
         .into_boxed();
-    if !authenticated {
+    if authenticated.is_none() {
         query = query.filter(streams::is_public.eq(true));
     }
     let root = moq_net::Path::new(&request.path);
@@ -86,8 +86,8 @@ fn decide(request: &Request, pool: &DbPool, jwt: &JWTConfig) -> Result<Grant, Ap
     let paths = query.load::<(String, String)>(&mut conn)?;
     let subscribe = paths
         .into_iter()
-        .filter_map(|(channel, stream)| {
-            let path = format!("live/{channel}/{stream}");
+        .map(|(channel, stream)| format!("live/{channel}/{stream}"))
+        .filter_map(|path| {
             moq_net::Path::new(&path)
                 .strip_prefix(&root)
                 .and_then(|relative| Pattern::literal(relative.as_str()).ok())

@@ -10,6 +10,12 @@ key = "config/certs/key.pem"
 [files]
 htdocs = 'htdocs'
 
+# Defaults to files.htdocs/recordings, created with the other storage directories
+# at server initialization and served by /static. Static authentication is separate.
+[media]
+# Optional storage override; only this selected directory is initialized.
+# directory = '/mnt/recordings'
+
 # These are the domian settings even for mail
 # If your server is behind an HTTP proxy, please apply these settings.
 [federation]

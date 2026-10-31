@@ -41,6 +41,8 @@ pub struct ConfigFile {
 
     #[serde(default)]
     pub relay: RelayConfig,
+    #[serde(default)]
+    pub media: crate::sfu::media::config::Config,
 }
 
 // Config struct holds to data from the `[config]` section.
@@ -79,9 +81,11 @@ pub fn start(
     ensure_static_dir(&format!("{htdocs}/avatar"))?;
     ensure_static_dir(&format!("{htdocs}/banner"))?;
     ensure_static_dir(&format!("{htdocs}/thumbnail"))?;
+    ensure_static_dir(relay_state.media.storage_directory())?;
 
     let svs = HttpServer::new(move || {
         App::new()
+            .service(actix_files::Files::new("/static", &cfg.files.htdocs).use_last_modified(true))
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(sfu_addr.clone()))
             .app_data(web::Data::new(relay_state.clone()))
@@ -110,11 +114,12 @@ pub fn start(
     Ok(server)
 }
 
-fn ensure_static_dir(path: &str) -> io::Result<()> {
+fn ensure_static_dir(path: impl AsRef<std::path::Path>) -> io::Result<()> {
+    let path = path.as_ref();
     fs::create_dir_all(path).map_err(|err| {
         io::Error::new(
             err.kind(),
-            format!("failed to create static directory `{path}`: {err}"),
+            format!("failed to create storage directory `{}`: {err}", path.display()),
         )
     })
 }

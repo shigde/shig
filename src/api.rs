@@ -4,6 +4,7 @@ pub mod auth;
 pub mod federation;
 pub mod user;
 pub mod relay;
+pub mod media;
 
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
@@ -19,7 +20,6 @@ use crate::api::user::stream_friend::{
 use crate::api::user::{
     channel, get_active_user, lobby, search_active_users_by_name, stream_preview, whep, whip,
 };
-use actix_files as fs;
 use actix_web::{get, web, HttpResponse, Responder};
 
 // ignore routes
@@ -46,11 +46,7 @@ async fn metrics() -> impl Responder {
 }
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
-    cfg.service(metrics).service(
-        fs::Files::new("/static", "./htdocs")
-            // .show_files_listing()
-            .use_last_modified(true),
-    )
+    cfg.service(metrics)
     .service(
         web::scope("/api")
             .service(poll::poll)
@@ -69,6 +65,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/pub")
+                    .service(web::scope("/stream")
+                        .service(media::available))
                     .service(
                         web::scope("/user")
                             .service(search_active_users_by_name)
@@ -106,6 +104,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/stream")
+                    .service(media::status).service(media::start).service(media::stop).service(media::publication)
                     .service(get_stream)
                     .service(create_stream)
                     .service(update_stream)

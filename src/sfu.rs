@@ -18,11 +18,11 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod lobby;
-mod media;
+pub(crate) mod media;
 pub(crate) mod metrics;
 mod message;
 pub mod peer;
-mod relay;
+pub(crate) mod relay;
 mod rtc;
 
 pub struct Sfu {
