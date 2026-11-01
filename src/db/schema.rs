@@ -299,6 +299,7 @@ diesel::joinable!(users -> user_roles (user_role_id));
 diesel::joinable!(verification_tokens -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    recorded_videos,
     messages,
     notifications,
     notification_stream_state,
@@ -319,3 +320,32 @@ diesel::allow_tables_to_appear_in_same_query!(
     verification_tokens,
     active_users,
 );
+
+diesel::table! {
+    recorded_videos (id) {
+        id -> Int4,
+        uuid -> Varchar,
+        source_stream_id -> Nullable<Int4>,
+        source_stream_uuid -> Varchar,
+        user_id -> Int4,
+        channel_id -> Int4,
+        title -> Varchar,
+        description -> Text,
+        support -> Text,
+        thumbnail -> Varchar,
+        licence -> Int4,
+        is_public -> Bool,
+        published_at -> Nullable<Timestamp>,
+        status -> Varchar,
+        duration_ms -> Int8,
+        archive_prefix -> Nullable<Varchar>,
+        error -> Nullable<Text>,
+        started_at -> Nullable<Timestamp>,
+        ended_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+diesel::joinable!(recorded_videos -> streams (source_stream_id));
+diesel::joinable!(recorded_videos -> users (user_id));
+diesel::joinable!(recorded_videos -> channels (channel_id));

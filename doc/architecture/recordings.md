@@ -1,5 +1,9 @@
 # Stream recordings
 
+For the current video resources, metadata snapshots, REST endpoints and preview
+view, see [Videos](videos.md). The control boundary below describes the remaining
+legacy recorder stubs; the SDK now uses the video-resource API.
+
 The custom Shig frame writer and reader have been removed. There is no `.frames`
 serializer, manifest persistence, per-viewer replay publisher, replay clock, or
 recording frame tap in the live publisher anymore. Existing recording files are

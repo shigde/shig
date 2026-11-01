@@ -16,6 +16,8 @@ pub mod stream_participants;
 pub mod stream_previews;
 pub mod stream_thumbnails;
 pub mod streams;
+pub mod recorded_videos;
+pub mod recorded_video_previews;
 pub mod user_roles;
 pub mod users;
 pub mod verification_tokens;

@@ -24,4 +24,7 @@ pub struct StreamPreview {
     pub channel_name: String,
     pub channel_uuid: String,
     pub channel_display_name: String,
+    pub content_type: String,
+    pub source_stream_uuid: Option<String>,
+    pub duration_ms: Option<i64>,
 }

@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub mod channel;
 pub mod stream;
 pub mod stream_preview;
+pub mod recorded_video_preview;
 pub mod whep;
 pub mod whip;
 pub mod stream_friend;

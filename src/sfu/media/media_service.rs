@@ -11,6 +11,8 @@ use std::{
 pub struct MediaService {
     root: PathBuf,
     live: Arc<Mutex<HashSet<String>>>,
+    recording_operations:
+        Arc<Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 impl Default for MediaService {
     fn default() -> Self {
@@ -27,10 +29,21 @@ impl MediaService {
                 .directory
                 .unwrap_or_else(|| Path::new(htdocs).join("recordings")),
             live: Default::default(),
+            recording_operations: Default::default(),
         }
     }
     pub fn storage_directory(&self) -> &Path {
         &self.root
+    }
+    pub async fn recording_operation(&self, stream: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let operation = self
+            .recording_operations
+            .lock()
+            .unwrap()
+            .entry(stream.into())
+            .or_default()
+            .clone();
+        operation.lock_owned().await
     }
     pub async fn status(&self, stream: &str) -> anyhow::Result<Recording> {
         uuid::Uuid::parse_str(stream)?;

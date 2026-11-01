@@ -5,6 +5,7 @@ pub mod federation;
 pub mod user;
 pub mod relay;
 pub mod media;
+pub mod videos;
 
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
@@ -49,6 +50,10 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     cfg.service(metrics)
     .service(
         web::scope("/api")
+            .service(web::scope("/videos")
+                .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::stop_recording))
+            .service(web::scope("/streams")
+                .service(videos::list_videos).service(videos::create_video).service(videos::start_recording))
             .service(poll::poll)
             .service(web::scope("/messages")
                 .service(crate::messages::api::list).service(crate::messages::api::counts)
@@ -65,6 +70,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/pub")
+                    .service(web::scope("/videos").service(videos::get_public_video))
                     .service(web::scope("/stream")
                         .service(media::available))
                     .service(
@@ -75,13 +81,17 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(
                         web::scope("/channel")
                             .service(channel::get_channel)
-                            .service(stream_preview::get_channel_stream_preview_list),
+                            .service(stream_preview::get_channel_stream_preview_list)
+                            .service(user::recorded_video_preview::get_channel_recorded_video_preview_list),
                     )
                     .service(
                         web::scope("/stream-preview")
                             .service(stream_preview::get_stream_preview_list)
                             .service(stream_preview::get_stream_preview),
                     )
+                    .service(web::scope("/recorded-video-preview")
+                        .service(user::recorded_video_preview::get_recorded_video_preview_list)
+                        .service(user::recorded_video_preview::get_recorded_video_preview))
                     .service(
                         web::scope("/streaming")
                             .service(relay::announcement::get_root)

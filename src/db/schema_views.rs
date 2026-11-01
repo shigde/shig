@@ -38,5 +38,33 @@ diesel::table! {
         channel_name -> Varchar,
         channel_uuid -> Varchar,
         channel_display_name -> Varchar,
+        content_type -> Varchar,
+        source_stream_uuid -> Nullable<Varchar>,
+        duration_ms -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    recorded_video_previews (id) {
+        id -> Int4,
+        title -> Varchar,
+        thumbnail -> Nullable<Varchar>,
+        uuid -> Varchar,
+        description -> Nullable<Text>,
+        support -> Nullable<Text>,
+        date -> Timestamp,
+        start_time -> Nullable<Timestamp>,
+        end_time -> Nullable<Timestamp>,
+        is_live -> Bool,
+        is_public -> Bool,
+        owner_name -> Varchar,
+        owner_uuid -> Varchar,
+        owner_avatar -> Nullable<Varchar>,
+        channel_name -> Varchar,
+        channel_uuid -> Varchar,
+        channel_display_name -> Varchar,
+        content_type -> Varchar,
+        source_stream_uuid -> Nullable<Varchar>,
+        duration_ms -> Nullable<Int8>,
     }
 }

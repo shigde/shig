@@ -1,5 +1,7 @@
 pub mod channel;
 pub mod stream;
+pub mod recorded_video;
+pub mod recorded_video_preview;
 pub mod stream_form;
 pub mod stream_meta_data;
 pub mod stream_preview;

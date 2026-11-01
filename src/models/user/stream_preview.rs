@@ -30,6 +30,10 @@ pub struct StreamPreview {
     pub channel_name: String,
     pub channel_uuid: String,
     pub channel_display_name: String,
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub source_stream_uuid: Option<String>,
+    pub duration_ms: Option<i64>,
 }
 
 impl StreamPreview {
@@ -85,6 +89,9 @@ impl StreamPreview {
             channel_name: dao.channel_name,
             channel_uuid: dao.channel_uuid,
             channel_display_name: dao.channel_display_name,
+            content_type: dao.content_type,
+            source_stream_uuid: dao.source_stream_uuid,
+            duration_ms: dao.duration_ms,
         }
     }
 }
