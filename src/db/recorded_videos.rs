@@ -72,6 +72,9 @@ pub fn update(
             .bind::<Text,_>(uuid).execute(conn)?;
         let current = find(conn, uuid)?;
         current.require_owner(owner)?;
+        if current.status == "deleting" {
+            return Err(ApiError::Conflict { error_message: "Replay is being permanently deleted".into() });
+        }
         if changes.published == Some(true) && current.status != "ready" {
             return Err(ApiError::Conflict { error_message: "Finish processing the video before publishing".into() });
         }
@@ -93,6 +96,45 @@ pub fn recording_started(conn: &mut PgConnection, uuid: &str) -> Result<Recorded
         .bind::<Text,_>(uuid).execute(conn)?;
     find(conn, uuid)
 }
+
+/// Commit a tombstone before removing files. Concurrent edits cannot republish it,
+/// and an interrupted filesystem deletion can be retried by its owner.
+pub fn prepare_delete(
+    conn: &mut PgConnection,
+    uuid: &str,
+    owner: i32,
+) -> Result<RecordedVideo, ApiError> {
+    conn.transaction::<_, ApiError, _>(|conn| {
+        diesel::sql_query("SELECT id FROM recorded_videos WHERE uuid=$1 FOR UPDATE")
+            .bind::<Text,_>(uuid).execute(conn)?;
+        let video = find(conn, uuid)?;
+        video.require_owner(owner)?;
+        if matches!(video.status.as_str(), "recording" | "processing") {
+            return Err(ApiError::Conflict { error_message: "Stop the recording before deleting it".into() });
+        }
+        diesel::sql_query("UPDATE recorded_videos SET status='deleting', published_at=NULL, error=NULL WHERE uuid=$1")
+            .bind::<Text,_>(uuid).execute(conn)?;
+        find(conn, uuid)
+    })
+}
+
+pub fn deletion_failed(conn: &mut PgConnection, uuid: &str, error: &str) -> Result<(), ApiError> {
+    diesel::sql_query("UPDATE recorded_videos SET error=$2 WHERE uuid=$1 AND status='deleting'")
+        .bind::<Text, _>(uuid)
+        .bind::<Text, _>(error)
+        .execute(conn)?;
+    Ok(())
+}
+
+pub fn finish_delete(conn: &mut PgConnection, uuid: &str, owner: i32) -> Result<(), ApiError> {
+    diesel::sql_query(
+        "DELETE FROM recorded_videos WHERE uuid=$1 AND user_id=$2 AND status='deleting'",
+    )
+    .bind::<Text, _>(uuid)
+    .bind::<Integer, _>(owner)
+    .execute(conn)?;
+    Ok(())
+}
 pub fn recording_failed(
     conn: &mut PgConnection,
     uuid: &str,
@@ -109,6 +151,27 @@ pub fn recording_failed(
 pub fn recording_stopped(conn: &mut PgConnection, uuid: &str) -> Result<RecordedVideo, ApiError> {
     diesel::sql_query("UPDATE recorded_videos SET status='processing', ended_at=now() WHERE uuid=$1 AND status='recording'")
         .bind::<Text,_>(uuid).execute(conn)?;
+    find(conn, uuid)
+}
+
+/// The HLS master playlist is written last, before a video becomes publishable.
+pub fn recording_ready(
+    conn: &mut PgConnection,
+    uuid: &str,
+    duration_ms: u64,
+) -> Result<RecordedVideo, ApiError> {
+    let duration = i64::try_from(duration_ms).map_err(|_| ApiError::InternalServerError {
+        error_message: "Recording duration exceeds database range".into(),
+    })?;
+    diesel::sql_query(
+        "UPDATE recorded_videos SET status='ready', archive_prefix=$2,
+        duration_ms=$3, started_at=COALESCE(started_at,now()), ended_at=now(), error=NULL
+        WHERE uuid=$1 AND status IN ('pending','recording','processing')",
+    )
+    .bind::<Text, _>(uuid)
+    .bind::<Text, _>(format!("recordings/{uuid}"))
+    .bind::<diesel::sql_types::BigInt, _>(duration)
+    .execute(conn)?;
     find(conn, uuid)
 }
 
@@ -153,8 +216,9 @@ mod tests {
             assert!(conn.transaction::<_, ApiError, _>(|conn| recording_started(conn, &second.uuid)).is_err());
             recording_stopped(conn, &first.uuid)?;
             recording_started(conn, &second.uuid)?;
-            diesel::sql_query("UPDATE recorded_videos SET status='ready', archive_prefix='recordings/test', duration_ms=12000 WHERE uuid=$1")
-                .bind::<Text,_>(&first.uuid).execute(conn)?;
+            let ready = recording_ready(conn, &first.uuid, 12000)?;
+            assert_eq!(ready.status, "ready");
+            assert_eq!(ready.duration_ms, 12000);
             assert_eq!(crate::db::stream_previews::read::find_all_stream_previews(conn, true)?.len(), 1);
             let published = update(conn, &first.uuid, 1, &RecordedVideoUpdate {published: Some(true), ..Default::default()})?;
             assert!(published.is_visible_to(None));
@@ -174,6 +238,16 @@ mod tests {
             conn.batch_execute("DELETE FROM streams WHERE uuid='source';")?;
             assert_eq!(find(conn, &first.uuid)?.source_stream_uuid, "source");
             assert_eq!(list(conn, "source", 1)?.len(), 2);
+            assert!(matches!(prepare_delete(conn, &first.uuid, 999), Err(ApiError::Forbidden { .. })));
+            assert!(matches!(prepare_delete(conn, &second.uuid, 1), Err(ApiError::Conflict { .. })));
+            let deleting = prepare_delete(conn, &first.uuid, 1)?;
+            assert_eq!(deleting.status, "deleting");
+            assert!(deleting.published_at.is_none());
+            assert!(matches!(update(conn, &first.uuid, 1, &RecordedVideoUpdate {published: Some(true), ..Default::default()}), Err(ApiError::Conflict { .. })));
+            prepare_delete(conn, &first.uuid, 1)?; // deletion resumes after a failed filesystem attempt
+            finish_delete(conn, &first.uuid, 1)?;
+            assert!(find(conn, &first.uuid).is_err());
+            assert_eq!(list(conn, "source", 1)?.len(), 1);
             Ok(())
         });
     }

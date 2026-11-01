@@ -6,7 +6,7 @@ use crate::{
     },
     relay::state::RelayState,
 };
-use actix_web::{get, patch, post, web, HttpResponse};
+use actix_web::{delete, get, patch, post, web, HttpResponse};
 
 fn check_stream_owner(pool: &DbPool, stream: &str, owner: i32) -> Result<(), ApiError> {
     let source = find_stream_by_uuid(&mut *pool.get()?, stream.into())?;
@@ -16,6 +16,35 @@ fn check_stream_owner(pool: &DbPool, stream: &str, owner: i32) -> Result<(), Api
         });
     }
     Ok(())
+}
+
+#[delete("/{uuid}")]
+pub async fn delete_video(
+    pool: web::Data<DbPool>,
+    state: web::Data<RelayState>,
+    path: web::Path<String>,
+    session: web::ReqData<Session>,
+) -> Result<HttpResponse, ApiError> {
+    let uuid = path.into_inner();
+    uuid::Uuid::parse_str(&uuid).map_err(|_| ApiError::BadRequest {
+        error_message: "Invalid replay UUID".into(),
+    })?;
+    let video = recorded_videos::find(&mut *pool.get()?, &uuid)?;
+    video.require_owner(session.principal.id)?;
+    let _operation = state
+        .media
+        .recording_operation(&video.source_stream_uuid)
+        .await;
+    recorded_videos::prepare_delete(&mut *pool.get()?, &uuid, session.principal.id)?;
+    if let Err(error) = state.media.delete_recording_files(&uuid).await {
+        recorded_videos::deletion_failed(&mut *pool.get()?, &uuid, &error.to_string())?;
+        return Err(ApiError::ServiceUnavailable {
+            error_message: "Replay files could not be fully deleted. Retry permanent deletion."
+                .into(),
+        });
+    }
+    recorded_videos::finish_delete(&mut *pool.get()?, &uuid, session.principal.id)?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 #[get("")]
@@ -61,7 +90,7 @@ pub async fn list_videos(
     let videos = recorded_videos::list(&mut *pool.get()?, &stream, session.principal.id)?;
     Ok(HttpResponse::Ok().json(Body::new("ok", videos)))
 }
-/// Create metadata only. This does not claim that an archive writer is running.
+/// Create metadata only, without starting a recording.
 #[post("/{stream}/videos")]
 pub async fn create_video(
     pool: web::Data<DbPool>,
@@ -92,6 +121,9 @@ pub async fn start_recording(
     session: web::ReqData<Session>,
 ) -> Result<HttpResponse, ApiError> {
     let stream = path.into_inner();
+    uuid::Uuid::parse_str(&stream).map_err(|_| ApiError::BadRequest {
+        error_message: "Invalid stream UUID".into(),
+    })?;
     check_stream_owner(&pool, &stream, session.principal.id)?;
     let _operation = state.media.recording_operation(&stream).await;
     if recorded_videos::list(&mut *pool.get()?, &stream, session.principal.id)?
@@ -103,9 +135,28 @@ pub async fn start_recording(
         });
     }
     let video = recorded_videos::create(&mut *pool.get()?, &stream, session.principal.id)?;
-    // The archive backend is still deliberately unconnected. A failed start is
-    // persisted as failed, never advertised as a successful or publishable video.
-    if let Err(error) = state.media.start(&stream).await {
+    // Resolve through the embedded relay's normal, permission-scoped subscriber view.
+    let grant = moq_auth::Grant::new(
+        Default::default(),
+        [stream.parse().expect("validated stream UUID")]
+            .into_iter()
+            .collect(),
+    );
+    let token = moq_relay::auth::Token::new(&format!("live/{}", video.channel_uuid), &grant);
+    let source = state
+        .cluster
+        .subscriber(&token)
+        .map(|origin| moq_mux::Source::new(origin.consume(), stream.clone()));
+    let started = match source {
+        Some(source) => {
+            state
+                .media
+                .start_recording(&stream, &video.uuid, source, pool.get_ref().clone())
+                .await
+        }
+        None => Err(anyhow::anyhow!("Recording source is not authorized")),
+    };
+    if let Err(error) = started {
         let video =
             recorded_videos::recording_failed(&mut *pool.get()?, &video.uuid, &error.to_string())?;
         return Ok(HttpResponse::ServiceUnavailable().json(Body::new(&error.to_string(), video)));
@@ -149,6 +200,7 @@ pub async fn stop_recording(
             recorded_videos::recording_failed(&mut *pool.get()?, &uuid, &error.to_string())?;
         return Ok(HttpResponse::ServiceUnavailable().json(Body::new(&error.to_string(), video)));
     }
-    let video = recorded_videos::recording_stopped(&mut *pool.get()?, &uuid)?;
+    // Stop waits for the HLS writer and its persisted ready/failed result.
+    let video = recorded_videos::find(&mut *pool.get()?, &uuid)?;
     Ok(HttpResponse::Ok().json(Body::new("ok", video)))
 }

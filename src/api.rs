@@ -51,7 +51,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     .service(
         web::scope("/api")
             .service(web::scope("/videos")
-                .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::stop_recording))
+                .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
             .service(web::scope("/streams")
                 .service(videos::list_videos).service(videos::create_video).service(videos::start_recording))
             .service(poll::poll)
@@ -138,4 +138,21 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             ),
 
     );
+}
+
+#[cfg(test)]
+mod routing_tests {
+    #[actix_web::test]
+    async fn replay_methods_reach_the_registered_handlers() {
+        use actix_web::{http::{Method, StatusCode}, test, App};
+        let app = test::init_service(App::new().configure(super::config_services)).await;
+        for method in [Method::GET, Method::PATCH, Method::DELETE] {
+            let response = test::call_service(&app, test::TestRequest::default()
+                .method(method.clone()).uri("/api/videos/00000000-0000-0000-0000-000000000000")
+                .set_json(serde_json::json!({})).to_request()).await;
+            // No database/session is installed: extraction must fail in the handler,
+            // rather than routing returning an empty 404 or rejecting the method.
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR, "{method}");
+        }
+    }
 }

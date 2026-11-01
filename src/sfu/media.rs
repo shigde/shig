@@ -22,6 +22,7 @@ use webrtc::media_stream::track_remote::TrackRemote;
 pub mod config;
 pub mod media_service;
 pub mod recording;
+mod hls_writer;
 pub mod router;
 pub(crate) mod track_info;
 
