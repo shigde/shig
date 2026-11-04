@@ -44,6 +44,10 @@ impl MediaService {
     pub fn storage_directory(&self) -> &Path {
         &self.root
     }
+    pub async fn wait_recording_ready(&self, source: moq_mux::Source) -> anyhow::Result<()> {
+        super::hls_writer::HlsWriter::prepare(source).await?;
+        Ok(())
+    }
     pub async fn recording_operation(&self, stream: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let operation = self
             .recording_operations

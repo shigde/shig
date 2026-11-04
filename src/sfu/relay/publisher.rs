@@ -1,4 +1,5 @@
 use super::error::{RelayError, RelayResult};
+use super::h264_diagnostics::H264Diagnostics;
 use super::pipeline::{Frame, MediaPipeline, PipelineConfig, VideoCodec};
 use super::video_group::VideoGroup;
 use super::video_recovery::{VideoOutcome, VideoRecovery};
@@ -20,6 +21,7 @@ pub struct HangPublisher {
     audio_rx: broadcast::Receiver<std::sync::Arc<rtp::packet::Packet>>,
     video_rx: broadcast::Receiver<std::sync::Arc<rtp::packet::Packet>>,
     video_codec: VideoCodec,
+    diagnostics_directory: Option<std::path::PathBuf>,
 }
 
 impl HangPublisher {
@@ -28,6 +30,7 @@ impl HangPublisher {
         origin: moq_net::origin::Producer,
         name: String,
         stream: RelayMediaStream,
+        diagnostics_directory: Option<std::path::PathBuf>,
     ) -> RelayResult<Self> {
         let audio = stream
             .audio
@@ -63,6 +66,7 @@ impl HangPublisher {
             audio_rx,
             video_rx,
             video_codec,
+            diagnostics_directory,
         })
     }
 
@@ -147,6 +151,14 @@ impl HangPublisher {
         let mut video_recovery = VideoRecovery::default();
         let mut keyframe_check = tokio::time::interval(Duration::from_millis(500));
         keyframe_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut diagnostics = if matches!(self.video_codec, VideoCodec::H264) {
+            match self.diagnostics_directory.as_deref() {
+                Some(directory) => H264Diagnostics::open(directory, &self.name).await,
+                None => None,
+            }
+        } else {
+            None
+        };
         let result = async {
             loop {
                 tokio::select! {
@@ -155,6 +167,15 @@ impl HangPublisher {
                     changed = pipeline.failure.changed() => {
                         changed.context("GStreamer error channel closed")?;
                         bail!("{}", pipeline.failure.borrow().as_deref().unwrap_or("GStreamer stopped"));
+                    }
+                    Some(()) = pipeline.keyframe_requests.recv() => {
+                        video_group.reset();
+                        if video_group.poll(Instant::now()) {
+                            tokio::select! {
+                                _ = cancel.cancelled() => break,
+                                _ = self.video.request_keyframe(&self.video.peer_id) => {}
+                            }
+                        }
                     }
                     _ = keyframe_check.tick() => {
                         if video_group.poll(Instant::now()) {
@@ -167,6 +188,10 @@ impl HangPublisher {
                     frame = pipeline.frames.recv() => {
                         let frame = frame.context("GStreamer frame channel closed")?;
                         if frame.video {
+                            // Capture the unmodified access unit before recovery or MoQ import.
+                            if let Some(diagnostics) = diagnostics.as_mut() {
+                                diagnostics.capture(&frame);
+                            }
                             let flags = frame.sample.buffer().context("Missing video buffer")?.flags();
                             let size = frame.sample.buffer().unwrap().size();
                             let keyframe = !flags.contains(gstreamer::BufferFlags::DELTA_UNIT);
@@ -199,12 +224,19 @@ impl HangPublisher {
                         MediaPipeline::push(&pipeline.audio, packet.context("Relay audio RTP input lost")?.as_ref())?;
                     }
                     packet = self.video_rx.recv() => {
-                        MediaPipeline::push(&pipeline.video, packet.context("Relay video RTP input lost")?.as_ref())?;
+                        let packet = packet.context("Relay video RTP input lost")?;
+                        if let Some(diagnostics) = diagnostics.as_mut() {
+                            diagnostics.capture_rtp(&packet);
+                        }
+                        MediaPipeline::push(&pipeline.video, packet.as_ref())?;
                     }
                 }
             }
             Ok(())
         }.await;
+        if let Some(diagnostics) = diagnostics {
+            diagnostics.finish().await;
+        }
         let video_finished = video.finish().context("finish relay video track");
         let audio_finished = audio.finish().context("finish relay audio track");
         // A failed group can also make finish fail. Preserve the original write

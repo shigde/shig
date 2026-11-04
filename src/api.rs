@@ -53,7 +53,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(web::scope("/videos")
                 .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
             .service(web::scope("/streams")
-                .service(videos::list_videos).service(videos::create_video).service(videos::start_recording))
+                .service(videos::list_videos).service(videos::create_video).service(videos::recording_ready).service(videos::start_recording))
             .service(poll::poll)
             .service(web::scope("/messages")
                 .service(crate::messages::api::list).service(crate::messages::api::counts)

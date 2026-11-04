@@ -56,3 +56,9 @@ listen = "[::]:4443"
 advertised_ip = ""
 port_min = 50000
 port_max = 51000
+
+# Optional H264/RTP diagnostics. Directory is initialized only when enabled.
+# Relative paths resolve from the server working directory; keep outside htdocs.
+[sfu.h264_diagnostics]
+enabled = false
+directory = 'debug/hls'

@@ -113,6 +113,48 @@ pub async fn update_video(
     Ok(HttpResponse::Ok().json(Body::new("ok", video)))
 }
 
+#[get("/{stream}/recordings/ready")]
+pub async fn recording_ready(
+    pool: web::Data<DbPool>,
+    state: web::Data<RelayState>,
+    path: web::Path<String>,
+    session: web::ReqData<Session>,
+) -> Result<HttpResponse, ApiError> {
+    let stream = path.into_inner();
+    uuid::Uuid::parse_str(&stream).map_err(|_| ApiError::BadRequest {
+        error_message: "Invalid stream UUID".into(),
+    })?;
+    check_stream_owner(&pool, &stream, session.principal.id)?;
+    let channel = {
+        let mut conn = pool.get()?;
+        let source = find_stream_by_uuid(&mut conn, stream.clone())?;
+        crate::db::channels::read::find_channel_by_id(&mut conn, source.channel_id)?
+    };
+    let grant = moq_auth::Grant::new(
+        Default::default(),
+        [stream.parse().expect("validated stream UUID")]
+            .into_iter()
+            .collect(),
+    );
+    let token = moq_relay::auth::Token::new(&format!("live/{}", channel.uuid), &grant);
+    let origin = state
+        .cluster
+        .subscriber(&token)
+        .ok_or_else(|| ApiError::Forbidden {
+            error_message: "Recording source is not authorized".into(),
+        })?;
+    state
+        .media
+        .wait_recording_ready(moq_mux::Source::new(origin.consume(), stream))
+        .await
+        .map_err(|error| ApiError::ServiceUnavailable {
+            error_message: error.to_string(),
+        })?;
+    Ok(HttpResponse::NoContent()
+        .append_header(("Cache-Control", "no-store"))
+        .finish())
+}
+
 #[post("/{stream}/recordings")]
 pub async fn start_recording(
     pool: web::Data<DbPool>,

@@ -204,6 +204,147 @@ async fn h264_rtp_yields_annex_b_access_unit() {
 }
 
 #[tokio::test]
+async fn h264_missing_fu_end_recovers_at_next_keyframe_without_sequence_gap() {
+    let mut pipeline = MediaPipeline::start(config(VideoCodec::H264)).unwrap();
+    let source = gst::parse::launch(
+        "videotestsrc num-buffers=6 ! video/x-raw,width=320,height=240,framerate=30/1 \
+         ! x264enc tune=zerolatency key-int-max=2 bframes=0 \
+         ! rtph264pay config-interval=-1 pt=96 mtu=800 ! appsink name=rtp sync=false",
+    )
+    .unwrap()
+    .downcast::<gst::Pipeline>()
+    .unwrap();
+    let sink = source
+        .by_name("rtp")
+        .unwrap()
+        .downcast::<AppSink>()
+        .unwrap();
+    source.set_state(gst::State::Playing).unwrap();
+    let mut timestamps = Vec::new();
+    let mut sequence = 1u16;
+    let mut removed = false;
+    while let Some(sample) = sink.try_pull_sample(gst::ClockTime::from_seconds(5)) {
+        let map = sample.buffer().unwrap().map_readable().unwrap();
+        let mut bytes = map.as_slice();
+        let mut packet = rtp::packet::Packet::unmarshal(&mut bytes).unwrap();
+        if timestamps.last() != Some(&packet.header.timestamp) {
+            timestamps.push(packet.header.timestamp);
+        }
+        // Remove only the final fragment of the first delta picture, then number
+        // packets contiguously: this is the exact shape observed in the capture.
+        if timestamps.len() == 2 && packet.payload[0] & 31 == 28 && packet.payload[1] & 0x40 != 0 {
+            removed = true;
+            continue;
+        }
+        packet.header.sequence_number = sequence;
+        sequence = sequence.wrapping_add(1);
+        MediaPipeline::push(&pipeline.video, &packet).unwrap();
+    }
+    source.set_state(gst::State::Null).unwrap();
+    assert!(
+        removed,
+        "test input must contain a fragmented delta picture"
+    );
+    pipeline.video.end_of_stream().unwrap();
+    let mut keys = Vec::new();
+    while let Ok(Some(frame)) =
+        tokio::time::timeout(Duration::from_millis(500), pipeline.frames.recv()).await
+    {
+        keys.push(
+            !frame
+                .sample
+                .buffer()
+                .unwrap()
+                .flags()
+                .contains(gst::BufferFlags::DELTA_UNIT),
+        );
+    }
+    assert_eq!(
+        keys,
+        [true, true, false, true, false],
+        "the incomplete P-frame must be absent, and later frames must still arrive"
+    );
+    assert!(
+        pipeline.keyframe_requests.try_recv().is_ok(),
+        "GStreamer feedback must reach the publisher"
+    );
+    pipeline.stop().unwrap();
+}
+
+/// Optional replay of an existing diagnostic, without browser/network or re-encoding.
+#[tokio::test]
+#[ignore = "requires SHIG_H264_REPLAY_PREFIX pointing to a local diagnostic capture"]
+async fn replay_h264_diagnostic_through_guarded_pipeline() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let prefix = std::env::var("SHIG_H264_REPLAY_PREFIX").unwrap();
+    let rows = std::fs::read_to_string(format!("{prefix}.jsonl")).unwrap();
+    let mut input = std::fs::File::open(format!("{prefix}.rtp")).unwrap();
+    let output_path = format!("{prefix}.guarded-{}.h264", uuid::Uuid::new_v4());
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output_path)
+        .unwrap();
+    let mut pipeline = MediaPipeline::start(PipelineConfig {
+        video_payload_type: 102,
+        ..config(VideoCodec::H264)
+    })
+    .unwrap();
+    let started = tokio::time::Instant::now();
+    for line in rows.lines() {
+        let row: serde_json::Value = serde_json::from_str(line).unwrap();
+        if row["event"] != "rtp" {
+            continue;
+        }
+        let elapsed = row["elapsed_us"].as_u64().unwrap();
+        if elapsed > 20_000_000 {
+            break;
+        }
+        tokio::time::sleep_until(started + Duration::from_micros(elapsed)).await;
+        input
+            .seek(SeekFrom::Start(row["offset"].as_u64().unwrap()))
+            .unwrap();
+        let mut bytes = vec![0; row["size"].as_u64().unwrap() as usize];
+        input.read_exact(&mut bytes).unwrap();
+        let packet = rtp::packet::Packet::unmarshal(&mut bytes.as_slice()).unwrap();
+        MediaPipeline::push(&pipeline.video, &packet).unwrap();
+        while let Ok(frame) = pipeline.frames.try_recv() {
+            output
+                .write_all(
+                    frame
+                        .sample
+                        .buffer()
+                        .unwrap()
+                        .map_readable()
+                        .unwrap()
+                        .as_slice(),
+                )
+                .unwrap();
+        }
+    }
+    pipeline.video.end_of_stream().unwrap();
+    while let Ok(Some(frame)) =
+        tokio::time::timeout(Duration::from_millis(500), pipeline.frames.recv()).await
+    {
+        output
+            .write_all(
+                frame
+                    .sample
+                    .buffer()
+                    .unwrap()
+                    .map_readable()
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap();
+    }
+    output.flush().unwrap();
+    assert!(output.metadata().unwrap().len() > 0);
+    pipeline.stop().unwrap();
+    println!("Guarded diagnostic output: {output_path}");
+}
+
+#[tokio::test]
 async fn opus_rtp_yields_compressed_audio() {
     let mut pipeline = MediaPipeline::start(config(VideoCodec::Vp8)).unwrap();
     let packet = rtp::packet::Packet {
@@ -284,6 +425,7 @@ async fn publisher_delivers_frames_and_can_stop_and_restart() {
                 audio: Some(audio.clone()),
                 video: Some(video.clone()),
             },
+            None,
         )
         .unwrap();
         let cancel = tokio_util::sync::CancellationToken::new();

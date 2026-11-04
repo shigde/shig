@@ -64,6 +64,12 @@ fn main() {
         }
     };
 
+    let h264_diagnostics_directory = server_cfg.sfu.h264_diagnostics.initialize()
+        .unwrap_or_else(|error| {
+            log::error!("failed to initialize H264 diagnostics: {error:#}");
+            exit(1);
+        });
+
     actix::System::new().block_on(async {
         // Set up the connection pool
         let pool = build_pool(server_cfg.database.clone()).unwrap_or_else(|error| {
@@ -101,6 +107,7 @@ fn main() {
             exit(1);
         });
         relay_server.state.media = MediaService::with_htdocs(server_cfg.media.clone(), &server_cfg.files.htdocs);
+        relay_server.state.h264_diagnostics_directory = h264_diagnostics_directory;
         let access_pool = pool.clone();
         let access_jwt = server_cfg.jwt.clone();
         let relay_server = relay_server

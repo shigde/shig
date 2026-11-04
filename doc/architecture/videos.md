@@ -48,6 +48,7 @@ All paths are relative to `/api`:
 | POST | `/streams/{streamUuid}/videos` | Create an unpublished metadata snapshot; 201 + Location |
 | GET | `/streams/{streamUuid}/videos` | Owner's videos for this source |
 | POST | `/streams/{streamUuid}/recordings` | Create a new video and request recording start |
+| GET | `/streams/{streamUuid}/recordings/ready` | Wait for actual HLS video initialization; owner only, 204 when ready |
 | POST | `/videos/{videoUuid}/stop` | End this recording; repeated stop is idempotent |
 | GET | `/videos/{videoUuid}` | Owner metadata and status |
 | PATCH | `/videos/{videoUuid}` | Edit metadata, visibility and publication |

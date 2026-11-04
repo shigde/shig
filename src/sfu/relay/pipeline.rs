@@ -44,7 +44,7 @@ impl VideoCodec {
         match self {
             Self::Vp8 => ("VP8", "rtpvp8depay"),
             Self::Vp9 => ("VP9", "rtpvp9depay"),
-            Self::H264 => ("H264", "rtph264depay ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au"),
+            Self::H264 => ("H264", "rtph264depay name=h264_depay wait-for-keyframe=true request-keyframe=true ! video/x-h264,stream-format=byte-stream,alignment=au ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au"),
             Self::H265 => ("H265", "rtph265depay ! h265parse config-interval=-1 ! video/x-h265,stream-format=byte-stream,alignment=au"),
             Self::Av1 => ("AV1", "rtpav1depay ! av1parse ! video/x-av1,stream-format=obu-stream,alignment=tu"),
         }
@@ -71,6 +71,7 @@ pub(super) struct MediaPipeline {
     pub audio: AppSrc,
     pub frames: mpsc::Receiver<Frame>,
     pub failure: watch::Receiver<Option<String>>,
+    pub keyframe_requests: mpsc::Receiver<()>,
 }
 
 impl MediaPipeline {
@@ -88,6 +89,41 @@ impl MediaPipeline {
         let pipeline = gst::parse::launch(&description)?
             .downcast::<gst::Pipeline>()
             .map_err(|_| anyhow!("Expected a GStreamer pipeline"))?;
+        let (keyframe_tx, keyframe_requests) = mpsc::channel(1);
+        if matches!(config.video_codec, VideoCodec::H264) {
+            let pad = pipeline
+                .by_name("h264_depay")
+                .unwrap()
+                .static_pad("sink")
+                .unwrap();
+            let guard = std::sync::Mutex::new(super::h264_guard::H264Guard::default());
+            pad.add_probe(
+                gst::PadProbeType::BUFFER | gst::PadProbeType::EVENT_UPSTREAM,
+                move |_, info| {
+                    match info.data.as_mut() {
+                        Some(gst::PadProbeData::Buffer(buffer)) => {
+                            match guard.lock().unwrap().inspect(buffer) {
+                                Some(true) => {
+                                    buffer.make_mut().set_flags(gst::BufferFlags::DISCONT)
+                                }
+                                Some(false) => {}
+                                None => return gst::PadProbeReturn::Drop,
+                            }
+                        }
+                        Some(gst::PadProbeData::Event(event)) => {
+                            if event
+                                .structure()
+                                .is_some_and(|s| s.name() == "GstForceKeyUnit")
+                            {
+                                let _ = keyframe_tx.try_send(());
+                            }
+                        }
+                        _ => {}
+                    }
+                    gst::PadProbeReturn::Ok
+                },
+            );
+        }
         let video = pipeline
             .by_name("video_in")
             .unwrap()
@@ -178,6 +214,7 @@ impl MediaPipeline {
             audio,
             frames,
             failure,
+            keyframe_requests,
         };
         result.pipeline.set_state(gst::State::Playing)?;
         Ok(result)

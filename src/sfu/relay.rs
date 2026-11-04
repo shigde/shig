@@ -2,6 +2,8 @@ use crate::sfu::media::Media;
 
 pub mod actor;
 mod error;
+mod h264_diagnostics;
+mod h264_guard;
 pub mod message;
 pub(crate) mod pipeline;
 mod publisher;

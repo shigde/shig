@@ -24,6 +24,21 @@ struct SavedRendition {
 
 impl HlsWriter {
     pub async fn open(source: moq_mux::Source, directory: PathBuf) -> anyhow::Result<Self> {
+        let (broadcaster, after) = Self::prepare(source).await?;
+        // Only an actual recording creates a directory; never create the configured root here.
+        fs::create_dir(&directory)
+            .await
+            .context("Cannot create recording directory")?;
+        Ok(Self {
+            broadcaster,
+            directory,
+            after,
+        })
+    }
+
+    pub(super) async fn prepare(
+        source: moq_mux::Source,
+    ) -> anyhow::Result<(Arc<Broadcaster>, u64)> {
         // Retain timeline metadata for the entire recording, rather than the live 16s window.
         // Media bytes are still fetched and written one segment at a time.
         let mut config = moq_hls::export::Config::default();
@@ -39,23 +54,30 @@ impl HlsWriter {
         // Segment numbers are shared by every rendition. Establish one common start
         // boundary before returning, including when an inline codec must build its init.
         let mut renditions = broadcaster.renditions();
-        let Some(Event::Added(rendition)) = renditions.next().await else {
-            bail!("No recording rendition is available");
-        };
-        let playlist = tokio::time::timeout(Duration::from_secs(10), rendition.playlist(None))
-            .await
-            .context("Timed out initializing HLS recording")??
-            .context("HLS initialization is not available")?;
-        let after = last_segment(&playlist).context("HLS timeline is empty")?;
-        // Only an actual recording creates a directory; never create the configured root here.
-        fs::create_dir(&directory)
-            .await
-            .context("Cannot create recording directory")?;
-        Ok(Self {
-            broadcaster,
-            directory,
-            after,
+        let after = tokio::time::timeout(Duration::from_secs(15), async {
+            while let Some(event) = renditions.next().await {
+                let Event::Added(rendition) = event else {
+                    continue;
+                };
+                if !matches!(rendition.kind, Kind::Video) {
+                    continue;
+                }
+                // An advertised rendition is not necessarily initialized yet. The cursor
+                // waits for actual media and bootstraps the inline H.264 parameter sets.
+                let mut segments = rendition.segments();
+                while segments.next().await?.is_some() {
+                    if let Some(playlist) = rendition.playlist(None).await? {
+                        if let Some(after) = last_segment(&playlist) {
+                            return Ok(after);
+                        }
+                    }
+                }
+            }
+            bail!("Recording source ended before HLS initialization became available")
         })
+        .await
+        .context("Timed out waiting for HLS recording readiness")??;
+        Ok((broadcaster, after))
     }
 
     pub async fn run(self, stop: CancellationToken) -> anyhow::Result<u64> {
@@ -288,6 +310,47 @@ mod tests {
     fn missing_media_cannot_be_advertised_as_a_ready_recording() {
         assert!(finish_playlist(PLAYLIST, &[10, 12].into()).is_err());
         assert!(finish_playlist(PLAYLIST, &BTreeSet::new()).is_err());
+    }
+
+    #[tokio::test]
+    async fn waits_for_initial_video_media_without_creating_a_recording_directory() {
+        let origin = moq_tokio::origin::spawn();
+        let mut broadcast = origin
+            .publish("live/preparing", Default::default())
+            .unwrap();
+        let catalog =
+            moq_mux::catalog::Producer::<()>::new(&mut broadcast, Default::default()).unwrap();
+        let mut track = moq_mux::import::Track::video(
+            broadcast.reserve_track("video").unwrap(),
+            catalog.reserve(),
+            moq_mux::import::VideoInit::new(moq_mux::import::VideoFormat::Vp8, bytes::Bytes::new()),
+        )
+        .unwrap();
+        let source = moq_mux::Source::new(origin.consume(), "live/preparing");
+        let mut preparing = tokio::spawn(HlsWriter::prepare(source));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut preparing)
+                .await
+                .is_err()
+        );
+        for second in 0..6 {
+            track
+                .decode(
+                    bytes::Bytes::from_static(&[
+                        0x10, 0, 0, 0x9d, 0x01, 0x2a, 0x40, 0x01, 0xf0, 0x00,
+                    ]),
+                    Some(moq_net::Timestamp::from_micros(second * 1_000_000).unwrap()),
+                )
+                .unwrap();
+            tokio::task::yield_now().await;
+        }
+        let (broadcaster, _) = tokio::time::timeout(Duration::from_secs(5), preparing)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!broadcaster.is_closed());
+        assert!(!broadcast.consume().is_closed());
     }
 
     #[tokio::test]
