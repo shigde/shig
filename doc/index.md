@@ -22,7 +22,6 @@
 - [Mail](admin/mail.md)
 - [Firewall](admin/firewall.md)
 - [Certificate Renewal](admin/certificate-renewal.md)
-- [Relay UDP Buffers and Timestamp Diagnostics](admin/relay-diagnostics.md)
 - [Verification](admin/verification.md)
 - [Messages and Notifications](admin/inboxes.md)
 - [Troubleshooting](admin/trouble-shouting.md)
