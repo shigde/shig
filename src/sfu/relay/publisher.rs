@@ -92,12 +92,7 @@ impl HangPublisher {
             }
         };
         let mut ready = Some(ready);
-        // Register the real publisher, rather than relying on a stale database live flag.
-        if let Err(error) = self.media.live_started(&self.name).await {
-            log::error!("Recording registration failed for {}: {error:#}", self.name);
-        }
         let result = self.publish(&mut pipeline, &cancel, &mut ready).await;
-        self.media.live_stopped(&self.name).await;
         if let Some(ready) = ready.take() {
             let _ = ready.send(Err(RelayError::PublisherError(
                 result
@@ -141,13 +136,12 @@ impl HangPublisher {
             AudioInit::new(AudioFormat::Opus, opus_head),
         )?;
         drop(reservation);
+        if let Err(error) = self.media.live_started(&self.name).await {
+            log::error!("Recording registration failed for {}: {error:#}", self.name);
+        }
         let _ = ready.take().unwrap().send(Ok(()));
         let mut video_group = VideoGroup::default();
         video_group.requested(Instant::now());
-        tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
-            _ = self.video.request_keyframe(&self.video.peer_id) => {}
-        }
         let mut video_recovery = VideoRecovery::default();
         let mut keyframe_check = tokio::time::interval(Duration::from_millis(500));
         keyframe_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -160,6 +154,10 @@ impl HangPublisher {
             None
         };
         let result = async {
+            tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                _ = self.video.request_keyframe(&self.video.peer_id) => {}
+            }
             loop {
                 tokio::select! {
                     biased;
@@ -234,6 +232,8 @@ impl HangPublisher {
             }
             Ok(())
         }.await;
+        // Finalize the recording while the publisher still owns both tracks.
+        self.media.live_stopped(&self.name).await;
         if let Some(diagnostics) = diagnostics {
             diagnostics.finish().await;
         }

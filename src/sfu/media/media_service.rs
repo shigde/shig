@@ -83,6 +83,8 @@ impl MediaService {
     }
     pub async fn live_stopped(&self, stream: &str) {
         self.live.lock().unwrap().remove(stream);
+        // A recording start may still be preparing its writer when the broadcast ends.
+        let _operation = self.recording_operation(stream).await;
         if let Err(error) = self.stop(stream).await {
             log::error!("Stop recording {stream}: {error:#}");
         }
