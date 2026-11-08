@@ -1,8 +1,7 @@
 //! Sequential, allowlisted reads. A resource failure never changes the batch HTTP status.
 use crate::{
-    db::DbPool,
-    inbox::{self, Inbox},
-    models::{auth::session::Session, error::ApiError},
+    db::{inbox::{read as inbox_read, Inbox}, DbPool},
+    models::{auth::session::Session, error::ApiError, inbox::{Counts, Page}},
     relay::state::RelayState,
     sfu::Sfu,
 };
@@ -204,9 +203,9 @@ async fn dispatch(
                 conn.transaction::<_, ApiError, _>(|conn| {
                     conn.batch_execute("SET LOCAL statement_timeout = '1500ms'")?;
                     if counts {
-                        serialize(inbox::counts(conn, inbox, user)?)
+                        serialize(Counts::from(inbox_read::counts(conn, inbox, user)?))
                     } else {
-                        serialize(inbox::list(conn, inbox, user, offset)?)
+                        serialize(Page::from(inbox_read::list(conn, inbox, user, offset)?))
                     }
                 })
             })

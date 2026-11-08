@@ -73,3 +73,34 @@ pub fn find_if_exists_stream_by_uuid_for_owner(
         .optional()?;
     Ok(stream_dao)
 }
+
+pub fn lock_owned_stream_id(
+    conn: &mut PgConnection,
+    stream_uuid: &str,
+    owner: i32,
+) -> DbResult<i32> {
+    use crate::db::schema::streams;
+
+    Ok(streams::table
+        .filter(streams::uuid.eq(stream_uuid))
+        .filter(streams::user_id.eq(owner))
+        .select(streams::id)
+        .for_update()
+        .first(conn)?)
+}
+
+pub fn find_stream_uuid_by_id(conn: &mut PgConnection, id: i32) -> QueryResult<String> {
+    use crate::db::schema::streams;
+
+    streams::table.find(id).select(streams::uuid).first(conn)
+}
+
+pub fn lock_stream(conn: &mut PgConnection, id: i32) -> DbResult<()> {
+    use crate::db::schema::streams;
+
+    streams::table.find(id)
+        .select(streams::id)
+        .for_update()
+        .first::<i32>(conn)?;
+    Ok(())
+}

@@ -73,7 +73,12 @@ pub(crate) async fn publish(
             ApiError::InternalServerError { error_message }
         })??;
 
-    crate::notifications::repository::stream_state(&mut conn, db_stream.id, publishing, &user.name, &db_stream.title)?;
+    if !publishing {
+        crate::db::device_grants::delete::revoke_stream(&mut conn, db_stream.id)?;
+    }
+    crate::models::inbox::stream_state(
+        &mut conn, db_stream.id, publishing, &user.name, &db_stream.title,
+    )?;
     Ok(())
 }
 fn internal_publish_token(channel_id: &str, _stream_id: &str) -> AuthToken {

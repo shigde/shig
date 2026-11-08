@@ -1,7 +1,6 @@
 extern crate core;
 
 mod api;
-mod inbox;
 #[cfg(test)]
 mod inbox_test;
 mod messages;

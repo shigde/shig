@@ -81,6 +81,29 @@ diesel::table! {
 }
 
 diesel::table! {
+    device_grants (device_uuid) {
+        device_uuid -> Uuid,
+        stream_id -> Int4,
+        invite_hash -> Nullable<Text>,
+        session_hash -> Nullable<Text>,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    devices (uuid) {
+        uuid -> Uuid,
+        owner_user_id -> Int4,
+        slot -> Int2,
+        #[max_length = 255]
+        name -> Varchar,
+        active -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     friend_roles (id) {
         id -> Int4,
         #[max_length = 40]
@@ -281,6 +304,9 @@ diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
 diesel::joinable!(channel_friends -> users (user_id));
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
+diesel::joinable!(devices -> users (owner_user_id));
+diesel::joinable!(device_grants -> devices (device_uuid));
+diesel::joinable!(device_grants -> streams (stream_id));
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(lobbies -> channels (channel_id));
 diesel::joinable!(lobbies -> streams (stream_id));
@@ -307,6 +333,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     actors,
     channel_friends,
     channels,
+    devices,
+    device_grants,
     friend_roles,
     instances,
     lobbies,

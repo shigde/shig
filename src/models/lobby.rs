@@ -73,7 +73,7 @@ pub(crate) async fn leave_lobby(
         });
     }
 
-    let _ = sfu_addr
+    let result = sfu_addr
         .send(LeaveLobby {
             lobby_uuid: db_lobby.uuid.clone(),
             user_uuid: user.user_uuid.clone(),
@@ -88,6 +88,11 @@ pub(crate) async fn leave_lobby(
             ApiError::InternalServerError { error_message }
         })?;
 
+    if result.is_ok() && db_lobby.user_id == user.id {
+        if let Some(stream_id) = db_lobby.stream_id {
+            crate::db::device_grants::delete::revoke_stream(&mut conn, stream_id)?;
+        }
+    }
     Ok(())
 }
 

@@ -1,7 +1,9 @@
 pub mod auth;
+pub mod device;
 pub mod error;
 pub mod federation;
 pub mod http;
+pub mod inbox;
 pub mod lobby;
 pub mod mail;
 pub mod user;

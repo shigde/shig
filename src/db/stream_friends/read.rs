@@ -63,6 +63,17 @@ pub fn find_all_by_stream(conn: &mut PgConnection, stream: i32) -> DbResult<Vec<
     Ok(friends)
 }
 
+pub fn list_active_accepted_user_ids(conn: &mut PgConnection, stream: i32) -> DbResult<Vec<i32>> {
+    use crate::db::schema::stream_friends;
+
+    Ok(stream_friends::table
+        .filter(stream_friends::stream_id.eq(stream))
+        .filter(stream_friends::active.eq(true))
+        .filter(stream_friends::accepted.eq(true))
+        .select(stream_friends::user_id)
+        .load(conn)?)
+}
+
 pub fn is_stream_friend(conn: &mut PgConnection, stream: i32, user: i32) -> DbResult<bool> {
     use crate::db::schema::stream_friends::dsl::*;
     let exists = select(exists(

@@ -26,3 +26,29 @@ pub fn find_lobby_by_channel_id(conn: &mut PgConnection, channel: i32) -> DbResu
 
     Ok(lobby)
 }
+
+pub fn lock_open_lobby_for_stream(
+    conn: &mut PgConnection,
+    stream: i32,
+    owner: i32,
+) -> DbResult<Option<i32>> {
+    use crate::db::schema::lobbies;
+
+    Ok(lobbies::table
+        .filter(lobbies::stream_id.eq(Some(stream)))
+        .filter(lobbies::user_id.eq(owner))
+        .filter(lobbies::is_open)
+        .select(lobbies::id)
+        .for_update()
+        .first(conn)
+        .optional()?)
+}
+
+pub fn is_open_for_stream(conn: &mut PgConnection, stream: i32) -> DbResult<bool> {
+    use crate::db::schema::lobbies;
+
+    let open = lobbies::table
+        .filter(lobbies::stream_id.eq(Some(stream)))
+        .filter(lobbies::is_open);
+    Ok(diesel::select(diesel::dsl::exists(open)).get_result(conn)?)
+}

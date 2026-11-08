@@ -208,7 +208,9 @@ fn sync_guests(conn: &mut PgConnection, stream_id: i32, requested: &Option<Vec<S
         let exists = diesel::select(diesel::dsl::exists(sf::table.filter(sf::stream_id.eq(stream_id)).filter(sf::user_id.eq(user_id)))).get_result::<bool>(conn)?;
         if !exists {
             let guest = crate::db::stream_friends::create::insert_new_stream_friend(conn, user_id, stream_id, crate::models::user::friend_role::FriendRole::Guest.into())?;
-            crate::messages::repository::invitation(conn, user_id, stream_id, guest.id, &principal.name, &title)?;
+            crate::models::inbox::invitation(
+                conn, user_id, stream_id, guest.id, &principal.name, &title,
+            )?;
         }
     }
     Ok(())

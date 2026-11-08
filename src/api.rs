@@ -1,6 +1,7 @@
 pub mod poll;
 pub mod admin;
 pub mod auth;
+pub mod devices;
 pub mod federation;
 pub mod user;
 pub mod relay;
@@ -24,7 +25,9 @@ use crate::api::user::{
 use actix_web::{get, web, HttpResponse, Responder};
 
 // ignore routes
-pub const IGNORE_ROUTES: [&str; 9] = [
+pub const IGNORE_ROUTES: [&str; 11] = [
+    "/api/auth/device/redeem",
+    "/api/auth/device/disconnect",
     "/api/auth/register",
     "/api/auth/verify",
     "/api/auth/login",
@@ -50,6 +53,12 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
     cfg.service(metrics)
     .service(
         web::scope("/api")
+            .service(web::scope("/devices")
+                .service(devices::list)
+                .service(devices::create)
+                .service(devices::update)
+                .service(devices::remove)
+                .service(devices::invite))
             .service(web::scope("/videos")
                 .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
             .service(web::scope("/streams")
@@ -126,6 +135,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/auth")
+                    .service(devices::redeem)
+                    .service(devices::disconnect)
                     .service(login)
                     .service(signup)
                     .service(get_current_user)
