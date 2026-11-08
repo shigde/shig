@@ -1,7 +1,8 @@
 use crate::db::instances::read::find_home_instance;
 use crate::db::users::User;
 use crate::db::DbPool;
-use crate::models::auth::session::Session;
+use crate::models::auth::{scopes::{DeviceScope, SessionScope}, session::Session};
+use crate::models::device::grant;
 use crate::models::error::ApiError;
 use crate::models::http::MESSAGE_INTERNAL_SERVER_ERROR;
 use actix_web::http::header::HeaderValue;
@@ -29,6 +30,8 @@ pub struct JWT {
     // data
     pub user: String,
     pub uuid: String,
+    #[serde(default)]
+    pub scope: SessionScope,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -57,9 +60,29 @@ impl JWT {
             exp: now + AUTH_SESSION_TIMEOUT, // 10min in seconds
             user: user.name.clone(),
             uuid: user.user_uuid.clone(),
+            scope: SessionScope::Account,
         };
 
         generate_token(payload, cgf.auth_token_key.clone())
+    }
+
+    pub fn generate_device_token(
+        user: &User,
+        scope: DeviceScope,
+        issued_at: i64,
+        expires_at: i64,
+        config: &JWTConfig,
+    ) -> Result<String, ApiError> {
+        generate_token(
+            JWT {
+                iat: issued_at,
+                exp: expires_at,
+                user: user.name.clone(),
+                uuid: user.user_uuid.clone(),
+                scope: SessionScope::Device(scope),
+            },
+            config.auth_token_key.clone(),
+        )
     }
 }
 
@@ -118,9 +141,30 @@ pub fn verify_auth_token(
     token_data: &TokenData<JWT>,
     pool: &web::Data<DbPool>,
 ) -> Result<Session, String> {
+    if token_data.claims.scope != SessionScope::Account {
+        return Err("Account session required".into());
+    }
     let mut conn = pool.get().map_err(|_| "Failed to get db connection")?;
     let user = find_active_user_by_uuid(&mut conn, token_data.claims.uuid.as_str()).map_err(|_| "Invalid token")?;
     Ok(Session::create(user))
+}
+
+pub fn verify_device_token(
+    token_data: &TokenData<JWT>,
+    pool: &web::Data<DbPool>,
+) -> Result<Session, String> {
+    let SessionScope::Device(scope) = &token_data.claims.scope else {
+        return Err("Device session required".into());
+    };
+    let mut conn = pool.get().map_err(|_| "Failed to get db connection")?;
+    let user = find_active_user_by_uuid(&mut conn, &token_data.claims.uuid)
+        .map_err(|_| "Invalid token")?;
+    if !grant::is_active_session(&mut conn, scope, user.id).map_err(|_| "Invalid token")? {
+        return Err("Invalid token".into());
+    }
+    let mut session = Session::create(user);
+    session.scope = token_data.claims.scope.clone();
+    Ok(session)
 }
 
 pub fn verify_refresh_token(
@@ -146,4 +190,41 @@ pub fn is_auth_header_valid(authen_header: &HeaderValue) -> bool {
         return authen_str.starts_with("bearer") || authen_str.starts_with("Bearer");
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn access_tokens_preserve_device_scope_and_accept_legacy_account_tokens() {
+        let config = web::Data::new(JWTConfig {
+            auth_token_key: "scope-test-key".into(),
+            refresh_token_key: "scope-test-refresh-key".into(),
+            session_live_time: 3600,
+        });
+        let now = Utc::now().timestamp();
+        let scope = SessionScope::Device(DeviceScope {
+            device_id: Uuid::new_v4(),
+            stream_id: 7,
+            session_id: Uuid::new_v4(),
+        });
+        let device_token = generate_token(JWT {
+            iat: now,
+            exp: now + 60,
+            user: "owner".into(),
+            uuid: "owner-id".into(),
+            scope: scope.clone(),
+        }, config.auth_token_key.clone()).unwrap();
+        assert_eq!(decode_auth_token(device_token, &config).unwrap().claims.scope, scope);
+
+        let legacy_token = generate_token(serde_json::json!({
+            "iat": now, "exp": now + 60, "user": "owner", "uuid": "owner-id",
+        }), config.auth_token_key.clone()).unwrap();
+        assert_eq!(
+            decode_auth_token(legacy_token, &config).unwrap().claims.scope,
+            SessionScope::Account,
+        );
+    }
 }

@@ -39,6 +39,8 @@ pub type PeerResult<T> = Result<T, PeerError>;
 
 #[derive(Debug, Display)]
 pub enum PeerError {
+    #[display(fmt = "Peer is not allowed to subscribe")]
+    SubscribeNotAllowed,
     #[display(fmt = "Peer RTC error: {}", _0)]
     InternalRtc(String),
     #[display(fmt = "Peer has no subscribe endpoint")]

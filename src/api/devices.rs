@@ -1,9 +1,11 @@
 use crate::db::{devices, DbPool};
 use crate::models::auth::{jwt::JWTConfig, session::Session};
-use crate::models::device::{grant, DeviceView};
+use crate::models::device::{grant, publish, DeviceView};
 use crate::models::error::ApiError;
 use crate::models::http::response::Body;
-use actix_web::{delete, get, patch, post, web, HttpResponse};
+use crate::sfu::{lobby::KickPeer, peer::PeerId, LeaveLobby, Sfu};
+use actix::Addr;
+use actix_web::{delete, get, http::header, patch, post, web, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -65,6 +67,7 @@ pub async fn create(
 #[patch("/{uuid}")]
 pub async fn update(
     pool: web::Data<DbPool>,
+    sfu: web::Data<Addr<Sfu>>,
     session: web::ReqData<Session>,
     path: web::Path<String>,
     body: web::Json<DeviceUpdate>,
@@ -76,16 +79,28 @@ pub async fn update(
         body.name.as_deref(),
         body.active,
     )?;
+    if !device.active {
+        sfu.do_send(KickPeer {
+            host_uuid: session.principal.user_uuid.clone(),
+            id: PeerId::new(device.uuid.to_string()),
+        });
+    }
     Ok(HttpResponse::Ok().json(Body::new("ok", DeviceView::from(device))))
 }
 
 #[delete("/{uuid}")]
 pub async fn remove(
     pool: web::Data<DbPool>,
+    sfu: web::Data<Addr<Sfu>>,
     session: web::ReqData<Session>,
     path: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
-    devices::delete::delete(&mut *pool.get()?, session.principal.id, device_uuid(&path)?)?;
+    let uuid = device_uuid(&path)?;
+    devices::delete::delete(&mut *pool.get()?, session.principal.id, uuid)?;
+    sfu.do_send(KickPeer {
+        host_uuid: session.principal.user_uuid.clone(),
+        id: PeerId::new(uuid.to_string()),
+    });
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -107,24 +122,45 @@ pub async fn invite(
         .json(Body::new("ok", Invite { token })))
 }
 
-#[post("/device/redeem")]
 pub async fn redeem(
     pool: web::Data<DbPool>,
     config: web::Data<JWTConfig>,
     body: web::Json<RedeemRequest>,
 ) -> Result<HttpResponse, ApiError> {
-    let session = grant::redeem(&mut *pool.get()?, &body.token, config.session_live_time)?;
+    let session = grant::redeem(&mut *pool.get()?, &body.token, &config)?;
     Ok(HttpResponse::Ok()
         .insert_header(("Cache-Control", "no-store"))
         .json(Body::new("ok", session)))
 }
 
-#[post("/device/disconnect")]
 pub async fn disconnect(
     pool: web::Data<DbPool>,
-    body: web::Json<RedeemRequest>,
+    sfu: web::Data<Addr<Sfu>>,
+    session: web::ReqData<Session>,
 ) -> Result<HttpResponse, ApiError> {
-    grant::end_session(&mut *pool.get()?, &body.token)?;
+    let scope = session.device_scope()?;
+    if let Some(lobby_uuid) = grant::end_session(&mut *pool.get()?, scope)? {
+        sfu.do_send(LeaveLobby {
+            lobby_uuid,
+            user_uuid: scope.device_id.to_string(),
+        });
+    }
     Ok(HttpResponse::NoContent().finish())
+}
+
+pub async fn whip(
+    request: HttpRequest,
+    pool: web::Data<DbPool>,
+    sfu: web::Data<actix::Addr<crate::sfu::Sfu>>,
+    session: web::ReqData<Session>,
+    offer: String,
+) -> Result<HttpResponse, ApiError> {
+    if request.headers().get(header::CONTENT_TYPE)
+        != Some(&header::HeaderValue::from_static("application/sdp"))
+    {
+        return Ok(HttpResponse::UnsupportedMediaType().body("Expected Content-Type: application/sdp"));
+    }
+    let answer = publish::publish(&pool, &sfu, &session, offer).await?;
+    Ok(HttpResponse::Created().content_type("application/sdp").body(answer))
 }
 

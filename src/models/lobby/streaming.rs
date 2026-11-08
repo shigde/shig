@@ -4,7 +4,7 @@ use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
-use crate::sfu::{PublishLobbyStream, Sfu};
+use crate::sfu::{lobby::KickPeer, peer::PeerId, PublishLobbyStream, Sfu};
 use actix::Addr;
 use actix_web::web;
 use moq_relay::auth::Token as AuthToken;
@@ -74,7 +74,13 @@ pub(crate) async fn publish(
         })??;
 
     if !publishing {
-        crate::db::device_grants::delete::revoke_stream(&mut conn, db_stream.id)?;
+        let devices = crate::db::device_grants::delete::revoke_stream(&mut conn, db_stream.id)?;
+        for device in devices {
+            sfu_addr.do_send(KickPeer {
+                host_uuid: user.user_uuid.clone(),
+                id: PeerId::new(device.to_string()),
+            });
+        }
     }
     crate::models::inbox::stream_state(
         &mut conn, db_stream.id, publishing, &user.name, &db_stream.title,

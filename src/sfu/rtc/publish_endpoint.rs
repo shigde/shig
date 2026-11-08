@@ -1,6 +1,6 @@
 use crate::sfu::lobby::Lobby;
 use crate::sfu::media::track_info::InboundTrackInfo;
-use crate::sfu::media::{AddMedia, Media, RemoveMedia, RtpCodecType};
+use crate::sfu::media::{AddMedia, Media, MediaPurpose, RemoveMedia, RtpCodecType};
 use crate::sfu::peer::PeerId;
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
 use crate::sfu::rtc::sdp::parse_offered_track_info;
@@ -64,11 +64,16 @@ impl PublishEndpoint {
         peer_id: PeerId,
         lobby_addr: Addr<Lobby>,
         track: Arc<dyn TrackRemote>,
+        device_name: Option<String>,
     ) {
         let kind = track.kind().await;
         let track_id = track.track_id().await;
         let stream_id = track.stream_id().await;
-        let track_info = self.take_track_info(kind, &track_id, &stream_id);
+        let mut track_info = self.take_track_info(kind, &track_id, &stream_id);
+        if let Some(name) = device_name {
+            track_info.purpose = MediaPurpose::PARTICIPANT;
+            track_info.info = name;
+        }
         log::info!(
             "receive publish track, peer_id={}, endpoint_id={}, kind={:?}, track_id={}, stream_id={}, mid={}",
             peer_id,

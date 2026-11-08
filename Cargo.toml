@@ -41,7 +41,7 @@ diesel_migrations = "^2.2.0"
 log = "^0.4.22"
 env_logger = "^0.11.6"
 chrono = { version = "^0.4.39", features = ["serde"] }
-uuid = { version = "^1.11.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = { version = "^1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 openssl = { version = "^0.10", features = ["vendored"] }
 bcrypt = "^0.16.0"
 rsa = "^0.9.7"

@@ -1,4 +1,5 @@
 pub mod grant;
+pub mod publish;
 
 use crate::db::devices::Device;
 use serde::Serialize;

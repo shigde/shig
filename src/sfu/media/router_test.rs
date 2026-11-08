@@ -62,6 +62,7 @@ mod tests {
         ForwardTarget::new(
             peer_id,
             track,
+            96,
             RtpHeaderExtensionTranslator::new(&HashMap::new(), &[], "0".into()),
         )
     }

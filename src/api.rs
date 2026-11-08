@@ -22,24 +22,10 @@ use crate::api::user::stream_friend::{
 use crate::api::user::{
     channel, get_active_user, lobby, search_active_users_by_name, stream_preview, whep, whip,
 };
-use actix_web::{get, web, HttpResponse, Responder};
+use crate::middleware::auth::Authentication;
+use crate::models::auth::scopes::RequireScope;
+use actix_web::{web, HttpResponse, Responder};
 
-// ignore routes
-pub const IGNORE_ROUTES: [&str; 11] = [
-    "/api/auth/device/redeem",
-    "/api/auth/device/disconnect",
-    "/api/auth/register",
-    "/api/auth/verify",
-    "/api/auth/login",
-    "/api/auth/refresh",
-    "/api/auth/pass/email",
-    "/api/auth/pass/reset",
-    "/static",
-    "/api/pub/",
-    "/metrics",
-];
-
-#[get("/metrics")]
 async fn metrics() -> impl Responder {
     match crate::sfu::metrics::render() {
         Ok(body) => HttpResponse::Ok()
@@ -50,28 +36,37 @@ async fn metrics() -> impl Responder {
 }
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
-    cfg.service(metrics)
+    cfg.service(
+        web::resource("/metrics")
+            .wrap(Authentication::new(RequireScope::Public))
+            .route(web::get().to(metrics)),
+    )
     .service(
         web::scope("/api")
             .service(web::scope("/devices")
+                .wrap(Authentication::new(RequireScope::Account))
                 .service(devices::list)
                 .service(devices::create)
                 .service(devices::update)
                 .service(devices::remove)
                 .service(devices::invite))
             .service(web::scope("/videos")
+                .wrap(Authentication::new(RequireScope::Account))
                 .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
             .service(web::scope("/streams")
+                .wrap(Authentication::new(RequireScope::Account))
                 .service(videos::list_videos).service(videos::create_video).service(videos::recording_ready).service(videos::start_recording))
-            .service(poll::poll)
             .service(web::scope("/messages")
+                .wrap(Authentication::new(RequireScope::Account))
                 .service(crate::messages::api::list).service(crate::messages::api::counts)
                 .service(crate::messages::api::read_all).service(crate::messages::api::read))
             .service(web::scope("/notifications")
+                .wrap(Authentication::new(RequireScope::Account))
                 .service(crate::notifications::api::list).service(crate::notifications::api::counts)
                 .service(crate::notifications::api::read_all).service(crate::notifications::api::read))
             .service(
                 web::scope("/admin")
+                    .wrap(Authentication::new(RequireScope::Account))
                     .service(admin::monitoring)
                     .service(admin::list_users)
                     .service(admin::set_user_active)
@@ -79,6 +74,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/pub")
+                    .wrap(Authentication::any_of(&[RequireScope::Public, RequireScope::Account]))
                     .service(web::scope("/videos").service(videos::get_public_video))
                     .service(web::scope("/stream")
                         .service(media::available))
@@ -110,6 +106,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/channel")
+                    .wrap(Authentication::new(RequireScope::Account))
                     .service(channel::update_channel)
                     .service(whip::create_answer)
                     .service(whep::create_offer)
@@ -123,6 +120,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/stream")
+                    .wrap(Authentication::new(RequireScope::Account))
                     .service(media::status).service(media::start).service(media::stop).service(media::publication)
                     .service(get_stream)
                     .service(create_stream)
@@ -135,18 +133,34 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/auth")
-                    .service(devices::redeem)
-                    .service(devices::disconnect)
-                    .service(login)
-                    .service(signup)
-                    .service(get_current_user)
-                    .service(delete_current_user)
-                    .service(verify)
-                    .service(refresh)
-                    .service(send_forgotten_pass_email)
-                    .service(reset_password)
-                    .service(update_password),
-            ),
+                    .service(web::resource("/device/redeem")
+                        .wrap(Authentication::new(RequireScope::Public))
+                        .route(web::post().to(devices::redeem)))
+                    .service(web::resource("/device/disconnect")
+                        .wrap(Authentication::new(RequireScope::Device))
+                        .route(web::post().to(devices::disconnect)))
+                    .service(web::resource("/device/whip")
+                        .wrap(Authentication::new(RequireScope::Device))
+                        .route(web::post().to(devices::whip)))
+                    .service(web::resource("/user")
+                        .wrap(Authentication::new(RequireScope::Account))
+                        .route(web::get().to(get_current_user))
+                        .route(web::delete().to(delete_current_user)))
+                    .service(web::resource("/pass/update")
+                        .wrap(Authentication::new(RequireScope::Account))
+                        .route(web::put().to(update_password)))
+                    .service(web::scope("")
+                        .wrap(Authentication::new(RequireScope::Public))
+                        .service(login)
+                        .service(signup)
+                        .service(verify)
+                        .service(refresh)
+                        .service(send_forgotten_pass_email)
+                        .service(reset_password)),
+            )
+            .service(web::scope("")
+                .wrap(Authentication::new(RequireScope::Account))
+                .service(poll::poll)),
 
     );
 }
@@ -154,16 +168,46 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod routing_tests {
     #[actix_web::test]
-    async fn replay_methods_reach_the_registered_handlers() {
+    async fn protected_routes_require_a_session() {
         use actix_web::{http::{Method, StatusCode}, test, App};
         let app = test::init_service(App::new().configure(super::config_services)).await;
-        for method in [Method::GET, Method::PATCH, Method::DELETE] {
+        for (method, path) in [
+            (Method::GET, "/api/videos/00000000-0000-0000-0000-000000000000"),
+            (Method::PATCH, "/api/videos/00000000-0000-0000-0000-000000000000"),
+            (Method::DELETE, "/api/videos/00000000-0000-0000-0000-000000000000"),
+            (Method::GET, "/api/devices"),
+            (Method::POST, "/api/auth/device/whip"),
+            (Method::POST, "/api/auth/device/disconnect"),
+            (Method::GET, "/api/auth/user"),
+            (Method::POST, "/api/poll"),
+        ] {
             let response = test::call_service(&app, test::TestRequest::default()
-                .method(method.clone()).uri("/api/videos/00000000-0000-0000-0000-000000000000")
+                .method(method.clone()).uri(path)
                 .set_json(serde_json::json!({})).to_request()).await;
-            // No database/session is installed: extraction must fail in the handler,
-            // rather than routing returning an empty 404 or rejecting the method.
-            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR, "{method}");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{method} {path}");
         }
+        let redeem = test::call_service(&app, test::TestRequest::post()
+            .uri("/api/auth/device/redeem").set_json(serde_json::json!({"token": "test"}))
+            .to_request()).await;
+        // The request reaches the handler, which has no database in this test.
+        assert_eq!(redeem.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[actix_web::test]
+    async fn public_routes_support_anonymous_and_optional_account_access() {
+        use actix_web::{http::StatusCode, test, App};
+        let app = test::init_service(App::new().configure(super::config_services)).await;
+        let path = "/api/pub/federation/settings";
+        let anonymous = test::call_service(&app, test::TestRequest::get().uri(path).to_request()).await;
+        // Missing settings data produces a handler error, so the anonymous request passed auth.
+        assert_eq!(anonymous.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let invalid_token = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(path)
+                .insert_header(("Authorization", "Bearer invalid"))
+                .to_request(),
+        ).await;
+        assert_eq!(invalid_token.status(), StatusCode::UNAUTHORIZED);
     }
 }

@@ -20,12 +20,22 @@ pub fn lock_owned(conn: &mut PgConnection, owner: i32, uuid: Uuid) -> DbResult<D
         .first(conn)?)
 }
 
-pub fn lock_active_name(conn: &mut PgConnection, uuid: Uuid) -> DbResult<Option<String>> {
+pub fn lock_active(conn: &mut PgConnection, uuid: Uuid) -> DbResult<Option<Device>> {
     Ok(devices::table
         .find(uuid)
         .filter(devices::active)
-        .select(devices::name)
+        .select(Device::as_select())
         .for_update()
+        .first(conn)
+        .optional()?)
+}
+
+pub fn find_active_name(conn: &mut PgConnection, owner: i32, uuid: Uuid) -> DbResult<Option<String>> {
+    Ok(devices::table
+        .find(uuid)
+        .filter(devices::owner_user_id.eq(owner))
+        .filter(devices::active)
+        .select(devices::name)
         .first(conn)
         .optional()?)
 }

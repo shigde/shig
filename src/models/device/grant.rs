@@ -1,4 +1,5 @@
-use crate::db::{device_grants, devices, lobbies, streams};
+use crate::db::{device_grants, devices, lobbies, streams, users};
+use crate::models::auth::{jwt::{JWTConfig, JWT}, scopes::DeviceScope};
 use crate::models::error::ApiError;
 use chrono::{TimeDelta, Utc};
 use diesel::{Connection, PgConnection};
@@ -54,7 +55,7 @@ pub fn issue_invite(
 pub fn redeem(
     conn: &mut PgConnection,
     token: &str,
-    session_seconds: i64,
+    config: &JWTConfig,
 ) -> Result<DeviceSession, ApiError> {
     if !is_credential(token) {
         return Err(invalid_invite());
@@ -63,21 +64,32 @@ pub fn redeem(
     conn.transaction(|conn| {
         let invite =
             device_grants::read::find_invite(conn, &invite_hash)?.ok_or_else(invalid_invite)?;
-        let device_name = devices::read::lock_active_name(conn, invite.device_uuid)?
+        let device = devices::read::lock_active(conn, invite.device_uuid)?
             .ok_or_else(invalid_invite)?;
         let now = Utc::now();
-        let expires_at = TimeDelta::try_seconds(session_seconds)
+        let expires_at = TimeDelta::try_seconds(config.session_live_time)
             .and_then(|ttl| now.checked_add_signed(ttl))
             .ok_or_else(|| ApiError::InternalServerError {
                 error_message: "Invalid device session lifetime".into(),
             })?;
 
-        let session_token = credential()?;
+        let scope = DeviceScope {
+            device_id: device.uuid,
+            stream_id: invite.stream_id,
+            session_id: Uuid::new_v4(),
+        };
+        let owner = users::read::find_user_by_id(conn, device.owner_user_id)?;
+        if !owner.active {
+            return Err(invalid_invite());
+        }
+        let session_token = JWT::generate_device_token(
+            &owner, scope.clone(), now.timestamp(), expires_at.timestamp(), config,
+        )?;
         let session = device_grants::update::redeem_invite(
             conn,
             invite.device_uuid,
             &invite_hash,
-            &digest(&session_token),
+            &session_hash(&scope),
             now,
             expires_at,
         )?
@@ -85,17 +97,26 @@ pub fn redeem(
         let stream_uuid = streams::read::find_stream_uuid_by_id(conn, session.stream_id)?;
         Ok(DeviceSession {
             token: session_token,
-            device_name,
+            device_name: device.name,
             stream_uuid,
         })
     })
 }
 
-pub fn end_session(conn: &mut PgConnection, token: &str) -> Result<(), ApiError> {
-    if is_credential(token) {
-        device_grants::delete::delete_by_session(conn, &digest(token))?;
-    }
-    Ok(())
+pub fn end_session(conn: &mut PgConnection, scope: &DeviceScope) -> Result<Option<String>, ApiError> {
+    let lobby = lobbies::read::find_open_lobby_for_stream(conn, scope.stream_id)?;
+    let revoked = device_grants::delete::delete_by_session(conn, &session_hash(scope))?;
+    Ok(lobby.filter(|_| revoked).map(|lobby| lobby.uuid))
+}
+
+pub fn is_active_session(conn: &mut PgConnection, scope: &DeviceScope, owner_id: i32) -> Result<bool, ApiError> {
+    Ok(device_grants::read::is_active_for(
+        conn, &session_hash(scope), scope.device_id, scope.stream_id, owner_id,
+    )?)
+}
+
+pub(super) fn session_hash(scope: &DeviceScope) -> String {
+    digest(&scope.session_id.to_string())
 }
 
 fn credential() -> Result<String, ApiError> {

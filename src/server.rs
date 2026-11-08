@@ -93,7 +93,6 @@ pub fn start(
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))
             .app_data(web::Data::new(cfg.files.clone()))
-            .wrap(crate::middleware::auth::Authentication)
             .wrap(crate::middleware::req::LoggingMiddleware)
             .configure(api::config_services)
     });

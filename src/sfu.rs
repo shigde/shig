@@ -4,7 +4,7 @@ use crate::sfu::db::message::SetLobbyOffline;
 use crate::sfu::db::DbActor;
 use crate::sfu::error::{SfuError, SfuResult};
 use crate::sfu::lobby::{
-    LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
+    KickPeer, LeavePeer, Lobby, LobbyShutdown, Publish, PublishStream, Subscribe, SubscribeKind,
 };
 use crate::sfu::rtc::PortAllocator;
 use actix::prelude::*;
@@ -94,7 +94,7 @@ impl Handler<PublishLobby> for Sfu {
 
         let lobby_addr = match self.lobbies.get(&lobby_uuid) {
             None => {
-                if matches!(msg.role, peer::PeerRole::Guest) {
+                if !matches!(msg.role, peer::PeerRole::Host) {
                     return Box::pin(fut::err(SfuError::LobbyError(crate::sfu::error::LobbyError::HostAbsent)));
                 }
                 let lobby_addr = Lobby::new(
@@ -115,24 +115,16 @@ impl Handler<PublishLobby> for Sfu {
             Some(lobby_addr) => lobby_addr.clone(),
         };
 
-        let user_uuid = msg.user_uuid.clone();
-        let offer = msg.offer.clone();
+        log::info!("peer joining lobby, peer_id={}, lobby_id={}", msg.user_uuid, lobby_uuid);
+        let request = lobby_addr.send(Publish {
+            user_uuid: msg.user_uuid,
+            stream_uuid: msg.stream_uuid,
+            offer: msg.offer,
+            role: msg.role,
+        });
 
         let fut = async move {
-            log::info!(
-                "peer joining lobby,  peer_id={}, lobby_id={}",
-                user_uuid.clone(),
-                lobby_uuid.clone()
-            );
-            let result = lobby_addr
-                .send(Publish {
-                    user_uuid,
-                    offer,
-                    role: msg.role,
-                })
-                .await;
-
-            match result {
+            match request.await {
                 Ok(val) => match val {
                     Ok(answer) => Ok(answer),
                     Err(e) => Err(SfuError::LobbyError(e)),
@@ -143,6 +135,16 @@ impl Handler<PublishLobby> for Sfu {
         .into_actor(self);
 
         Box::pin(fut)
+    }
+}
+
+impl Handler<KickPeer> for Sfu {
+    type Result = ();
+
+    fn handle(&mut self, msg: KickPeer, _: &mut Self::Context) {
+        for lobby in self.lobbies.values() {
+            lobby.do_send(msg.clone());
+        }
     }
 }
 

@@ -52,3 +52,14 @@ pub fn is_open_for_stream(conn: &mut PgConnection, stream: i32) -> DbResult<bool
         .filter(lobbies::is_open);
     Ok(diesel::select(diesel::dsl::exists(open)).get_result(conn)?)
 }
+
+pub fn find_open_lobby_for_stream(conn: &mut PgConnection, stream: i32) -> DbResult<Option<Lobby>> {
+    use crate::db::schema::lobbies;
+
+    Ok(lobbies::table
+        .filter(lobbies::stream_id.eq(Some(stream)))
+        .filter(lobbies::is_open)
+        .select(Lobby::as_select())
+        .first(conn)
+        .optional()?)
+}

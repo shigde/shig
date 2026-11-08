@@ -141,6 +141,7 @@ impl Actor for DbActor {
     type Context = SyncContext<Self>;
 }
 
+
 impl Handler<SetLobbyOnline> for DbActor {
     type Result = Result<(), String>;
 

@@ -339,7 +339,9 @@ mod tests {
         }
         let app = test::init_service(
             App::new()
-                .wrap(crate::middleware::auth::Authentication)
+                .wrap(crate::middleware::auth::Authentication::new(
+                    crate::models::auth::scopes::RequireScope::Account,
+                ))
                 .service(poll),
         )
         .await;
