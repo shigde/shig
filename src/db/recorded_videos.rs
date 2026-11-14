@@ -1,3 +1,5 @@
+pub mod read;
+
 use crate::models::{
     error::ApiError,
     user::recorded_video::{RecordedVideo, RecordedVideoUpdate},
@@ -7,7 +9,8 @@ use diesel::{
     sql_types::{Bool, Integer, Nullable, Text},
 };
 
-const SELECT: &str = "SELECT v.*, 'video'::varchar AS content_type, u.user_uuid AS owner_uuid, c.uuid AS channel_uuid
+const SELECT: &str = "SELECT v.*, 'video'::varchar AS content_type, u.user_uuid AS owner_uuid, c.uuid AS channel_uuid,
+    (SELECT COUNT(*) FROM recorded_video_likes l WHERE l.recorded_video_id=v.id)::bigint AS like_count
     FROM recorded_videos v JOIN users u ON u.id=v.user_id JOIN channels c ON c.id=v.channel_id";
 
 pub fn find(conn: &mut PgConnection, uuid: &str) -> Result<RecordedVideo, ApiError> {
@@ -17,6 +20,45 @@ pub fn find(conn: &mut PgConnection, uuid: &str) -> Result<RecordedVideo, ApiErr
             .get_result(conn)
             .map_err(crate::db::error::DbError::from)?,
     )
+}
+
+/// Count every anonymous playback start, but only the first start per account and replay.
+pub fn record_view(
+    conn: &mut PgConnection,
+    uuid: &str,
+    user_id: Option<i32>,
+) -> Result<i64, ApiError> {
+    conn.transaction::<_, ApiError, _>(|conn| {
+        if let Some(user_id) = user_id {
+            let inserted = diesel::sql_query(
+                "INSERT INTO recorded_video_views (recorded_video_id, user_id)
+                 SELECT id, $2 FROM recorded_videos WHERE uuid=$1
+                 ON CONFLICT (recorded_video_id, user_id) DO NOTHING",
+            )
+            .bind::<Text, _>(uuid)
+            .bind::<Integer, _>(user_id)
+            .execute(conn)?;
+            if inserted > 0 {
+                diesel::sql_query("UPDATE recorded_videos SET view_count=view_count+1 WHERE uuid=$1")
+                    .bind::<Text, _>(uuid)
+                    .execute(conn)?;
+            }
+        } else {
+            diesel::sql_query("UPDATE recorded_videos SET view_count=view_count+1 WHERE uuid=$1")
+                .bind::<Text, _>(uuid)
+                .execute(conn)?;
+        }
+        let count = diesel::sql_query("SELECT view_count FROM recorded_videos WHERE uuid=$1")
+            .bind::<Text, _>(uuid)
+            .get_result::<ViewCount>(conn)?;
+        Ok(count.view_count)
+    })
+}
+
+#[derive(diesel::QueryableByName)]
+struct ViewCount {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    view_count: i64,
 }
 pub fn list(
     conn: &mut PgConnection,

@@ -39,6 +39,10 @@ pub struct RecordedVideo {
     pub status: String,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub duration_ms: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub view_count: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub like_count: i64,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     pub error: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamp>)]

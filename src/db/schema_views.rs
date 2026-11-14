@@ -41,6 +41,8 @@ diesel::table! {
         content_type -> Varchar,
         source_stream_uuid -> Nullable<Varchar>,
         duration_ms -> Nullable<Int8>,
+        view_count -> Int8,
+        like_count -> Int8,
     }
 }
 
@@ -66,5 +68,7 @@ diesel::table! {
         content_type -> Varchar,
         source_stream_uuid -> Nullable<Varchar>,
         duration_ms -> Nullable<Int8>,
+        view_count -> Int8,
+        like_count -> Int8,
     }
 }

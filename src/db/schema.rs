@@ -293,11 +293,33 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    stream_likes (id) {
+        id -> Int4,
+        stream_id -> Int4,
+        user_id -> Int4,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    recorded_video_likes (id) {
+        id -> Int4,
+        recorded_video_id -> Int4,
+        user_id -> Int4,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(messages -> users (recipient_id));
 diesel::joinable!(messages -> streams (stream_id));
 diesel::joinable!(notifications -> users (recipient_id));
 diesel::joinable!(notifications -> streams (stream_id));
 diesel::joinable!(notification_stream_state -> streams (stream_id));
+diesel::joinable!(stream_likes -> streams (stream_id));
+diesel::joinable!(stream_likes -> users (user_id));
+diesel::joinable!(recorded_video_likes -> recorded_videos (recorded_video_id));
+diesel::joinable!(recorded_video_likes -> users (user_id));
 diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channel_friends -> channels (channel_id));
 diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
@@ -329,6 +351,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     messages,
     notifications,
     notification_stream_state,
+    stream_likes,
+    recorded_video_likes,
     actor_images,
     actors,
     channel_friends,
@@ -366,6 +390,7 @@ diesel::table! {
         published_at -> Nullable<Timestamp>,
         status -> Varchar,
         duration_ms -> Int8,
+        view_count -> Int8,
         archive_prefix -> Nullable<Varchar>,
         error -> Nullable<Text>,
         started_at -> Nullable<Timestamp>,

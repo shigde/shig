@@ -1,4 +1,5 @@
 pub mod poll;
+pub mod reactions;
 pub mod admin;
 pub mod auth;
 pub mod devices;
@@ -7,6 +8,7 @@ pub mod user;
 pub mod relay;
 pub mod media;
 pub mod videos;
+pub mod notification;
 
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
@@ -53,6 +55,9 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(web::scope("/videos")
                 .wrap(Authentication::new(RequireScope::Account))
                 .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
+            .service(web::scope("/reactions")
+                .wrap(Authentication::new(RequireScope::Account))
+                .service(reactions::set_like))
             .service(web::scope("/streams")
                 .wrap(Authentication::new(RequireScope::Account))
                 .service(videos::list_videos).service(videos::create_video).service(videos::recording_ready).service(videos::start_recording))
@@ -62,8 +67,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 .service(crate::messages::api::read_all).service(crate::messages::api::read))
             .service(web::scope("/notifications")
                 .wrap(Authentication::new(RequireScope::Account))
-                .service(crate::notifications::api::list).service(crate::notifications::api::counts)
-                .service(crate::notifications::api::read_all).service(crate::notifications::api::read))
+                .service(notification::list).service(notification::counts)
+                .service(notification::read_all).service(notification::read))
             .service(
                 web::scope("/admin")
                     .wrap(Authentication::new(RequireScope::Account))
@@ -75,7 +80,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("/pub")
                     .wrap(Authentication::any_of(&[RequireScope::Public, RequireScope::Account]))
-                    .service(web::scope("/videos").service(videos::get_public_video))
+                    .service(web::scope("/videos").service(videos::get_public_video).service(videos::record_public_video_view))
+                    .service(web::scope("/stream-viewers").service(poll::public::poll))
                     .service(web::scope("/stream")
                         .service(media::available))
                     .service(
@@ -160,7 +166,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(web::scope("")
                 .wrap(Authentication::new(RequireScope::Account))
-                .service(poll::poll)),
+                .service(poll::private::poll)),
 
     );
 }

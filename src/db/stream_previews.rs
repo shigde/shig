@@ -27,4 +27,6 @@ pub struct StreamPreview {
     pub content_type: String,
     pub source_stream_uuid: Option<String>,
     pub duration_ms: Option<i64>,
+    pub view_count: i64,
+    pub like_count: i64,
 }

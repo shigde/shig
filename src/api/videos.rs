@@ -79,6 +79,30 @@ pub async fn get_public_video(
     }
     Ok(HttpResponse::Ok().json(Body::new("ok", video)))
 }
+
+/// Register a replay playback start. Anonymous starts are counted individually; authenticated
+/// starts are deduplicated by the database per account and replay.
+#[post("/{uuid}/views")]
+pub async fn record_public_video_view(
+    pool: web::Data<DbPool>,
+    path: web::Path<String>,
+    session: Option<web::ReqData<Session>>,
+) -> Result<HttpResponse, ApiError> {
+    let uuid = path.into_inner();
+    uuid::Uuid::parse_str(&uuid).map_err(|_| ApiError::BadRequest {
+        error_message: "Invalid replay UUID".into(),
+    })?;
+    let mut conn = pool.get()?;
+    let video = recorded_videos::find(&mut conn, &uuid)?;
+    let user_id = session.as_ref().map(|s| s.principal.id);
+    if !video.is_visible_to(user_id) {
+        return Err(ApiError::NotFound {
+            error_message: "Video is not available".into(),
+        });
+    }
+    let views = recorded_videos::record_view(&mut conn, &uuid, user_id)?;
+    Ok(HttpResponse::Ok().json(Body::new("ok", views)))
+}
 #[get("/{stream}/videos")]
 pub async fn list_videos(
     pool: web::Data<DbPool>,

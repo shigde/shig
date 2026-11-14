@@ -6,5 +6,6 @@ pub mod http;
 pub mod inbox;
 pub mod lobby;
 pub mod mail;
+pub mod reactions;
 pub mod user;
 pub mod stream_access;
