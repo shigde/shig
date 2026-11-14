@@ -111,7 +111,8 @@ pub fn stream_state(
                     &Notification {
                         id: Uuid::new_v4().to_string(),
                         recipient_id: recipient,
-                        stream_id: stream,
+                        stream_id: Some(stream),
+                        action_path: None,
                         event_key: &event_key,
                         title: "Stream started",
                         body: &body,
@@ -121,4 +122,45 @@ pub fn stream_state(
         }
         stream_state_db::update::set_live(conn, stream, live)
     })
+}
+
+pub fn streaming_permission_requested(
+    conn: &mut PgConnection,
+    requester_id: i32,
+    requester_name: &str,
+    channel_uuid: &str,
+) -> DbResult<()> {
+    let event_key = format!("streaming-permission-request:{channel_uuid}:{}", Uuid::new_v4());
+    let body = format!("{requester_name} requested permission to stream on channel {channel_uuid}.");
+    db::notification::create::insert_for_active_admins(
+        conn,
+        &Uuid::new_v4().to_string(),
+        requester_id,
+        &event_key,
+        "Streaming permission requested",
+        &body,
+        "/admin/users",
+    )
+}
+
+pub fn streaming_permission_changed(
+    conn: &mut PgConnection,
+    recipient_id: i32,
+    title: &str,
+    body: &str,
+    channel_uuid: &str,
+) -> DbResult<()> {
+    let event_key = format!("streaming-permission:{}", Uuid::new_v4());
+    db::notification::create::insert_for_active_recipient(
+        conn,
+        &Notification {
+            id: Uuid::new_v4().to_string(),
+            recipient_id,
+            stream_id: None,
+            action_path: Some(&format!("/channel/{channel_uuid}?streamingPermissionRequired=true")),
+            event_key: &event_key,
+            title,
+            body,
+        },
+    )
 }

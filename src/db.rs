@@ -5,6 +5,7 @@ pub mod channel_friends;
 pub mod channels;
 pub mod device_grants;
 pub mod devices;
+pub mod streaming_policy;
 pub mod error;
 pub mod fixtures;
 pub mod friend_roles;

@@ -17,11 +17,13 @@ pub fn counts(conn: &mut PgConnection, inbox: Inbox, user: i32) -> DbResult<Coun
 }
 
 pub fn list(conn: &mut PgConnection, inbox: Inbox, user: i32, offset: i64) -> DbResult<Page> {
+    let action_path = match inbox {
+        Inbox::Messages => "CASE WHEN s.id IS NOT NULL THEN '/channel/' || c.uuid || '/stream/' || s.uuid || '/lobby' ELSE NULL END",
+        Inbox::Notifications => "COALESCE(e.action_path, CASE WHEN s.id IS NOT NULL THEN '/channel/' || c.uuid || '/stream/' || s.uuid || '/lobby' ELSE NULL END)",
+    };
     let query = format!(
         "SELECT e.id::text, e.title, e.body, e.created_at, e.read_at,
-            CASE WHEN s.id IS NOT NULL THEN
-                '/channel/' || c.uuid || '/stream/' || s.uuid || '/lobby'
-            ELSE NULL END AS action_path
+            {action_path} AS action_path
          FROM {} e
          LEFT JOIN streams s ON s.id = e.stream_id
          LEFT JOIN channels c ON c.id = s.channel_id

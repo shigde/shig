@@ -130,6 +130,7 @@ pub async fn poll(
             "host-presence",
             "content-stats",
             "live-viewers",
+            "streaming-policy",
         ]
         .contains(&item.resource.as_str())
         {
@@ -169,6 +170,23 @@ async fn dispatch(
     session: &Session,
 ) -> Result<Value, ApiError> {
     match item.resource.as_str() {
+        "streaming-policy" => {
+            keys(item, &[])?;
+            let principal = session.principal.clone();
+            let pool = pool.clone();
+            web::block(move || {
+                let mut conn = pool.get_timeout(Duration::from_millis(250)).map_err(|_| ApiError::ServiceUnavailable {
+                    error_message: "Database busy".into(),
+                })?;
+                use diesel::{connection::SimpleConnection, Connection};
+                conn.transaction::<_, ApiError, _>(|conn| {
+                    conn.batch_execute("SET LOCAL statement_timeout = '1500ms'")?;
+                    serialize(crate::models::streaming_policy::info_for(conn, &principal)?)
+                })
+            })
+            .await
+            .map_err(|_| ApiError::ServiceUnavailable { error_message: "Database worker unavailable".into() })?
+        }
         "monitoring" => {
             keys(item, &[])?;
             if session.principal.user_role_id != crate::db::user_roles::Role::Admin.val() {

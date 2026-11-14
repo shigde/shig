@@ -25,3 +25,21 @@ pub fn mark_all_read(conn: &mut PgConnection, inbox: Inbox, user: i32) -> DbResu
     .execute(conn)?;
     Ok(())
 }
+
+pub fn delete_entry(conn: &mut PgConnection, inbox: Inbox, user: i32, id: &str) -> DbResult<bool> {
+    let deleted = diesel::sql_query(format!(
+        "DELETE FROM {} WHERE recipient_id = $1 AND id = $2",
+        inbox.table()
+    ))
+    .bind::<Integer, _>(user)
+    .bind::<Text, _>(id)
+    .execute(conn)?;
+    Ok(deleted > 0)
+}
+
+pub fn delete_all(conn: &mut PgConnection, inbox: Inbox, user: i32) -> DbResult<()> {
+    diesel::sql_query(format!("DELETE FROM {} WHERE recipient_id = $1", inbox.table()))
+        .bind::<Integer, _>(user)
+        .execute(conn)?;
+    Ok(())
+}

@@ -133,6 +133,12 @@ pub async fn update_video(
     session: web::ReqData<Session>,
     body: web::Json<RecordedVideoUpdate>,
 ) -> Result<HttpResponse, ApiError> {
+    if body.is_public == Some(true) || body.published == Some(true) {
+        let mut conn = pool.get()?;
+        if !crate::models::streaming_policy::can_stream(&mut conn, &session.principal)? {
+            return Err(ApiError::Forbidden { error_message: "This channel is not allowed to publish content on this server".into() });
+        }
+    }
     let video = recorded_videos::update(&mut *pool.get()?, &path, session.principal.id, &body)?;
     Ok(HttpResponse::Ok().json(Body::new("ok", video)))
 }

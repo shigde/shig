@@ -17,6 +17,7 @@ pub struct AdminUser {
     pub created_at: chrono::NaiveDateTime,
     pub channel_name: Option<String>,
     pub channel_uuid: Option<String>,
+    pub streaming_status: Option<String>,
 }
 
 fn serialize_utc<S: serde::Serializer>(
@@ -65,6 +66,7 @@ pub fn list(conn: &mut PgConnection, search: &str, offset: i64) -> DbResult<User
             users::created_at,
             channels::name.nullable(),
             channels::uuid.nullable(),
+            diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>("(SELECT status FROM channel_streaming_permissions WHERE channel_id=channels.id)"),
         ))
         .order((users::created_at.desc(), users::id.desc()))
         .limit(50)

@@ -39,6 +39,11 @@ impl StreamForm {
 
         let mut thumbnail_img: Option<ImageUpload> = None;
         let mut conn = pool.get()?;
+        if !crate::models::streaming_policy::can_stream(&mut conn, &principal)? {
+            return Err(ApiError::Forbidden {
+                error_message: "This channel needs streaming approval before creating a stream".into(),
+            });
+        }
         let stream_uuid = uuid::Uuid::new_v4().to_string();
 
         // Upload the Thumbnail if was one uploaded in the form
@@ -111,6 +116,12 @@ impl StreamForm {
         if principal.id != current_stream_dao.stream.user_id {
             return Err(ApiError::Forbidden {
                 error_message: "forbidden".to_string(),
+            });
+        }
+
+        if self.stream.is_public && !crate::models::streaming_policy::can_stream(&mut conn, &principal)? {
+            return Err(ApiError::Forbidden {
+                error_message: "This channel needs streaming approval before publishing streams".into(),
             });
         }
 

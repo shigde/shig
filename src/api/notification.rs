@@ -58,7 +58,7 @@ pub async fn read_all(
     pool: web::Data<DbPool>,
     session: web::ReqData<Session>,
 ) -> Result<HttpResponse, ApiError> {
-    update::mark_all_read(&mut *pool.get()?, INBOX, session.principal.id)?;
+    update::delete_all(&mut *pool.get()?, INBOX, session.principal.id)?;
     Ok(HttpResponse::Ok().json(Body::new("ok", true)))
 }
 #[patch("/{id}/read")]
@@ -67,7 +67,7 @@ pub async fn read(
     session: web::ReqData<Session>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, ApiError> {
-    if !update::mark_read(&mut *pool.get()?, INBOX, session.principal.id, &id)? {
+    if !update::delete_entry(&mut *pool.get()?, INBOX, session.principal.id, &id)? {
         return Err(ApiError::NotFound {
             error_message: "Entry not found".into(),
         });

@@ -75,7 +75,10 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(admin::monitoring)
                     .service(admin::list_users)
                     .service(admin::set_user_active)
-                    .service(admin::set_user_role),
+                    .service(admin::set_user_role)
+                    .service(admin::get_streaming_policy)
+                    .service(admin::set_streaming_policy)
+                    .service(admin::set_channel_streaming),
             )
             .service(
                 web::scope("/pub")
@@ -114,6 +117,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 web::scope("/channel")
                     .wrap(Authentication::new(RequireScope::Account))
                     .service(channel::update_channel)
+                    .service(channel::get_streaming_policy)
+                    .service(channel::request_streaming)
                     .service(whip::create_answer)
                     .service(whep::create_offer)
                     .service(whep::set_answer)

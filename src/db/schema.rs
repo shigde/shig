@@ -278,6 +278,7 @@ diesel::table! {
         id -> Varchar,
         recipient_id -> Int4,
         stream_id -> Nullable<Int4>,
+        action_path -> Nullable<Text>,
         event_key -> Text,
         title -> Text,
         body -> Text,

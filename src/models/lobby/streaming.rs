@@ -51,6 +51,12 @@ pub(crate) async fn publish(
         });
     }
 
+    if publishing && !crate::models::streaming_policy::can_stream(&mut conn, &user)? {
+        return Err(ApiError::Forbidden {
+            error_message: "This channel is not allowed to publish streams on this server".into(),
+        });
+    }
+
     let mut auth_token = None;
     if publishing {
         let token = internal_publish_token(&channel_uuid, &stream_uuid);

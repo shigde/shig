@@ -1,0 +1,2 @@
+DROP TABLE channel_streaming_permissions;
+DROP TABLE instance_streaming_policy;
