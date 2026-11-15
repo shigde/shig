@@ -1,12 +1,15 @@
 use crate::sfu::media::track_info::OutboundTrackInfo;
-use crate::sfu::media::{ActivateMedia, ForwardTarget, Media, MediaId};
+use crate::sfu::media::{ActivateMedia, ForwardTarget, Media, MediaId, RtpCodecType};
 use crate::sfu::peer::PeerId;
 use crate::sfu::rtc::data_channel::SdpMsgData;
 use crate::sfu::rtc::endpoint::{Endpoint, EndpointId};
 use crate::sfu::rtc::header_extension_translator::RtpHeaderExtensionTranslator;
 use crate::sfu::rtc::sdp::set_track_info;
 use crate::sfu::rtc::{RtcError, RtcResult};
-use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodingParameters, RTCRtpEncodingParameters};
+use rtc::rtp_transceiver::rtp_sender::{
+    RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
+};
+use rtc::rtp_transceiver::PayloadType;
 use std::collections::HashMap;
 use std::sync::Arc;
 use webrtc::data_channel::DataChannel;
@@ -27,6 +30,7 @@ pub struct SubscribeEndpoint {
     sending_media: HashMap<MediaId, OutboundTrackInfo>,
     pending_subscriptions: HashMap<MediaId, PendingSubscription>,
     data_channel: Option<Arc<dyn DataChannel>>,
+    video_codecs_negotiated: bool,
 }
 
 impl SubscribeEndpoint {
@@ -36,6 +40,7 @@ impl SubscribeEndpoint {
             sending_media: HashMap::new(),
             pending_subscriptions: HashMap::new(),
             data_channel: None,
+            video_codecs_negotiated: false,
         }
     }
 
@@ -74,7 +79,23 @@ impl SubscribeEndpoint {
                 }),
             )
             .await
-            .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+            .map_err(|err| {
+                RtcError::SubscribeEndpoint(format!(
+                    "{err}, codec={:?}, fmtp={:?}, inbound_payload_type={}",
+                    media.capability.mime_type,
+                    media.capability.sdp_fmtp_line,
+                    media.payload_type,
+                ))
+            })?;
+
+        if media.kind == RtpCodecType::Video && !self.video_codecs_negotiated {
+            // The first video answer populates the connection's negotiated codec list.
+            // Offer the defaults so later tracks can use a different supported codec.
+            transceiver
+                .set_codec_preferences(Vec::new())
+                .await
+                .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+        }
 
         let msid = format!("{} {}", media.src_stream_id.clone(), media.id.clone());
         self.sending_media.insert(
@@ -180,12 +201,14 @@ impl SubscribeEndpoint {
                 .start_subscription(&subscriber_peer_id, &media_id, &pending)
                 .await
             {
-                Ok(target) => target,
+                Ok(Some(target)) => target,
+                Ok(None) => continue,
                 Err(err) => {
                     self.pending_subscriptions.insert(media_id, pending);
                     return Err(err);
                 }
             };
+            self.video_codecs_negotiated |= pending.media.kind == RtpCodecType::Video;
             activations.push(ActivateMedia { media_id, target });
         }
         Ok(activations)
@@ -196,7 +219,7 @@ impl SubscribeEndpoint {
         subscriber_peer_id: &PeerId,
         media_id: &MediaId,
         pending: &PendingSubscription,
-    ) -> RtcResult<ForwardTarget> {
+    ) -> RtcResult<Option<ForwardTarget>> {
         let outbound = self.sending_media.get(media_id).ok_or_else(|| {
             RtcError::SubscribeEndpoint(format!("missing outbound media {media_id}"))
         })?;
@@ -220,17 +243,28 @@ impl SubscribeEndpoint {
             .get_parameters()
             .await
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))?;
+        let Some(payload_type) = subscriber_payload_type(
+            &pending.media.capability,
+            &parameters.rtp_parameters.codecs,
+        ) else {
+            log::warn!(
+                "subscriber has no matching RTP codec, media_id={}, subscriber_peer_id={}, codec={}",
+                media_id, subscriber_peer_id, pending.media.capability.mime_type,
+            );
+            return Ok(None);
+        };
         let header_extensions = RtpHeaderExtensionTranslator::new(
             &pending.media.header_extensions,
             &parameters.rtp_parameters.header_extensions,
             target_mid,
         );
 
-        Ok(ForwardTarget::new(
+        Ok(Some(ForwardTarget::new(
             subscriber_peer_id.clone(),
             Arc::clone(&pending.track),
+            payload_type,
             header_extensions,
-        ))
+        )))
     }
 
     pub async fn set_signal_answer(&mut self, msg: SdpMsgData) -> RtcResult<Vec<ActivateMedia>> {
@@ -250,5 +284,56 @@ impl SubscribeEndpoint {
             .close()
             .await
             .map_err(|err| RtcError::SubscribeEndpoint(err.to_string()))
+    }
+}
+
+fn subscriber_payload_type(
+    codec: &RTCRtpCodec,
+    negotiated: &[RTCRtpCodecParameters],
+) -> Option<PayloadType> {
+    let mut matching = negotiated.iter().filter(|candidate| {
+        let candidate = &candidate.rtp_codec;
+        candidate.mime_type.eq_ignore_ascii_case(&codec.mime_type)
+            && candidate.clock_rate == codec.clock_rate
+            && candidate.channels == codec.channels
+    });
+    let first = matching.next()?;
+    let exact = std::iter::once(first)
+        .chain(matching.clone())
+        .find(|candidate| candidate.rtp_codec.sdp_fmtp_line == codec.sdp_fmtp_line);
+    exact.or_else(|| matching.next().is_none().then_some(first))
+        .map(|candidate| candidate.payload_type)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_source_codec_to_subscriber_payload_type() {
+        let source = RTCRtpCodec {
+            mime_type: "video/H264".into(),
+            clock_rate: 90_000,
+            sdp_fmtp_line: "packetization-mode=1".into(),
+            ..Default::default()
+        };
+        let negotiated = [
+            RTCRtpCodecParameters {
+                payload_type: 102,
+                rtp_codec: RTCRtpCodec {
+                    sdp_fmtp_line: "packetization-mode=0".into(),
+                    ..source.clone()
+                },
+                ..Default::default()
+            },
+            RTCRtpCodecParameters {
+                payload_type: 127,
+                rtp_codec: source.clone(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(subscriber_payload_type(&source, &negotiated), Some(127));
+        let vp8 = RTCRtpCodec {mime_type: "video/VP8".into(), ..source};
+        assert_eq!(subscriber_payload_type(&vp8, &negotiated), None);
     }
 }

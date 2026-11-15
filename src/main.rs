@@ -1,12 +1,11 @@
 extern crate core;
 
 mod api;
-mod inbox;
 #[cfg(test)]
 mod inbox_test;
 mod messages;
-mod notifications;
 mod db;
+mod ephemeral;
 mod federation;
 mod files;
 mod middleware;
@@ -119,6 +118,7 @@ fn main() {
                 exit(1);
             });
         let relay_state = relay_server.state.clone();
+        let ephemeral_state = crate::ephemeral::state::EphemeralState::default();
 
         // Start the SFU server
         let sfu = Sfu::new(
@@ -165,7 +165,7 @@ fn main() {
         // HTTP/WS-Server
         log::info!("starting actix web server on");
         let web_server =
-            match server::start(server_cfg.clone(), sfu_addr, pool.clone(), relay_state) {
+            match server::start(server_cfg.clone(), sfu_addr, pool.clone(), relay_state, ephemeral_state) {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to start server: {}", e);

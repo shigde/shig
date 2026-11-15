@@ -48,6 +48,11 @@ pub(crate) async fn whip(
     }
 
     let role = if is_owner {
+        if !crate::models::streaming_policy::can_stream(&mut conn, &user)? {
+            return Err(ApiError::Forbidden {
+                error_message: "This channel needs streaming approval before joining its lobby".into(),
+            });
+        }
         PeerRole::Host
     } else {
         PeerRole::Guest

@@ -31,7 +31,6 @@ pub async fn reset_password(
     Ok(HttpResponse::Ok().json(Body::new(MESSAGE_OK, {})))
 }
 
-#[put("/pass/update")]
 pub async fn update_password(
     pool: web::Data<DbPool>,
     update_dto: web::Json<UpdatePassword>,

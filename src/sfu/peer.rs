@@ -102,8 +102,15 @@ impl Peer {
 impl Actor for Peer {
     type Context = Context<Self>;
 
-    fn started(&mut self, _ctx: &mut Context<Self>) {
+    fn started(&mut self, ctx: &mut Context<Self>) {
         log::info!("peer actor peer_id={} is alive", self.id);
+        if matches!(self.role, PeerRole::Device { .. }) {
+            ctx.run_later(Duration::from_secs(30), |peer, ctx| {
+                if !peer.publish_connection_ready {
+                    ctx.notify(PeerShutdown {});
+                }
+            });
+        }
     }
 
     fn stopped(&mut self, _ctx: &mut Context<Self>) {
@@ -268,10 +275,14 @@ impl Handler<EndpointEvent> for Peer {
 
                 let peer_id = self.id.clone();
                 let lobby_addr = self.parent_addr.clone();
+                let device_name = match &self.role {
+                    PeerRole::Device { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
                 actix::spawn(async move {
                     let mut publish_endpoint = publish_endpoint.lock().await;
                     publish_endpoint
-                        .receive_track(peer_id, lobby_addr, track)
+                        .receive_track(peer_id, lobby_addr, track, device_name)
                         .await;
                 });
             }
@@ -290,6 +301,9 @@ impl Handler<PeerCreateSubscribeOffer> for Peer {
     type Result = ResponseActFuture<Self, PeerResult<String>>;
 
     fn handle(&mut self, msg: PeerCreateSubscribeOffer, ctx: &mut Self::Context) -> Self::Result {
+        if matches!(self.role, PeerRole::Device { .. }) {
+            return Box::pin(async { Err(PeerError::SubscribeNotAllowed) }.into_actor(self));
+        }
         log::info!(
             "setup subscribe endpoint for peer actor peer_id={}",
             self.id
@@ -352,6 +366,9 @@ impl Handler<PeerReceiveSubscribeAnswer> for Peer {
         msg: PeerReceiveSubscribeAnswer,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        if matches!(self.role, PeerRole::Device { .. }) {
+            return Box::pin(async { Err(PeerError::SubscribeNotAllowed) }.into_actor(self));
+        }
         log::info!(
             "set subscribe endpoint answer for peer actor peer_id={}",
             self.id
@@ -505,13 +522,16 @@ impl Handler<RemoveMedia> for Peer {
 impl Handler<OnDataChannel> for Peer {
     type Result = ResponseActFuture<Self, ()>;
 
-    fn handle(&mut self, msg: OnDataChannel, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: OnDataChannel, ctx: &mut Self::Context) -> Self::Result {
         let reader_matches_channel = self
             .data_channel_reader
             .as_ref()
             .is_some_and(|reader| reader.matches(&msg.endpoint_id, &msg.dc));
         if matches!(msg.event, EventType::Closed) && reader_matches_channel {
             self.stop_data_channel_reader();
+            if matches!(self.role, PeerRole::Device { .. }) {
+                ctx.notify(PeerShutdown {});
+            }
         }
 
         let dc = msg.dc.clone();
@@ -696,6 +716,36 @@ impl Handler<MuteRemoteMedia> for Peer {
 
 #[derive(Message)]
 #[rtype(result = "()")]
+pub struct PeerHostLeft;
+
+impl Handler<PeerHostLeft> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, _: PeerHostLeft, ctx: &mut Self::Context) {
+        if matches!(self.role, PeerRole::Device { .. }) {
+            ctx.notify(SendHostStatus(HostStatus::Closed));
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PeerLeave;
+
+impl Handler<PeerLeave> for Peer {
+    type Result = ();
+
+    fn handle(&mut self, _: PeerLeave, ctx: &mut Self::Context) {
+        if matches!(self.role, PeerRole::Device { .. }) {
+            ctx.notify(SendHostStatus(HostStatus::Closed));
+        } else {
+            ctx.notify(PeerShutdown {});
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct PeerShutdown {}
 
 impl Handler<PeerShutdown> for Peer {
@@ -715,6 +765,7 @@ impl Handler<PeerShutdown> for Peer {
         self.stop_data_channel_reader();
 
         let peer_id = self.id.clone();
+        let role = self.role.clone();
         let parent_addr = self.parent_addr.clone();
         let subscribe_endpoint = self.subscribe_endpoint.clone();
         let publish_endpoint = self.publish_endpoint.clone();
@@ -738,6 +789,7 @@ impl Handler<PeerShutdown> for Peer {
 
                 parent_addr.do_send(PeerStopped {
                     id: peer_id.clone(),
+                    role,
                 });
             }
             .into_actor(self)
@@ -753,6 +805,7 @@ impl Handler<PeerShutdown> for Peer {
 pub enum PeerRole {
     Host,
     Guest,
+    Device { name: String },
 }
 
 #[derive(Message)]

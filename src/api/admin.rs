@@ -16,6 +16,56 @@ pub async fn monitoring(session: web::ReqData<Session>) -> HttpResponse {
         .json(crate::sfu::metrics::snapshot())
 }
 
+#[get("/streaming-policy")]
+pub async fn get_streaming_policy(session: web::ReqData<Session>, pool: web::Data<DbPool>) -> Result<HttpResponse, ApiError> {
+    require_admin(&session)?;
+    let info = crate::models::streaming_policy::info(&pool, &session.principal)?;
+    Ok(HttpResponse::Ok().insert_header(("Cache-Control", "no-store")).json(Body::new("ok", info)))
+}
+
+#[derive(Deserialize)]
+pub struct StreamingModeUpdate { mode: crate::models::streaming_policy::Mode }
+
+#[patch("/streaming-policy")]
+pub async fn set_streaming_policy(
+    session: web::ReqData<Session>, pool: web::Data<DbPool>, sfu: web::Data<actix::Addr<crate::sfu::Sfu>>,
+    update: web::Json<StreamingModeUpdate>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&session)?;
+    crate::models::streaming_policy::set_global(&pool, update.mode, &sfu).await?;
+    Ok(HttpResponse::Ok().insert_header(("Cache-Control", "no-store")).json(Body::new("ok", update.mode)))
+}
+
+#[derive(Deserialize)]
+pub struct PublicContentUpdate { enabled: bool }
+
+#[patch("/public-content")]
+pub async fn set_public_content(
+    session: web::ReqData<Session>, pool: web::Data<DbPool>, update: web::Json<PublicContentUpdate>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&session)?;
+    crate::models::streaming_policy::set_public_content_enabled(&pool, update.enabled)?;
+    Ok(HttpResponse::Ok().insert_header(("Cache-Control", "no-store")).json(Body::new("ok", update.enabled)))
+}
+
+#[derive(Deserialize)]
+pub struct ChannelStreamingUpdate { status: String }
+
+#[patch("/users/{uuid}/streaming")]
+pub async fn set_channel_streaming(
+    session: web::ReqData<Session>, pool: web::Data<DbPool>, path: web::Path<String>,
+    sfu: web::Data<actix::Addr<crate::sfu::Sfu>>, update: web::Json<ChannelStreamingUpdate>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&session)?;
+    if !["inherited", "allowed", "blocked"].contains(&update.status.as_str()) {
+        return Err(ApiError::BadRequest { error_message: "Status must be inherited, allowed, or blocked".into() });
+    }
+    let uuid = path.into_inner();
+    let changed = crate::models::streaming_policy::set_channel(&pool, &uuid, &update.status, &sfu).await?;
+    if !changed { return Err(ApiError::NotFound { error_message: "Channel not found".into() }); }
+    Ok(HttpResponse::Ok().json(Body::new("ok", update.status.clone())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@ mod error;
 
 use crate::api;
 use crate::db::DbConfig;
+use crate::ephemeral::state::EphemeralState;
 use crate::federation::FederationConfig;
 use crate::files::FilesConfig;
 use crate::models::auth::jwt::JWTConfig;
@@ -74,6 +75,7 @@ pub fn start(
     sfu_addr: Addr<Sfu>,
     pool: Pool<ConnectionManager<PgConnection>>,
     relay_state: RelayState,
+    ephemeral_state: EphemeralState,
 ) -> ServerResult<Server> {
     // create static file dir if not exists
     let htdocs = cfg.files.htdocs.as_str();
@@ -85,17 +87,17 @@ pub fn start(
 
     let svs = HttpServer::new(move || {
         App::new()
-            .service(actix_files::Files::new("/static", &cfg.files.htdocs).use_last_modified(true))
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(sfu_addr.clone()))
             .app_data(web::Data::new(relay_state.clone()))
+            .app_data(web::Data::new(ephemeral_state.clone()))
             .app_data(web::Data::new(cfg.federation.clone()))
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))
             .app_data(web::Data::new(cfg.files.clone()))
-            .wrap(crate::middleware::auth::Authentication)
-            .wrap(crate::middleware::req::LoggingMiddleware)
             .configure(api::config_services)
+            .service(actix_files::Files::new("/static", &cfg.files.htdocs).use_last_modified(true))
+            .wrap(crate::middleware::req::LoggingMiddleware)
     });
 
     let url = cfg.server.clone().url();

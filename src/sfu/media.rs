@@ -39,6 +39,7 @@ pub(crate) type RelayRtpChannel = broadcast::Sender<Arc<Packet>>;
 pub(crate) struct ForwardTarget {
     peer_id: PeerId,
     track: Arc<TrackLocalStaticRTP>,
+    payload_type: PayloadType,
     header_extensions: RtpHeaderExtensionTranslator,
     rtp_binding_confirmed: Arc<AtomicBool>,
 }
@@ -47,11 +48,13 @@ impl ForwardTarget {
     pub(crate) fn new(
         peer_id: PeerId,
         track: Arc<TrackLocalStaticRTP>,
+        payload_type: PayloadType,
         header_extensions: RtpHeaderExtensionTranslator,
     ) -> Self {
         Self {
             peer_id,
             track,
+            payload_type,
             header_extensions,
             rtp_binding_confirmed: Arc::new(AtomicBool::new(false)),
         }
@@ -187,9 +190,13 @@ impl Media {
     }
 
     pub(crate) async fn forward_rtp(&self, packet: Packet) {
+        if packet.header.payload_type != self.payload_type {
+            return;
+        }
         let targets = self.targets.load();
         for target in targets.iter() {
             let mut packet = packet.clone();
+            packet.header.payload_type = target.payload_type;
             target.header_extensions.translate(&mut packet);
             match target.track.write_rtp(packet).await {
                 Ok(()) => {

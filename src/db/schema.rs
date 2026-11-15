@@ -81,6 +81,29 @@ diesel::table! {
 }
 
 diesel::table! {
+    device_grants (device_uuid) {
+        device_uuid -> Uuid,
+        stream_id -> Int4,
+        invite_hash -> Nullable<Text>,
+        session_hash -> Nullable<Text>,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    devices (uuid) {
+        uuid -> Uuid,
+        owner_user_id -> Int4,
+        slot -> Int2,
+        #[max_length = 255]
+        name -> Varchar,
+        active -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     friend_roles (id) {
         id -> Int4,
         #[max_length = 40]
@@ -255,6 +278,7 @@ diesel::table! {
         id -> Varchar,
         recipient_id -> Int4,
         stream_id -> Nullable<Int4>,
+        action_path -> Nullable<Text>,
         event_key -> Text,
         title -> Text,
         body -> Text,
@@ -270,17 +294,51 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    stream_likes (id) {
+        id -> Int4,
+        stream_id -> Int4,
+        user_id -> Int4,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    recorded_video_likes (id) {
+        id -> Int4,
+        recorded_video_id -> Int4,
+        user_id -> Int4,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    user_stream_settings (user_id) {
+        user_id -> Int4,
+        settings -> Jsonb,
+        updated_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(messages -> users (recipient_id));
 diesel::joinable!(messages -> streams (stream_id));
 diesel::joinable!(notifications -> users (recipient_id));
 diesel::joinable!(notifications -> streams (stream_id));
 diesel::joinable!(notification_stream_state -> streams (stream_id));
+diesel::joinable!(stream_likes -> streams (stream_id));
+diesel::joinable!(stream_likes -> users (user_id));
+diesel::joinable!(recorded_video_likes -> recorded_videos (recorded_video_id));
+diesel::joinable!(recorded_video_likes -> users (user_id));
+diesel::joinable!(user_stream_settings -> users (user_id));
 diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channel_friends -> channels (channel_id));
 diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
 diesel::joinable!(channel_friends -> users (user_id));
 diesel::joinable!(channels -> actors (actor_id));
 diesel::joinable!(channels -> users (user_id));
+diesel::joinable!(devices -> users (owner_user_id));
+diesel::joinable!(device_grants -> devices (device_uuid));
+diesel::joinable!(device_grants -> streams (stream_id));
 diesel::joinable!(instances -> actors (actor_id));
 diesel::joinable!(lobbies -> channels (channel_id));
 diesel::joinable!(lobbies -> streams (stream_id));
@@ -303,10 +361,15 @@ diesel::allow_tables_to_appear_in_same_query!(
     messages,
     notifications,
     notification_stream_state,
+    stream_likes,
+    recorded_video_likes,
+    user_stream_settings,
     actor_images,
     actors,
     channel_friends,
     channels,
+    devices,
+    device_grants,
     friend_roles,
     instances,
     lobbies,
@@ -338,6 +401,7 @@ diesel::table! {
         published_at -> Nullable<Timestamp>,
         status -> Varchar,
         duration_ms -> Int8,
+        view_count -> Int8,
         archive_prefix -> Nullable<Varchar>,
         error -> Nullable<Text>,
         started_at -> Nullable<Timestamp>,

@@ -105,7 +105,9 @@ impl StreamFriend {
                 .filter(stream_friends::user_id.eq(user.id)))).get_result(conn)?;
             if exists { return Ok(()); }
             let guest = insert_new_stream_friend(conn, user.id, stream.id, role.into())?;
-            crate::messages::repository::invitation(conn, user.id, stream.id, guest.id, &principal.name, &stream.title)?;
+            crate::models::inbox::invitation(
+                conn, user.id, stream.id, guest.id, &principal.name, &stream.title,
+            )?;
             Ok(())
         })?;
 

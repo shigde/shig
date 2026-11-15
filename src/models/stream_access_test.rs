@@ -89,7 +89,10 @@ async fn visibility_covers_public_apis_and_direct_relay_grants() {
         App::new()
             .app_data(web::Data::new(fixture.pool.clone()))
             .app_data(web::Data::new(fixture.jwt.clone()))
-            .wrap(crate::middleware::auth::Authentication)
+            .wrap(crate::middleware::auth::Authentication::any_of(&[
+                crate::models::auth::scopes::RequireScope::Public,
+                crate::models::auth::scopes::RequireScope::Account,
+            ]))
             .service(
                 web::scope("/api/pub/stream-preview")
                     .service(crate::api::user::stream_preview::get_stream_preview_list)
@@ -194,7 +197,9 @@ async fn deleting_stream_preserves_lobby_and_rejects_live_streams() {
         App::new()
             .app_data(web::Data::new(fixture.pool.clone()))
             .app_data(web::Data::new(fixture.jwt.clone()))
-            .wrap(crate::middleware::auth::Authentication)
+            .wrap(crate::middleware::auth::Authentication::new(
+                crate::models::auth::scopes::RequireScope::Account,
+            ))
             .service(
                 web::scope("/api/user/stream").service(crate::api::user::stream::delete_stream),
             ),

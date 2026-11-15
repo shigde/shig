@@ -39,6 +39,10 @@ pub struct RecordedVideo {
     pub status: String,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub duration_ms: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub view_count: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    pub like_count: i64,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     pub error: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamp>)]
@@ -62,7 +66,9 @@ impl RecordedVideo {
     }
     pub fn is_visible_to(&self, user_id: Option<i32>) -> bool {
         user_id == Some(self.user_id)
-            || (self.is_public && self.published_at.is_some() && self.status == "ready")
+            || (self.published_at.is_some()
+                && self.status == "ready"
+                && (self.is_public || user_id.is_some()))
     }
 }
 

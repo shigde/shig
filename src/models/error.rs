@@ -83,7 +83,9 @@ impl From<SfuError> for ApiError {
             SfuError::LobbyAlreadyStarted() => ApiError::Conflict {
                 error_message: "Lobby is already started".to_owned(),
             },
-            SfuError::LobbyNotExists() | SfuError::LobbyError(LobbyError::PeerNotExists(_)) => {
+            SfuError::LobbyNotExists()
+            | SfuError::LobbyError(LobbyError::PeerNotExists(_))
+            | SfuError::LobbyError(LobbyError::PeerInternalError(PeerError::SubscribeNotAllowed)) => {
                 ApiError::NotFound {
                     error_message: "Lobby peer does not exist".to_owned(),
                 }

@@ -4,7 +4,7 @@ use crate::db::streams::read::find_stream_by_uuid;
 use crate::db::DbPool;
 use crate::models::auth::session::Principal;
 use crate::models::error::ApiError;
-use crate::sfu::{PublishLobbyStream, Sfu};
+use crate::sfu::{lobby::KickPeer, peer::PeerId, PublishLobbyStream, Sfu};
 use actix::Addr;
 use actix_web::web;
 use moq_relay::auth::Token as AuthToken;
@@ -51,6 +51,12 @@ pub(crate) async fn publish(
         });
     }
 
+    if publishing && !crate::models::streaming_policy::can_stream(&mut conn, &user)? {
+        return Err(ApiError::Forbidden {
+            error_message: "This channel is not allowed to publish streams on this server".into(),
+        });
+    }
+
     let mut auth_token = None;
     if publishing {
         let token = internal_publish_token(&channel_uuid, &stream_uuid);
@@ -73,7 +79,18 @@ pub(crate) async fn publish(
             ApiError::InternalServerError { error_message }
         })??;
 
-    crate::notifications::repository::stream_state(&mut conn, db_stream.id, publishing, &user.name, &db_stream.title)?;
+    if !publishing {
+        let devices = crate::db::device_grants::delete::revoke_stream(&mut conn, db_stream.id)?;
+        for device in devices {
+            sfu_addr.do_send(KickPeer {
+                host_uuid: user.user_uuid.clone(),
+                id: PeerId::new(device.to_string()),
+            });
+        }
+    }
+    crate::models::inbox::stream_state(
+        &mut conn, db_stream.id, publishing, &user.name, &db_stream.title,
+    )?;
     Ok(())
 }
 fn internal_publish_token(channel_id: &str, _stream_id: &str) -> AuthToken {

@@ -3,14 +3,14 @@ use crate::relay::state::RelayState;
 use crate::sfu::config::SfuConfig;
 use crate::sfu::db::message::{AddParticipant, RemoveParticipant, SetLobbyOnline};
 use crate::sfu::db::DbActor;
-use crate::sfu::error::{LobbyError, LobbyResult};
+use crate::sfu::error::{LobbyError, LobbyResult, PeerError};
 use crate::sfu::media::router::Router;
 use crate::sfu::media::{
     ActivateMedia, AddMedia, MediaId, MuteMedia, MuteRemoteMedia, RemoveMedia,
 };
 use crate::sfu::peer::{
     Peer, PeerCreatePublishAnswer, PeerCreateSubscribeOffer, PeerId, PeerReceiveSubscribeAnswer,
-    PeerRole, PeerShutdown, SendHostStatus,
+    PeerHostLeft, PeerLeave, PeerRole, PeerShutdown, SendHostStatus,
 };
 use crate::sfu::relay::actor::RelayActor;
 use crate::sfu::relay::message::{StartRelayMediaStream, StopRelayMediaStream};
@@ -127,6 +127,12 @@ impl Lobby {
             ));
         }
     }
+
+    fn notify_host_left(&self) {
+        for peer in self.peers.values() {
+            peer.do_send(PeerHostLeft);
+        }
+    }
 }
 
 #[derive(Message)]
@@ -187,6 +193,7 @@ impl Actor for Lobby {
 #[rtype(result = " LobbyResult<String>")]
 pub struct Publish {
     pub user_uuid: String,
+    pub stream_uuid: String,
     pub offer: String,
     pub role: PeerRole,
 }
@@ -199,7 +206,7 @@ impl Handler<Publish> for Lobby {
             return Box::pin(async { Err(LobbyError::Closing) }.into_actor(self));
         }
         let guest = msg.user_uuid != self.host_uuid;
-        if guest && !self.host_present {
+        if guest && (!self.host_present || self.stream_uuid != msg.stream_uuid) {
             return Box::pin(async { Err(LobbyError::HostAbsent) }.into_actor(self));
         }
         let peer_id = PeerId::new(msg.user_uuid.clone());
@@ -214,6 +221,8 @@ impl Handler<Publish> for Lobby {
             );
         }
         if !guest { self.host_leaving = false; }
+
+        let is_device = matches!(msg.role, PeerRole::Device { .. });
 
         let peer_addr = Peer::new(
             peer_id.clone(),
@@ -230,24 +239,26 @@ impl Handler<Publish> for Lobby {
         let offer = msg.offer.clone();
         let failed_peer_addr = peer_addr.clone();
         let fut = async move {
-            // The next WHEP/leave request reads these records directly from the database.
-            db_actor
-                .send(SetLobbyOnline {
-                    lobby_uuid: lobby_uuid.clone(),
-                    stream_uuid: stream_uuid.clone(),
-                })
-                .await
-                .map_err(LobbyError::MailboxError)?
-                .map_err(LobbyError::PersistenceError)?;
-            db_actor
-                .send(AddParticipant {
-                    lobby_uuid,
-                    stream_uuid,
-                    user_uuid,
-                })
-                .await
-                .map_err(LobbyError::MailboxError)?
-                .map_err(LobbyError::PersistenceError)?;
+            if !is_device {
+                // The next WHEP/leave request reads these records directly from the database.
+                db_actor
+                    .send(SetLobbyOnline {
+                        lobby_uuid: lobby_uuid.clone(),
+                        stream_uuid: stream_uuid.clone(),
+                    })
+                    .await
+                    .map_err(LobbyError::MailboxError)?
+                    .map_err(LobbyError::PersistenceError)?;
+                db_actor
+                    .send(AddParticipant {
+                        lobby_uuid,
+                        stream_uuid,
+                        user_uuid,
+                    })
+                    .await
+                    .map_err(LobbyError::MailboxError)?
+                    .map_err(LobbyError::PersistenceError)?;
+            }
             let result = peer_addr.send(PeerCreatePublishAnswer { offer }).await;
 
             match result {
@@ -299,7 +310,6 @@ impl Handler<Subscribe> for Lobby {
             return Box::pin(async { Err(LobbyError::HostAbsent) }.into_actor(self));
         }
         let peer_id = PeerId::new(msg.user_uuid.clone());
-
         let peer_addr = match self.peers.get(&peer_id) {
             Some(addr) => addr.clone(),
             None => {
@@ -344,6 +354,9 @@ impl Handler<Subscribe> for Lobby {
 
         let guest = msg.user_uuid != self.host_uuid;
         Box::pin(fut.map(move |mut result, actor, _ctx| {
+            if matches!(&result, Err(LobbyError::PeerInternalError(PeerError::SubscribeNotAllowed))) {
+                return result;
+            }
             if result.is_ok() && (actor.shutting_down || (guest && !actor.host_present)) {
                 result = Err(if actor.shutting_down { LobbyError::Closing } else { LobbyError::HostAbsent });
             }
@@ -366,6 +379,27 @@ pub struct LeavePeer {
     pub user_uuid: String,
 }
 
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct KickPeer {
+    pub host_uuid: String,
+    pub id: PeerId,
+}
+
+impl Handler<KickPeer> for Lobby {
+    type Result = ();
+
+    fn handle(&mut self, msg: KickPeer, _: &mut Self::Context) {
+        if msg.host_uuid != self.host_uuid || msg.id.as_str() == self.host_uuid {
+            return;
+        }
+        if let Some(peer) = self.peers.get(&msg.id) {
+            log::info!("host kicked peer, lobby_id={}, peer_id={}", self.id, msg.id);
+            peer.do_send(SendHostStatus(HostStatus::Closed));
+        }
+    }
+}
+
 impl Handler<LeavePeer> for Lobby {
     type Result = LobbyResult<()>;
 
@@ -378,6 +412,7 @@ impl Handler<LeavePeer> for Lobby {
         if msg.user_uuid == self.host_uuid {
             self.host_leaving = true;
             self.set_host_presence(false, ctx);
+            self.notify_host_left();
         }
 
         // remove all medias
@@ -387,7 +422,7 @@ impl Handler<LeavePeer> for Lobby {
         }
 
         log::info!("send shutdown because peer_id={} is leaving lobby", peer_id);
-        peer_add.do_send(PeerShutdown {});
+        peer_add.do_send(PeerLeave);
         Ok(())
     }
 }
@@ -441,6 +476,7 @@ impl Handler<LobbyShutdown> for Lobby {
 #[rtype(result = "()")]
 pub struct PeerStopped {
     pub id: PeerId,
+    pub role: PeerRole,
 }
 
 impl Handler<PeerStopped> for Lobby {
@@ -458,13 +494,16 @@ impl Handler<PeerStopped> for Lobby {
         if msg.id.as_str() == self.host_uuid {
             self.host_leaving = true;
             self.set_host_presence(false, ctx);
+            self.notify_host_left();
         }
         metrics::set_active_lobby_peers(&self.id, self.peers.len());
-        self.db_actor_addr.do_send(RemoveParticipant {
-            lobby_uuid: self.id.clone(),
-            stream_uuid: self.stream_uuid.clone(),
-            user_uuid: msg.id.as_user_uuid(),
-        });
+        if !matches!(msg.role, PeerRole::Device { .. }) {
+            self.db_actor_addr.do_send(RemoveParticipant {
+                lobby_uuid: self.id.clone(),
+                stream_uuid: self.stream_uuid.clone(),
+                user_uuid: msg.id.as_user_uuid(),
+            });
+        }
 
         if self.peers.is_empty() {
             self.stop(ctx);

@@ -39,6 +39,13 @@ impl StreamForm {
 
         let mut thumbnail_img: Option<ImageUpload> = None;
         let mut conn = pool.get()?;
+        if !crate::models::streaming_policy::can_stream(&mut conn, &principal)? {
+            return Err(ApiError::Forbidden {
+                error_message: "This channel needs streaming approval before creating a stream".into(),
+            });
+        }
+        let public_content_enabled = crate::models::streaming_policy::public_content_enabled(&mut conn)?;
+        let is_public = self.stream.is_public && public_content_enabled;
         let stream_uuid = uuid::Uuid::new_v4().to_string();
 
         // Upload the Thumbnail if was one uploaded in the form
@@ -66,7 +73,7 @@ impl StreamForm {
             self.stream.licence,
             self.stream.is_repeating,
             Some(self.stream.repeat),
-            self.stream.is_public,
+            is_public,
         )?;
 
         // Insert stream Meta Data
@@ -76,6 +83,7 @@ impl StreamForm {
         // Build Stream Response Object
         let mut stream_response = self.stream.clone();
         stream_response.uuid = stream_dao.uuid.clone();
+        stream_response.is_public = is_public;
 
         // Insert Thumbnail if was one uploaded
         match thumbnail_img {
@@ -114,6 +122,18 @@ impl StreamForm {
             });
         }
 
+        let public_content_enabled = crate::models::streaming_policy::public_content_enabled(&mut conn)?;
+        if self.stream.is_public && !public_content_enabled {
+            return Err(ApiError::Forbidden {
+                error_message: "Public streams are disabled by the server administrator".into(),
+            });
+        }
+        if self.stream.is_public && !crate::models::streaming_policy::can_stream(&mut conn, &principal)? {
+            return Err(ApiError::Forbidden {
+                error_message: "This channel needs streaming approval before publishing streams".into(),
+            });
+        }
+
         let mut thumbnail_img: Option<ImageUpload> = None;
 
         // Upload the Thumbnail if was one uploaded in the form
@@ -141,7 +161,7 @@ impl StreamForm {
             self.stream.licence,
             self.stream.is_repeating,
             Some(self.stream.repeat),
-            self.stream.is_public,
+            self.stream.is_public && public_content_enabled,
             self.stream.is_live,
         )?;
 
@@ -152,6 +172,7 @@ impl StreamForm {
         // Build Stream Response Object
         let mut stream_response = self.stream.clone();
         stream_response.uuid = self.stream.uuid.clone();
+        stream_response.is_public = self.stream.is_public && public_content_enabled;
 
         // Update Thumbnail if was one uploaded
         match thumbnail_img {
@@ -208,7 +229,9 @@ fn sync_guests(conn: &mut PgConnection, stream_id: i32, requested: &Option<Vec<S
         let exists = diesel::select(diesel::dsl::exists(sf::table.filter(sf::stream_id.eq(stream_id)).filter(sf::user_id.eq(user_id)))).get_result::<bool>(conn)?;
         if !exists {
             let guest = crate::db::stream_friends::create::insert_new_stream_friend(conn, user_id, stream_id, crate::models::user::friend_role::FriendRole::Guest.into())?;
-            crate::messages::repository::invitation(conn, user_id, stream_id, guest.id, &principal.name, &title)?;
+            crate::models::inbox::invitation(
+                conn, user_id, stream_id, guest.id, &principal.name, &title,
+            )?;
         }
     }
     Ok(())

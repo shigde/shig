@@ -25,6 +25,10 @@ fn disconnected<A: Actor<Context = Context<A>>>() -> Addr<A> {
 }
 
 fn lobby(grace: u64) -> Addr<Lobby> {
+    lobby_with_device(grace, None)
+}
+
+fn lobby_with_device(grace: u64, device: Option<PeerId>) -> Addr<Lobby> {
     // No database server is required: cleanup jobs fail fast against an unused port.
     let pool = Pool::builder()
         .min_idle(Some(0))
@@ -53,6 +57,15 @@ fn lobby(grace: u64) -> Addr<Lobby> {
             )
             .start(),
         );
+        if let Some(id) = device {
+            peers.insert(id.clone(), Peer::new(
+                id.clone(),
+                ctx.address(),
+                PeerRole::Device { name: "Camera 1".into() },
+                config.clone(),
+                PortAllocator::new(50000, 50001),
+            ).start());
+        }
         Lobby {
             id: "lobby".into(),
             stream_uuid: "stream".into(),
@@ -71,6 +84,49 @@ fn lobby(grace: u64) -> Addr<Lobby> {
             host_timer: None,
         }
     })
+}
+
+#[derive(Message)]
+#[rtype(result = "bool")]
+struct HasPeer(PeerId);
+
+impl Handler<HasPeer> for Lobby {
+    type Result = bool;
+
+    fn handle(&mut self, msg: HasPeer, _: &mut Self::Context) -> bool {
+        self.peers.contains_key(&msg.0)
+    }
+}
+
+#[actix_rt::test]
+async fn only_the_host_can_kick_peers() {
+    let id = PeerId::new("camera");
+    let lobby = lobby_with_device(120, Some(id.clone()));
+    presence(&lobby, true).await;
+    let subscription = lobby.send(Subscribe {
+        kind: SubscribeKind::Offer,
+        user_uuid: "camera".into(),
+        answer: None,
+    }).await.unwrap();
+    assert!(matches!(subscription, Err(LobbyError::PeerInternalError(PeerError::SubscribeNotAllowed))));
+    lobby.send(KickPeer { host_uuid: "guest".into(), id: id.clone() }).await.unwrap();
+    lobby.send(KickPeer { host_uuid: "guest".into(), id: PeerId::new("host") }).await.unwrap();
+    assert!(lobby.send(HasPeer(id.clone())).await.unwrap());
+
+    lobby.send(KickPeer { host_uuid: "host".into(), id: id.clone() }).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while lobby.send(HasPeer(id.clone())).await.unwrap() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("host kick should remove the camera peer");
+    assert!(lobby.send(HasPeer(PeerId::new("guest"))).await.unwrap());
+    let guest = PeerId::new("guest");
+    lobby.send(KickPeer { host_uuid: "host".into(), id: guest.clone() }).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while lobby.send(HasPeer(guest.clone())).await.unwrap() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("host kick should also remove a guest peer");
 }
 
 async fn presence(lobby: &Addr<Lobby>, present: bool) {
@@ -103,13 +159,28 @@ async fn guests_are_rejected_until_host_connects_and_presence_is_stream_specific
     let result = lobby
         .send(Publish {
             user_uuid: "new-guest".into(),
+            stream_uuid: "stream".into(),
             offer: String::new(),
             role: PeerRole::Guest,
         })
         .await
         .unwrap();
     assert!(matches!(result, Err(LobbyError::HostAbsent)));
+    let device = |stream_uuid: &str| Publish {
+        user_uuid: "camera".into(),
+        stream_uuid: stream_uuid.into(),
+        offer: String::new(),
+        role: PeerRole::Device { name: "Camera 1".into() },
+    };
+    assert!(matches!(
+        lobby.send(device("stream")).await.unwrap(),
+        Err(LobbyError::HostAbsent)
+    ));
     presence(&lobby, true).await;
+    assert!(matches!(
+        lobby.send(device("other-stream")).await.unwrap(),
+        Err(LobbyError::HostAbsent)
+    ));
     assert!(lobby
         .send(HostPresence {
             stream_uuid: "stream".into()
@@ -125,6 +196,7 @@ async fn guests_are_rejected_until_host_connects_and_presence_is_stream_specific
     let _ = lobby.send(LobbyShutdown {}).await;
     lobby.do_send(PeerStopped {
         id: PeerId::new("host"),
+        role: PeerRole::Host,
     });
 }
 
@@ -142,6 +214,7 @@ async fn recovery_cancels_the_single_grace_timer() {
     let _ = lobby.send(LobbyShutdown {}).await;
     lobby.do_send(PeerStopped {
         id: PeerId::new("host"),
+        role: PeerRole::Host,
     });
 }
 
@@ -152,6 +225,7 @@ async fn absent_host_expires_and_shuts_down_remaining_guests() {
     lobby
         .send(PeerStopped {
             id: PeerId::new("host"),
+            role: PeerRole::Host,
         })
         .await
         .unwrap();
@@ -171,6 +245,7 @@ async fn last_guest_leaving_closes_without_waiting_for_grace() {
     lobby
         .send(PeerStopped {
             id: PeerId::new("host"),
+            role: PeerRole::Host,
         })
         .await
         .unwrap();
@@ -192,7 +267,8 @@ async fn last_guest_leaving_closes_without_waiting_for_grace() {
 
 #[actix_rt::test]
 async fn explicit_host_leave_ignores_late_connected_events() {
-    let lobby = lobby(120);
+    let camera = PeerId::new("camera");
+    let lobby = lobby_with_device(120, Some(camera.clone()));
     presence(&lobby, true).await;
     lobby
         .send(LeavePeer {
@@ -203,8 +279,15 @@ async fn explicit_host_leave_ignores_late_connected_events() {
         .unwrap();
     presence(&lobby, true).await;
     assert_eq!(lobby.send(Inspect).await.unwrap(), (false, true, false));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while lobby.send(HasPeer(camera.clone())).await.unwrap() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("camera peer should close when the host leaves");
+    assert!(lobby.send(HasPeer(PeerId::new("guest"))).await.unwrap());
     let _ = lobby.send(LobbyShutdown {}).await;
     lobby.do_send(PeerStopped {
         id: PeerId::new("host"),
+        role: PeerRole::Host,
     });
 }

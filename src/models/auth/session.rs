@@ -1,5 +1,6 @@
 use crate::db::active_users::ActiveUser;
 use serde::{Deserialize, Serialize};
+use super::scopes::{DeviceScope, SessionScope};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Principal {
@@ -18,6 +19,8 @@ pub struct Principal {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Session {
     pub principal: Principal,
+    #[serde(default)]
+    pub scope: SessionScope,
 }
 
 impl Session {
@@ -35,6 +38,16 @@ impl Session {
                 channel_actor_id: user.channel_actor_id,
                 avatar: user.avatar,
             },
+            scope: SessionScope::Account,
+        }
+    }
+
+    pub fn device_scope(&self) -> Result<&DeviceScope, crate::models::error::ApiError> {
+        match &self.scope {
+            SessionScope::Device(scope) => Ok(scope),
+            SessionScope::Account => Err(crate::models::error::ApiError::Forbidden {
+                error_message: "Device session required".into(),
+            }),
         }
     }
 }
