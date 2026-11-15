@@ -25,6 +25,7 @@ pub mod recorded_videos;
 pub mod recorded_video_previews;
 pub mod recorded_video_likes;
 pub mod user_roles;
+pub mod user_stream_settings;
 pub mod users;
 pub mod verification_tokens;
 

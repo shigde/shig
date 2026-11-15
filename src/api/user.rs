@@ -13,6 +13,7 @@ pub mod whep;
 pub mod whip;
 pub mod stream_friend;
 pub mod lobby;
+pub mod stream_settings;
 
 // GET api/pup/user/:user_uuid
 #[get("/{user_uuid}")]

@@ -312,6 +312,14 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    user_stream_settings (user_id) {
+        user_id -> Int4,
+        settings -> Jsonb,
+        updated_at -> Timestamp,
+    }
+}
+
 diesel::joinable!(messages -> users (recipient_id));
 diesel::joinable!(messages -> streams (stream_id));
 diesel::joinable!(notifications -> users (recipient_id));
@@ -321,6 +329,7 @@ diesel::joinable!(stream_likes -> streams (stream_id));
 diesel::joinable!(stream_likes -> users (user_id));
 diesel::joinable!(recorded_video_likes -> recorded_videos (recorded_video_id));
 diesel::joinable!(recorded_video_likes -> users (user_id));
+diesel::joinable!(user_stream_settings -> users (user_id));
 diesel::joinable!(actor_images -> actors (actor_id));
 diesel::joinable!(channel_friends -> channels (channel_id));
 diesel::joinable!(channel_friends -> friend_roles (friend_role_id));
@@ -354,6 +363,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     notification_stream_state,
     stream_likes,
     recorded_video_likes,
+    user_stream_settings,
     actor_images,
     actors,
     channel_friends,
