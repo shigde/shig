@@ -195,7 +195,7 @@ async fn dispatch(
                     error_message: "Administrator access required".into(),
                 });
             }
-            serialize(crate::sfu::metrics::snapshot())
+            serialize(crate::metrics::snapshot())
         }
         "content-stats" => {
             keys(item, &["contentType", "uuid"])?;

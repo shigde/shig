@@ -9,6 +9,7 @@ mod ephemeral;
 mod federation;
 mod files;
 mod middleware;
+mod metrics;
 mod models;
 mod relay;
 mod server;

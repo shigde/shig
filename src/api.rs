@@ -27,26 +27,13 @@ use crate::api::user::{
 };
 use crate::middleware::auth::Authentication;
 use crate::models::auth::scopes::RequireScope;
-use actix_web::{web, HttpResponse, Responder};
-
-async fn metrics() -> impl Responder {
-    match crate::sfu::metrics::render() {
-        Ok(body) => HttpResponse::Ok()
-            .content_type("text/plain; version=0.0.4; charset=utf-8")
-            .body(body),
-        Err(error) => HttpResponse::InternalServerError().body(error.to_string()),
-    }
-}
+use actix_web::web;
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/static/recordings")
             .wrap(Authentication::any_of(&[RequireScope::Public, RequireScope::Account]))
             .route("/{uuid}/{filename:.*}", web::get().to(videos::recording_file)),
-    ).service(
-        web::resource("/metrics")
-            .wrap(Authentication::new(RequireScope::Public))
-            .route(web::get().to(metrics)),
     )
     .service(
         web::scope("/api")
@@ -81,7 +68,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("/admin")
                     .wrap(Authentication::new(RequireScope::Account))
-                    .service(admin::monitoring)
+                    .service(admin::metrics::monitoring::monitoring)
+                    .service(admin::metrics::prometheus::prometheus)
                     .service(admin::list_users)
                     .service(admin::set_user_active)
                     .service(admin::set_user_role)
