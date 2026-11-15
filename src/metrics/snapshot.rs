@@ -6,10 +6,12 @@
 pub(crate) struct MonitoringSnapshot {
     #[serde(flatten)]
     sfu: crate::sfu::metrics::MonitoringSnapshot,
+    relay: super::relay::RelaySnapshot,
 }
 
-pub(crate) fn snapshot() -> MonitoringSnapshot {
+pub(crate) fn snapshot(relay: &moq_net::stats::Registry) -> MonitoringSnapshot {
     MonitoringSnapshot {
         sfu: crate::sfu::metrics::snapshot(),
+        relay: super::relay::snapshot(relay),
     }
 }

@@ -43,9 +43,13 @@ pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelaySe
     let relay = Box::pin(moq_relay::Relay::load(config))
         .await?
         .with_signals(false);
+    let relay_stats = relay.stats().registry().clone();
+    let relay_metrics = relay.internal().routes();
     let state = RelayState {
         h264_diagnostics_directory: None,
         media: Default::default(),
+        relay_stats,
+        relay_metrics,
         auth: relay.auth().clone(),
         cluster: relay.cluster().clone(),
         web: relay.web().routes(),
