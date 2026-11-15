@@ -16,7 +16,12 @@ impl Mode {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PolicyInfo { pub mode: Mode, pub channel_status: String, pub can_stream: bool }
+pub struct PolicyInfo {
+    pub mode: Mode,
+    pub channel_status: String,
+    pub can_stream: bool,
+    pub public_content_enabled: bool,
+}
 
 pub fn can_stream(conn: &mut diesel::PgConnection, principal: &Principal) -> Result<bool, ApiError> {
     if principal.user_role_id == Role::Admin.val() { return Ok(true); }
@@ -37,14 +42,25 @@ pub fn info(pool: &web::Data<DbPool>, principal: &Principal) -> Result<PolicyInf
 
 pub fn info_for(conn: &mut diesel::PgConnection, principal: &Principal) -> Result<PolicyInfo, ApiError> {
     let mode = dao::mode(conn).map_err(crate::db::error::DbError::from)?;
+    let public_content_enabled = dao::public_content_enabled(conn).map_err(crate::db::error::DbError::from)?;
     let mode = match mode.as_str() { "open" => Mode::Open, "locked" => Mode::Locked, _ => Mode::Request };
     if principal.user_role_id == Role::Admin.val() {
-        return Ok(PolicyInfo { mode, channel_status: "admin".into(), can_stream: true });
+        return Ok(PolicyInfo { mode, channel_status: "admin".into(), can_stream: true, public_content_enabled });
     }
     let status = dao::channel_status(conn, principal.channel_id).map_err(crate::db::error::DbError::from)?
         .unwrap_or_else(|| "inherited".into());
     let can_stream = can_stream(conn, principal)?;
-    Ok(PolicyInfo { mode, channel_status: status, can_stream })
+    Ok(PolicyInfo { mode, channel_status: status, can_stream, public_content_enabled })
+}
+
+pub fn public_content_enabled(conn: &mut diesel::PgConnection) -> Result<bool, ApiError> {
+    Ok(dao::public_content_enabled(conn).map_err(crate::db::error::DbError::from)?)
+}
+
+pub fn set_public_content_enabled(pool: &web::Data<DbPool>, enabled: bool) -> Result<(), ApiError> {
+    let mut conn = pool.get()?;
+    dao::set_public_content_enabled(&mut conn, enabled).map_err(crate::db::error::DbError::from)?;
+    Ok(())
 }
 
 pub fn request(conn: &mut diesel::PgConnection, channel_id: i32) -> Result<bool, ApiError> {

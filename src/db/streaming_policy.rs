@@ -22,6 +22,27 @@ pub fn mode(conn: &mut PgConnection) -> DbResult<String> {
         .get_result::<TextRow>(conn).map(|r| r.value).map_err(Into::into)
 }
 
+pub fn public_content_enabled(conn: &mut PgConnection) -> DbResult<bool> {
+    #[derive(diesel::QueryableByName)]
+    struct Enabled { #[diesel(sql_type = diesel::sql_types::Bool)] enabled: bool }
+    diesel::sql_query("SELECT public_content_enabled AS enabled FROM instance_streaming_policy WHERE id=1")
+        .get_result::<Enabled>(conn).map(|row| row.enabled).map_err(Into::into)
+}
+
+pub fn set_public_content_enabled(conn: &mut PgConnection, enabled: bool) -> DbResult<()> {
+    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        diesel::sql_query("UPDATE instance_streaming_policy SET public_content_enabled=$1, updated_at=now() WHERE id=1")
+            .bind::<diesel::sql_types::Bool,_>(enabled).execute(conn)?;
+        if !enabled {
+            // Hide content from anonymous visitors without changing replay publication state.
+            diesel::sql_query("UPDATE streams SET is_public=false, updated_at=now() WHERE is_public=true").execute(conn)?;
+            diesel::sql_query("UPDATE recorded_videos SET is_public=false, updated_at=now() WHERE is_public=true").execute(conn)?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
 pub fn channel_status(conn: &mut PgConnection, channel_id: i32) -> DbResult<Option<String>> {
     diesel::sql_query("SELECT status AS value FROM channel_streaming_permissions WHERE channel_id=$1")
         .bind::<Integer,_>(channel_id).get_result::<TextRow>(conn).optional()
@@ -43,6 +64,8 @@ pub fn set_global(conn: &mut PgConnection, mode: &str) -> DbResult<Vec<String>> 
         let lobbies = diesel::sql_query("SELECT l.uuid AS value FROM lobbies l JOIN users u ON u.id=l.user_id JOIN streams s ON s.id=l.stream_id WHERE s.is_live=true AND u.user_role_id <> $1")
             .bind::<Integer,_>(Role::Admin.val()).load::<TextRow>(conn)?;
         diesel::sql_query("UPDATE streams SET is_public=false, is_live=false, updated_at=now() WHERE user_id IN (SELECT id FROM users WHERE user_role_id <> $1)")
+            .bind::<Integer,_>(Role::Admin.val()).execute(conn)?;
+        diesel::sql_query("UPDATE notification_stream_state SET live=false WHERE stream_id IN (SELECT s.id FROM streams s JOIN users u ON u.id=s.user_id WHERE u.user_role_id <> $1)")
             .bind::<Integer,_>(Role::Admin.val()).execute(conn)?;
         diesel::sql_query("UPDATE recorded_videos SET is_public=false, published_at=NULL, updated_at=now() WHERE user_id IN (SELECT id FROM users WHERE user_role_id <> $1)")
             .bind::<Integer,_>(Role::Admin.val()).execute(conn)?;
@@ -67,6 +90,7 @@ pub fn set_channel(conn: &mut PgConnection, uuid: &str, status: &str) -> DbResul
         let active = diesel::sql_query("SELECT l.uuid AS value FROM lobbies l JOIN streams s ON s.id=l.stream_id WHERE l.channel_id=$1 AND s.is_live=true")
             .bind::<Integer,_>(channel.id).load::<TextRow>(conn)?;
         diesel::sql_query("UPDATE streams SET is_public=false, is_live=false, updated_at=now() WHERE channel_id=$1").bind::<Integer,_>(channel.id).execute(conn)?;
+        diesel::sql_query("UPDATE notification_stream_state SET live=false WHERE stream_id IN (SELECT id FROM streams WHERE channel_id=$1)").bind::<Integer,_>(channel.id).execute(conn)?;
         diesel::sql_query("UPDATE recorded_videos SET is_public=false, published_at=NULL, updated_at=now() WHERE channel_id=$1").bind::<Integer,_>(channel.id).execute(conn)?;
         Ok((old_status, active.into_iter().map(|row| row.value).collect()))
     })?;

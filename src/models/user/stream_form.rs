@@ -44,6 +44,8 @@ impl StreamForm {
                 error_message: "This channel needs streaming approval before creating a stream".into(),
             });
         }
+        let public_content_enabled = crate::models::streaming_policy::public_content_enabled(&mut conn)?;
+        let is_public = self.stream.is_public && public_content_enabled;
         let stream_uuid = uuid::Uuid::new_v4().to_string();
 
         // Upload the Thumbnail if was one uploaded in the form
@@ -71,7 +73,7 @@ impl StreamForm {
             self.stream.licence,
             self.stream.is_repeating,
             Some(self.stream.repeat),
-            self.stream.is_public,
+            is_public,
         )?;
 
         // Insert stream Meta Data
@@ -81,6 +83,7 @@ impl StreamForm {
         // Build Stream Response Object
         let mut stream_response = self.stream.clone();
         stream_response.uuid = stream_dao.uuid.clone();
+        stream_response.is_public = is_public;
 
         // Insert Thumbnail if was one uploaded
         match thumbnail_img {
@@ -119,6 +122,12 @@ impl StreamForm {
             });
         }
 
+        let public_content_enabled = crate::models::streaming_policy::public_content_enabled(&mut conn)?;
+        if self.stream.is_public && !public_content_enabled {
+            return Err(ApiError::Forbidden {
+                error_message: "Public streams are disabled by the server administrator".into(),
+            });
+        }
         if self.stream.is_public && !crate::models::streaming_policy::can_stream(&mut conn, &principal)? {
             return Err(ApiError::Forbidden {
                 error_message: "This channel needs streaming approval before publishing streams".into(),
@@ -152,7 +161,7 @@ impl StreamForm {
             self.stream.licence,
             self.stream.is_repeating,
             Some(self.stream.repeat),
-            self.stream.is_public,
+            self.stream.is_public && public_content_enabled,
             self.stream.is_live,
         )?;
 
@@ -163,6 +172,7 @@ impl StreamForm {
         // Build Stream Response Object
         let mut stream_response = self.stream.clone();
         stream_response.uuid = self.stream.uuid.clone();
+        stream_response.is_public = self.stream.is_public && public_content_enabled;
 
         // Update Thumbnail if was one uploaded
         match thumbnail_img {

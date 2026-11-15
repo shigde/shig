@@ -273,9 +273,13 @@ mod tests {
             assert_eq!(video_previews[0].uuid, first.uuid);
             assert_eq!(crate::db::recorded_video_previews::read::find_all_recorded_video_previews_by_channel(conn, "channel".into(), false)?.len(), 1);
             assert!(crate::db::recorded_video_previews::read::find_all_recorded_video_previews_by_channel(conn, "other".into(), false)?.is_empty());
-            update(conn, &first.uuid, 1, &RecordedVideoUpdate {is_public: Some(false), ..Default::default()})?;
-            assert!(crate::db::stream_previews::read::find_stream_preview_by_uuid(conn, first.uuid.clone(), true).is_err());
-            assert!(crate::db::recorded_video_previews::read::find_all_recorded_video_previews(conn, true)?.is_empty());
+            let private_published = update(conn, &first.uuid, 1, &RecordedVideoUpdate {is_public: Some(false), ..Default::default()})?;
+            assert!(crate::db::stream_previews::read::find_stream_preview_by_uuid(conn, first.uuid.clone(), true).is_ok());
+            assert!(crate::db::stream_previews::read::find_stream_preview_by_uuid(conn, first.uuid.clone(), false).is_err());
+            assert_eq!(crate::db::recorded_video_previews::read::find_all_recorded_video_previews(conn, true)?.len(), 1);
+            assert!(crate::db::recorded_video_previews::read::find_all_recorded_video_previews(conn, false)?.is_empty());
+            assert!(private_published.is_visible_to(Some(999)));
+            assert!(!private_published.is_visible_to(None));
             update(conn, &first.uuid, 1, &RecordedVideoUpdate {published: Some(false), ..Default::default()})?;
             conn.batch_execute("DELETE FROM streams WHERE uuid='source';")?;
             assert_eq!(find(conn, &first.uuid)?.source_stream_uuid, "source");

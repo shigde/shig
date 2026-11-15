@@ -66,7 +66,9 @@ impl RecordedVideo {
     }
     pub fn is_visible_to(&self, user_id: Option<i32>) -> bool {
         user_id == Some(self.user_id)
-            || (self.is_public && self.published_at.is_some() && self.status == "ready")
+            || (self.published_at.is_some()
+                && self.status == "ready"
+                && (self.is_public || user_id.is_some()))
     }
 }
 

@@ -42,14 +42,6 @@ pub async fn poll(
             error_message: "Stream is not available".into(),
         });
     }
-    if !stream.is_public {
-        let Some(session) = session.as_ref() else {
-            return Err(ApiError::NotFound {
-                error_message: "Stream is not available".into(),
-            });
-        };
-        crate::models::user::stream::Stream::fetch(&pool, uuid.clone(), session.principal.clone())?;
-    }
     let announcements = crate::api::relay::announcement::announced_prefix(
         &state,
         &request,

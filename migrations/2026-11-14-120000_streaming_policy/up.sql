@@ -2,6 +2,7 @@ CREATE TABLE instance_streaming_policy (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     mode VARCHAR(16) NOT NULL DEFAULT 'request'
         CHECK (mode IN ('request', 'open', 'locked')),
+    public_content_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 

@@ -87,7 +87,6 @@ pub fn start(
 
     let svs = HttpServer::new(move || {
         App::new()
-            .service(actix_files::Files::new("/static", &cfg.files.htdocs).use_last_modified(true))
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(sfu_addr.clone()))
             .app_data(web::Data::new(relay_state.clone()))
@@ -96,8 +95,9 @@ pub fn start(
             .app_data(web::Data::new(cfg.jwt.clone()))
             .app_data(web::Data::new(cfg.mail.clone()))
             .app_data(web::Data::new(cfg.files.clone()))
-            .wrap(crate::middleware::req::LoggingMiddleware)
             .configure(api::config_services)
+            .service(actix_files::Files::new("/static", &cfg.files.htdocs).use_last_modified(true))
+            .wrap(crate::middleware::req::LoggingMiddleware)
     });
 
     let url = cfg.server.clone().url();

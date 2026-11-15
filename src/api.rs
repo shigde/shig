@@ -9,6 +9,7 @@ pub mod relay;
 pub mod media;
 pub mod videos;
 pub mod notification;
+pub mod public_access;
 
 use crate::api::auth::login::login;
 use crate::api::auth::pass::{reset_password, send_forgotten_pass_email, update_password};
@@ -39,6 +40,10 @@ async fn metrics() -> impl Responder {
 
 pub fn config_services(cfg: &mut web::ServiceConfig) {
     cfg.service(
+        web::scope("/static/recordings")
+            .wrap(Authentication::any_of(&[RequireScope::Public, RequireScope::Account]))
+            .route("/{uuid}/{filename:.*}", web::get().to(videos::recording_file)),
+    ).service(
         web::resource("/metrics")
             .wrap(Authentication::new(RequireScope::Public))
             .route(web::get().to(metrics)),
@@ -78,6 +83,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .service(admin::set_user_role)
                     .service(admin::get_streaming_policy)
                     .service(admin::set_streaming_policy)
+                    .service(admin::set_public_content)
                     .service(admin::set_channel_streaming),
             )
             .service(
@@ -85,6 +91,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                     .wrap(Authentication::any_of(&[RequireScope::Public, RequireScope::Account]))
                     .service(web::scope("/videos").service(videos::get_public_video).service(videos::record_public_video_view))
                     .service(web::scope("/stream-viewers").service(poll::public::poll))
+                    .service(public_access::public_content)
                     .service(web::scope("/stream")
                         .service(media::available))
                     .service(

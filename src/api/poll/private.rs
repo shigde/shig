@@ -7,6 +7,7 @@ use crate::{
     sfu::Sfu,
 };
 use actix_web::{post, web, HttpRequest, HttpResponse, ResponseError};
+use diesel::RunQueryDsl;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -216,37 +217,28 @@ async fn dispatch(
         "live-viewers" => {
             keys(item, &["streamUuid"])?;
             let stream = param(item, "streamUuid")?;
-            let (row, channel_uuid) = {
+            #[derive(diesel::QueryableByName)]
+            struct LiveState {
+                #[diesel(sql_type = diesel::sql_types::Bool)]
+                live: bool,
+            }
+            let is_live = {
                 let mut conn = pool.get()?;
                 let row = crate::db::streams::read::find_stream_by_uuid(&mut conn, stream.to_owned())?;
-                let channel = crate::db::channels::read::find_channel_by_id(&mut conn, row.channel_id)?;
-                (row, channel.uuid)
+                diesel::sql_query("SELECT COALESCE((SELECT live FROM notification_stream_state WHERE stream_id=$1), false) AS live")
+                    .bind::<diesel::sql_types::Integer, _>(row.id)
+                    .get_result::<LiveState>(&mut conn)?
+                    .live
             };
-            if !row.is_public {
-                crate::models::user::stream::Stream::fetch(pool, stream.to_owned(), session.principal.clone())?;
-            }
-            let relay = request.app_data::<web::Data<RelayState>>().ok_or_else(|| ApiError::ServiceUnavailable {
-                error_message: "Relay unavailable".into(),
-            })?;
-            let announcements = crate::api::relay::announcement::announced_prefix(
-                relay,
-                request,
-                &format!("live/{channel_uuid}"),
-            )
-            .await
-            .map_err(|_| ApiError::ServiceUnavailable {
-                error_message: "Stream status is unavailable".into(),
-            })?;
-            let is_live = announcements.lines().any(|name| name.trim() == stream);
             let state = request.app_data::<web::Data<EphemeralState>>().ok_or_else(|| ApiError::ServiceUnavailable {
                 error_message: "Ephemeral state unavailable".into(),
             })?;
             let viewer_key = format!("account:{}", session.principal.id);
             if !is_live {
                 state.viewer.clear_stream(stream);
-                return Ok(json!({"viewers": 0}));
+                return Ok(json!({"viewers": 0, "isLive": false}));
             }
-            Ok(json!({"viewers": state.viewer.heartbeat(stream, &viewer_key)}))
+            Ok(json!({"viewers": state.viewer.heartbeat(stream, &viewer_key), "isLive": true}))
         }
         "messages-counts" | "notifications-counts" | "messages" | "notifications" => {
             let counts = item.resource.ends_with("-counts");

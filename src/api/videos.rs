@@ -6,7 +6,9 @@ use crate::{
     },
     relay::state::RelayState,
 };
-use actix_web::{delete, get, patch, post, web, HttpResponse};
+use actix_files::NamedFile;
+use actix_web::{delete, get, patch, post, web, HttpResponse, Responder};
+use std::path::{Component, Path};
 
 fn check_stream_owner(pool: &DbPool, stream: &str, owner: i32) -> Result<(), ApiError> {
     let source = find_stream_by_uuid(&mut *pool.get()?, stream.into())?;
@@ -16,6 +18,53 @@ fn check_stream_owner(pool: &DbPool, stream: &str, owner: i32) -> Result<(), Api
         });
     }
     Ok(())
+}
+
+/// Serve HLS files only when the replay itself is visible to this visitor.
+pub async fn recording_file(
+    pool: web::Data<DbPool>,
+    state: web::Data<RelayState>,
+    path: web::Path<(String, String)>,
+    session: Option<web::ReqData<Session>>,
+) -> Result<impl Responder, ApiError> {
+    let (uuid, filename) = path.into_inner();
+    uuid::Uuid::parse_str(&uuid).map_err(|_| ApiError::NotFound {
+        error_message: "Replay file is not available".into(),
+    })?;
+    let relative = Path::new(&filename);
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err(ApiError::NotFound {
+            error_message: "Replay file is not available".into(),
+        });
+    }
+    let video = recorded_videos::find(&mut *pool.get()?, &uuid)?;
+    if !video.is_visible_to(session.as_ref().map(|s| s.principal.id)) {
+        return Err(ApiError::NotFound {
+            error_message: "Replay is not available".into(),
+        });
+    }
+
+    let root = state.media.storage_directory().join(&uuid);
+    let requested = root.join(relative);
+    let root = tokio::fs::canonicalize(root).await.map_err(|_| ApiError::NotFound {
+        error_message: "Replay file is not available".into(),
+    })?;
+    let file = tokio::fs::canonicalize(requested).await.map_err(|_| ApiError::NotFound {
+        error_message: "Replay file is not available".into(),
+    })?;
+    if !file.starts_with(&root) || !file.is_file() {
+        return Err(ApiError::NotFound {
+            error_message: "Replay file is not available".into(),
+        });
+    }
+    let named_file = NamedFile::open_async(file).await.map_err(|_| ApiError::NotFound {
+        error_message: "Replay file is not available".into(),
+    })?;
+    Ok(named_file
+        .customize()
+        .insert_header(("Cache-Control", "private, no-store")))
 }
 
 #[delete("/{uuid}")]
@@ -135,6 +184,9 @@ pub async fn update_video(
 ) -> Result<HttpResponse, ApiError> {
     if body.is_public == Some(true) || body.published == Some(true) {
         let mut conn = pool.get()?;
+        if body.is_public == Some(true) && !crate::models::streaming_policy::public_content_enabled(&mut conn)? {
+            return Err(ApiError::Forbidden { error_message: "Public content is disabled by the server administrator".into() });
+        }
         if !crate::models::streaming_policy::can_stream(&mut conn, &session.principal)? {
             return Err(ApiError::Forbidden { error_message: "This channel is not allowed to publish content on this server".into() });
         }

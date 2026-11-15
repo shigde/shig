@@ -37,6 +37,18 @@ pub async fn set_streaming_policy(
 }
 
 #[derive(Deserialize)]
+pub struct PublicContentUpdate { enabled: bool }
+
+#[patch("/public-content")]
+pub async fn set_public_content(
+    session: web::ReqData<Session>, pool: web::Data<DbPool>, update: web::Json<PublicContentUpdate>,
+) -> Result<HttpResponse, ApiError> {
+    require_admin(&session)?;
+    crate::models::streaming_policy::set_public_content_enabled(&pool, update.enabled)?;
+    Ok(HttpResponse::Ok().insert_header(("Cache-Control", "no-store")).json(Body::new("ok", update.enabled)))
+}
+
+#[derive(Deserialize)]
 pub struct ChannelStreamingUpdate { status: String }
 
 #[patch("/users/{uuid}/streaming")]
