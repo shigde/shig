@@ -79,3 +79,4 @@ moq-net = "0.3.18"
 moq-mux = "0.10.19"
 gstreamer = { version = "0.24", features = ["v1_24"] }
 gstreamer-app = { version = "0.24", features = ["v1_24"] }
+sysinfo = "0.39.6"

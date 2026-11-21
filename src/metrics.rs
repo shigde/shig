@@ -1,7 +1,15 @@
 mod snapshot;
+pub(crate) mod recorder;
 mod relay;
+mod system;
 
 pub(crate) use snapshot::snapshot;
+
+/// Starts the low-frequency operating-system metrics sampler.
+pub(crate) fn init() {
+    recorder::init();
+    system::init();
+}
 
 use prometheus::{Encoder, TextEncoder};
 

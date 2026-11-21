@@ -45,6 +45,7 @@ struct Cli {
 fn main() {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     sfu::metrics::init();
+    metrics::init();
     let cli = Cli::parse();
 
     let filename = &cli.config[..];

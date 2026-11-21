@@ -32,6 +32,11 @@ impl RelayServer {
 pub async fn new_relay_server(mut config: RelayConfig) -> anyhow::Result<RelayServer> {
     let _ = moq_tokio::crypto::install_default();
 
+    // The relay's traffic registry is a no-op unless stats are enabled. Shig
+    // reads that registry for the admin monitoring snapshot and Prometheus
+    // endpoint, so enable the upstream stats producer and counter collection.
+    config.stats.enabled = true;
+
     if config.listen.tls.cert.is_empty()
         && config.listen.tls.key.is_empty()
         && config.listen.tls.generate.is_empty()
