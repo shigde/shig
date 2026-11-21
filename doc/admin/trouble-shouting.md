@@ -25,8 +25,8 @@ Do not use `pq-sys` bundled unless you have tested the C build for your target.
 Check Shig can read the copied cert files:
 
 ```shell
-sudo -u shig test -r /opt/shig/certs/relay/fullchain.pem && echo cert-ok
-sudo -u shig test -r /opt/shig/certs/relay/privkey.pem && echo key-ok
+sudo -u shig test -r /opt/shig/certs/fullchain.pem && echo cert-ok
+sudo -u shig test -r /opt/shig/certs/privkey.pem && echo key-ok
 ```
 
 See [config](../config.md#relay) for the expected relay TLS paths.

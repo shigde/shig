@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     environment: production
     permissions:
       contents: read
@@ -95,6 +95,12 @@ jobs:
           set -euo pipefail
 
           mkdir -p "$SERVER_TARGET_DIR/bin"
+
+          if [ ! -r "$SERVER_TARGET_DIR/config.toml" ]; then
+            echo "Missing readable runtime config: $SERVER_TARGET_DIR/config.toml" >&2
+            echo "Create the server-specific config.toml before deploying Shig." >&2
+            exit 1
+          fi
 
           if [ -n "${DB_BACKUP_COMMAND:-}" ]; then
             echo "Running database backup before deployment..."
