@@ -4,7 +4,7 @@ Certbot renews the originals under `/etc/letsencrypt`, not Shig's copied certifi
 
 See [config](../config.md#relay) for the relay TLS paths expected by Shig.
 
-The deployed `relay.shig.de` setup below uses `/opt/shig/certs/` directly, without a `relay` subdirectory. Other installations must substitute their certificate name and destination paths. In `/opt/shig/config.toml`, these destinations must match:
+The deployed `relay.shig.de` setup uses `/opt/shig/certs/` directly, without a `relay` subdirectory. The deployment project installs the deploy hook and copies an already-issued certificate with `shig-layout.yml`. Other installations must substitute their certificate name and destination paths. In `/opt/shig/config.toml`, these destinations must match:
 
 ```toml
 [relay.listen.tls]
@@ -51,13 +51,13 @@ sudo chmod 750 /etc/letsencrypt/renewal-hooks/deploy/shig-relay-certs.sh
 
 ## Scheduled Renewal
 
-Edit root's existing crontab with `sudo crontab -e`. The existing stop/start-based deployment uses:
+The deployment playbook installs Certbot and schedules renewal in root's crontab. With the webroot authenticator, Nginx stays running:
 
 ```cron
-0 2 * * * /bin/sh -c '/bin/systemctl stop nginx && { /usr/bin/certbot renew -q; result=$?; /bin/systemctl start nginx; exit "$result"; }'
+0 2 * * * /usr/bin/certbot renew --quiet
 ```
 
-This checks all Certbot-managed certificates daily at 02:00 in the server's timezone, renewing only those due. Nginx is started again even if Certbot fails. Replace the old entry rather than adding a duplicate. The deploy hook needs no separate cron entry.
+This checks all Certbot-managed certificates daily at 02:00 in the server's timezone, renewing only those due. Replace any old stop/start-based entry rather than adding a duplicate. The deploy hook needs no separate cron entry.
 
 Stopping Nginx briefly interrupts web access. This is appropriate when the configured authenticator needs its port, such as standalone HTTP validation. An Nginx or webroot authenticator normally does not require stopping Nginx; retain the method matching the existing renewal configuration.
 

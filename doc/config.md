@@ -58,8 +58,8 @@ port_max = 51000
 bind = "127.0.0.1:4443"
 
 [relay.listen.tls]
-cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = ["/opt/shig/certs/relay/privkey.pem"]
+cert = ["/opt/shig/certs/fullchain.pem"]
+key = ["/opt/shig/certs/privkey.pem"]
 
 [relay.web.http]
 listen = "127.0.0.1:4444"
@@ -230,8 +230,8 @@ TCP `443` uses SNI routing, so `relay.example.com` can share the public HTTPS po
 
 ```toml
 [relay.listen.tls]
-cert = ["/opt/shig/certs/relay/fullchain.pem"]
-key = ["/opt/shig/certs/relay/privkey.pem"]
+cert = ["/opt/shig/certs/fullchain.pem"]
+key = ["/opt/shig/certs/privkey.pem"]
 ```
 
 `cert` and `key` are lists. Each certificate chain is paired with the key at the same index.

@@ -195,7 +195,12 @@ async fn dispatch(
                     error_message: "Administrator access required".into(),
                 });
             }
-            serialize(crate::sfu::metrics::snapshot())
+            let disabled_registry = moq_net::stats::Registry::default();
+            let relay_stats = request
+                .app_data::<web::Data<RelayState>>()
+                .map(|state| &state.relay_stats)
+                .unwrap_or(&disabled_registry);
+            serialize(crate::metrics::snapshot(relay_stats))
         }
         "content-stats" => {
             keys(item, &["contentType", "uuid"])?;

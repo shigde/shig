@@ -44,6 +44,10 @@ smtp_port = 587
 [relay.listen]
 bind = "[::]:4443"
 
+[relay.runtime]
+# Run QUIC on one dedicated worker instead of the shared Tokio runtime.
+workers = 1
+
 [relay.web.http]
 # Listen for HTTP and WebSocket (TCP) connections on the given address.
 # Defaults to disabled if not provided.

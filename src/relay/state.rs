@@ -8,6 +8,10 @@ use tower::ServiceExt;
 pub struct RelayState {
     pub h264_diagnostics_directory: Option<std::path::PathBuf>,
     pub media: crate::sfu::media::MediaService,
+    /// Clone of the relay's shared MoQ traffic registry for admin monitoring.
+    pub relay_stats: moq_net::stats::Registry,
+    /// In-process router for the relay's full Prometheus exposition endpoint.
+    pub relay_metrics: axum::Router,
     pub auth: moq_relay::auth::Auth,
     pub cluster: moq_relay::cluster::Cluster,
     #[allow(dead_code)]
@@ -15,6 +19,30 @@ pub struct RelayState {
 }
 
 impl RelayState {
+    /// Render the upstream relay's own Prometheus endpoint in-process.
+    pub async fn prometheus_metrics(&self) -> actix_web::Result<String> {
+        let request = Request::builder()
+            .uri("/metrics")
+            .body(Body::empty())
+            .map_err(ErrorInternalServerError)?;
+        let response = self
+            .relay_metrics
+            .clone()
+            .oneshot(request)
+            .await
+            .map_err(ErrorInternalServerError)?;
+        if !response.status().is_success() {
+            return Err(ErrorInternalServerError(format!(
+                "Relay metrics route returned {}",
+                response.status()
+            )));
+        }
+        let body = to_bytes(response.into_body(), 8 * 1024 * 1024)
+            .await
+            .map_err(ErrorInternalServerError)?;
+        String::from_utf8(body.to_vec()).map_err(ErrorInternalServerError)
+    }
+
     // this method is used to forward http requests to the web server in fingerprint api
     #[allow(dead_code)]
     pub async fn forward_http(&self, uri: String) -> actix_web::Result<HttpResponse> {

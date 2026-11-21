@@ -26,7 +26,7 @@ See [firewall](firewall.md).
 
 Install server packages:
 
-The relay requires GStreamer >= 1.24 and its RTP plugins. Use Ubuntu 24.04 or a compatible distribution providing that version. Release binaries are built on Ubuntu 24.04 and require compatible system libraries on the deployment host; they are not standalone static binaries.
+The relay requires GStreamer >= 1.24 and its RTP plugins. Shig release binaries are built on Ubuntu 26.04 x86_64 and require compatible system libraries on the deployment host; they are not standalone static binaries. This release target supports Ubuntu 26.04 x86_64.
 
 ```shell
 sudo apt update
@@ -54,7 +54,7 @@ Create the application directory:
 
 ```shell
 sudo mkdir -p /opt/shig/bin
-sudo mkdir -p /opt/shig/certs/relay
+sudo mkdir -p /opt/shig/certs
 ```
 
 Allow the app to create `/opt/shig/htdocs` itself:
@@ -71,8 +71,8 @@ sudo chown root:shig /opt/shig/config.toml
 sudo chmod 640 /opt/shig/config.toml
 
 sudo chown -R root:shig /opt/shig/certs
-sudo chmod 750 /opt/shig/certs /opt/shig/certs/relay
-sudo chmod 640 /opt/shig/certs/relay/*.pem
+sudo chmod 750 /opt/shig/certs
+sudo chmod 640 /opt/shig/certs/*.pem
 ```
 
 Give the deployment user access to the binary directory:
@@ -131,19 +131,19 @@ sudo certbot certonly --nginx -d relay.example.com
 Copy the relay certificate for the Shig service user:
 
 ```shell
-sudo mkdir -p /opt/shig/certs/relay
-sudo cp /etc/letsencrypt/live/relay.example.com/fullchain.pem /opt/shig/certs/relay/fullchain.pem
-sudo cp /etc/letsencrypt/live/relay.example.com/privkey.pem /opt/shig/certs/relay/privkey.pem
+sudo mkdir -p /opt/shig/certs
+sudo cp /etc/letsencrypt/live/relay.example.com/fullchain.pem /opt/shig/certs/fullchain.pem
+sudo cp /etc/letsencrypt/live/relay.example.com/privkey.pem /opt/shig/certs/privkey.pem
 sudo chown -R root:shig /opt/shig/certs
-sudo chmod 750 /opt/shig/certs /opt/shig/certs/relay
-sudo chmod 640 /opt/shig/certs/relay/*.pem
+sudo chmod 750 /opt/shig/certs
+sudo chmod 640 /opt/shig/certs/*.pem
 ```
 
 Do not change permissions on `/etc/letsencrypt` if Nginx already uses those files.
 
 See [config](../config.md#relay) for the relay certificate paths used by `/opt/shig/config.toml`.
 
-Set up [automatic certificate renewal](certificate-renewal.md) so renewed originals are copied to Shig and the relay is restarted. That page also documents the deployed `/opt/shig/certs/` path variant and the daily root cronjob.
+Set up [automatic certificate renewal](certificate-renewal.md) so renewed relay certificates are copied to `/opt/shig/certs/` and Shig is restarted.
 
 ### systemd
 
@@ -226,7 +226,9 @@ SERVER_PORT=22
 SERVER_TARGET_DIR=/opt/shig
 ```
 
-The deploy workflow installs only:
+The release archive contains the executable and `default.toml`. The deploy workflow installs only the executable and requires the server-specific `/opt/shig/config.toml` to already exist. It creates `/opt/shig/bin` if needed and does not overwrite the runtime config.
+
+The deploy workflow installs the executable at:
 
 ```text
 /opt/shig/bin/shig_server

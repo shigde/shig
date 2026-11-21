@@ -5,7 +5,7 @@ use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{fs, task::JoinSet};
 use tokio_util::sync::CancellationToken;
@@ -24,7 +24,13 @@ struct SavedRendition {
 
 impl HlsWriter {
     pub async fn open(source: moq_mux::Source, directory: PathBuf) -> anyhow::Result<Self> {
-        let (broadcaster, after) = Self::prepare(source).await?;
+        let prepare_started = Instant::now();
+        let prepared = Self::prepare(source).await;
+        crate::metrics::recorder::preparation_finished(
+            prepare_started.elapsed(),
+            prepared.is_err(),
+        );
+        let (broadcaster, after) = prepared?;
         // Only an actual recording creates a directory; never create the configured root here.
         fs::create_dir(&directory)
             .await
@@ -81,7 +87,11 @@ impl HlsWriter {
     }
 
     pub async fn run(self, stop: CancellationToken) -> anyhow::Result<u64> {
+        let _active = crate::metrics::recorder::ActiveRecording::start();
         let result = self.record(stop.clone()).await;
+        if result.is_err() {
+            crate::metrics::recorder::recording_failed();
+        }
         stop.cancel();
         result
     }
@@ -180,6 +190,7 @@ async fn record_rendition(
         if segment.segment <= after {
             continue;
         }
+        let segment_processing_started = Instant::now();
         let playlist = rendition
             .media_playlist(None)
             .context("Missing HLS playlist")?;
@@ -204,13 +215,25 @@ async fn record_rendition(
             fs::write(directory.join(name), init).await?;
             init_name = Some(name.to_owned());
         }
-        fs::write(
+        let media_bytes = segment.media.len();
+        let write_started = Instant::now();
+        match fs::write(
             directory
                 .join("seg")
                 .join(format!("{}.m4s", segment.segment)),
             segment.media,
         )
-        .await?;
+        .await
+        {
+            Ok(()) => {
+                crate::metrics::recorder::segment_written(media_bytes, write_started.elapsed());
+                crate::metrics::recorder::segment_processed(segment_processing_started.elapsed());
+            }
+            Err(error) => {
+                crate::metrics::recorder::segment_write_failed();
+                return Err(error).context("Cannot persist HLS media segment");
+            }
+        }
         saved.insert(segment.segment);
         duration += segment.duration;
     }
