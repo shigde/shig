@@ -7,6 +7,7 @@ pub mod endpoint_event;
 pub mod control_data_channel;
 pub mod data_channel;
 pub mod publish_endpoint;
+mod receive_diagnostics;
 pub(crate) mod sdp;
 pub mod subscribe_endpoint;
 pub(crate) mod subscriber_pli;

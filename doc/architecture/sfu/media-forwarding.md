@@ -1,5 +1,34 @@
 # SFU Media Forwarding
 
+## Receive Delivery Diagnostics
+
+`RTP receive delivery` logs once per second at DEBUG per source track and SSRC, immediately after `TrackRemote::poll()` delivers RTP and before relay or subscriber forwarding. This measures application delivery after both the jitterbuffer and the internal TrackRemote event queue; it cannot isolate jitterbuffer residence time.
+
+- `packets`: delivered packets in this window, including late or duplicate packets.
+- `delivery_gap_max_ms`: largest interval between consecutive deliveries, including across reporting boundaries. It is recorded when the next packet arrives; a completely silent window reports zero packets.
+- `delivery_pairs_le_1ms`: consecutive deliveries at most 1 ms apart. Video packetization naturally produces bursts, so this alone does not imply a stall.
+- `sequence_gaps`: newly observed missing sequence numbers, provisionally, not confirmed packet loss.
+- `late_gap_fills`: previously missing sequence numbers delivered later, including gaps from earlier windows.
+- `missing_pending`: still-open sequence gaps, retained across windows.
+- `old_or_duplicate`: packets behind the highest sequence number that do not fill a tracked gap; these cannot always be classified as duplicates.
+- `missing_aged_out`: unresolved gaps removed from the bounded 4096-sequence tracking window or cleared after a discontinuity; this is not proof of network loss.
+- `sequence_discontinuities`: forward jumps larger than the tracking window, treated as ambiguous restarts/jumps instead of thousands of missing packets.
+
+Sequence comparisons handle 16-bit wraparound. Counters reset per report, while sequence tracking and the previous delivery timestamp persist. Measurement does not change jitterbuffer parameters or packet forwarding.
+
+## Subscriber Queue Diagnostics
+
+Each active subscriber-track sender logs `RTP forward queue` once per second at DEBUG level, identified by `media_id` and `subscriber_peer_id`.
+
+- `queue_pending`: retained packets still waiting, excluding the in-flight write (capacity 512).
+- `queue_max_observed`: highest sampled pending count in this reporting window; not an exact high-water mark.
+- `queue_dropped`: overwritten packets reported by the broadcast receiver in this window. These are counted when the receiver next reads, so a blocked write can delay their report.
+- `writes_completed`, `write_errors`: completed write attempts and errors in this window.
+- `write_avg_ms`, `write_max_ms`: duration of completed `write_rtp().await` calls, including failed calls. A call spanning windows is counted when it finishes.
+- `write_pending_ms`: elapsed time of the currently waiting call, or zero if none. Reporting continues while that call waits.
+
+Window counters reset after each report. These durations measure application-side WebRTC enqueueing, not UDP transmission or receipt by the browser. A zero overflow count does not exclude stalls elsewhere. Logging stops when the sender is cancelled; no separate monitoring task is created.
+
 ## Routing Identity
 
 The media router uses the SFU track ID (`MediaId`) as its routing identity. A publisher track creates one `Media` entry. Subscribers add a subscription to that entry and receive its RTP packets.
@@ -84,12 +113,15 @@ MediaId -> Media -> prepared active targets
 
 publisher RTP
 -> load prepared target list
--> direct fan-out to TrackLocalStaticRTP
+-> non-awaiting enqueue into each subscriber track's 512-packet queue
+-> dedicated sender task calls TrackLocalStaticRTP::write_rtp
 -> subscriber PeerConnection sender
 -> SRTP and UDP
 ```
 
-Reconciliation replaces the prepared target list when a subscription is activated or removed. The publisher RTP reader only loads that list and forwards to its entries. It does not use a broadcast channel, a subscriber receiver task, or a data channel. Tracks continue to be routed by `MediaId`.
+Reconciliation replaces the prepared target list when a subscription is activated or removed. The publisher RTP reader loads that list and enqueues without awaiting any subscriber. Each target uses an existing Tokio broadcast ring with a single receiver, holding at most 512 packets. On overflow, oldest queued packets are evicted; the sender handles `Lagged` and resumes with the oldest retained packet. Payload bytes remain shared. One sender task per target preserves retained-packet order and waits on that subscriber's WebRTC driver independently. Removing a route or shutting down its endpoint cancels the sender. The task captures source feedback state without owning the route list, avoiding ownership cycles. No per-packet tasks are created. Tracks continue to be routed by `MediaId`.
+
+The 512-packet limit applies to this application queue only. A sender may also hold one packet in an in-flight `write_rtp`, and WebRTC's existing driver queue remains separate. Overflow can discard parts of encoded frames; receiver PLI feedback requests recovery through the existing shared gate.
 
 ### Route Activation And Keyframes
 

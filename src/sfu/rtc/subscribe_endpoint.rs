@@ -212,12 +212,10 @@ impl SubscribeEndpoint {
                 }
             };
             self.video_codecs_negotiated |= pending.media.kind == RtpCodecType::Video;
-            if pending.media.kind == RtpCodecType::Video {
-                self.feedback_readers.insert(
+            self.feedback_readers.insert(
                     media_id.clone(),
                     crate::util::stop_guard::StopGuard(target.feedback_cancel()),
                 );
-            }
             activations.push(ActivateMedia { media_id, target });
         }
         Ok(activations)

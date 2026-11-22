@@ -208,7 +208,7 @@ mod tests {
     fn test_target_confirms_rtp_binding_once() {
         let target = target(peer("peer-b"));
 
-        assert!(target.confirm_rtp_binding());
-        assert!(!target.confirm_rtp_binding());
+        assert!(ForwardTarget::confirm_rtp_binding(&target.rtp_binding_confirmed));
+        assert!(!ForwardTarget::confirm_rtp_binding(&target.rtp_binding_confirmed));
     }
 }
