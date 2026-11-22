@@ -5,6 +5,7 @@
 - [Configuration](config.md)
 
 ### Architecture
+- [WebRTC Bridge mit str0m (Entwurf)](architecture/webrtc-bridge.md)
 - [Demand-driven Batch Polling](architecture/polling.md)
 - [MoQ Relay Architecture](architecture/relay.md)
 - [SFU Signaling](architecture/sfu/signaling.md)

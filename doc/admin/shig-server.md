@@ -24,7 +24,7 @@ PostgreSQL       127.0.0.1:5432
 
 See [firewall](firewall.md).
 
-Install server packages:
+Install server packages. The GStreamer development packages and `pkg-config` are needed only when building Shig on the server. For a prebuilt release binary, install the runtime packages listed in the deployment guide instead.
 
 The relay requires GStreamer >= 1.24 and its RTP plugins. Shig release binaries are built on Ubuntu 26.04 x86_64 and require compatible system libraries on the deployment host; they are not standalone static binaries. This release target supports Ubuntu 26.04 x86_64.
 
