@@ -6,17 +6,18 @@ use rtc::shared::marshal::Unmarshal;
 use std::time::Duration;
 
 #[test]
-fn video_group_requests_keyframes_and_bounds_retries() {
+fn video_group_does_not_request_keyframes_just_because_time_passes() {
     use super::video_group::VideoGroup;
     let start = std::time::Instant::now();
     let mut group = VideoGroup::default();
     assert!(!group.observe(true, 1000, start));
     assert!(!group.observe(false, 1000, start + Duration::from_secs(1)));
-    assert!(group.observe(false, 1000, start + Duration::from_secs(2)));
+    assert!(!group.observe(false, 1000, start + Duration::from_secs(2)));
     assert!(!group.observe(false, 1000, start + Duration::from_millis(2100)));
-    assert!(group.observe(false, 1000, start + Duration::from_secs(3)));
+    assert!(!group.observe(false, 1000, start + Duration::from_secs(3)));
     assert!(!group.observe(true, 1000, start + Duration::from_millis(3100)));
     assert!(!group.observe(false, 1000, start + Duration::from_secs(4)));
+    assert!(!group.poll(start + Duration::from_secs(60)));
 }
 
 #[test]
@@ -45,14 +46,13 @@ fn missing_first_keyframe_is_retried_without_incoming_frames() {
 }
 
 #[test]
-fn observed_encoder_delay_advances_the_next_request() {
+fn observed_encoder_delay_does_not_create_periodic_requests() {
     let start = std::time::Instant::now();
     let mut group = super::video_group::VideoGroup::default();
     group.requested(start);
     group.observe(true, 1000, start + Duration::from_millis(500));
     assert!(!group.poll(start + Duration::from_millis(1400)));
-    // A measured 500 ms response reserves twice that time for the next GOP.
-    assert!(group.poll(start + Duration::from_millis(1500)));
+    assert!(!group.poll(start + Duration::from_millis(1500)));
 }
 
 #[tokio::test]
@@ -76,7 +76,9 @@ async fn repeated_video_groups_can_publish_more_than_one_group_limit() {
     let mut group = super::video_group::VideoGroup::default();
     let mut keyframe = true;
     let mut requests = 0;
-    for index in 0..200 {
+    // Cross several cache limits without relying on periodic requests.
+    let frame_count = (moq_net::group::MAX_CACHE_BYTES as u64 / (256 * 1024)) * 4;
+    for index in 0..frame_count.max(200) {
         let pts = Duration::from_millis(index * 33);
         let frame = if keyframe { key.clone() } else { delta.clone() };
         let request = group.observe(keyframe, frame.len(), start + pts);

@@ -78,7 +78,11 @@ impl EndpointBuilder {
                 rtc::interceptor::JitterBufferBuilder::new().build(),
             )
         } else {
-            registry
+            // Application-most: standard interceptors see RTCP before filtering.
+            registry.with(
+                rtc::interceptor::Slot::from(14_000),
+                super::subscriber_pli::SubscriberPli::default(),
+            )
         };
 
         let configuration = RTCConfigurationBuilder::default().build();

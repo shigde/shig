@@ -66,8 +66,7 @@ impl VideoGroup {
                 let growth = reserve.as_secs_f64() / age.as_secs_f64().max(0.1);
                 let projected_bytes = self.bytes as f64 * (1.0 + growth);
                 let projected_frames = self.frames as f64 * (1.0 + growth);
-                age + reserve.min(Duration::from_secs(1)) >= Duration::from_secs(2)
-                    || projected_bytes >= moq_net::group::MAX_CACHE_BYTES as f64 * 0.75
+                projected_bytes >= moq_net::group::MAX_CACHE_BYTES as f64 * 0.75
                     || projected_frames >= moq_net::group::MAX_GROUP_FRAMES as f64 * 0.75
             }
         };

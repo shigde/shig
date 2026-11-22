@@ -9,6 +9,7 @@ pub mod data_channel;
 pub mod publish_endpoint;
 pub(crate) mod sdp;
 pub mod subscribe_endpoint;
+pub(crate) mod subscriber_pli;
 
 mod error;
 mod port_allocator;

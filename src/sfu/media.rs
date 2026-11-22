@@ -25,6 +25,7 @@ pub mod recording;
 mod hls_writer;
 pub mod router;
 pub(crate) mod track_info;
+mod pli_gate;
 
 pub use media_service::MediaService;
 pub use recording::Recording;
@@ -42,6 +43,7 @@ pub(crate) struct ForwardTarget {
     payload_type: PayloadType,
     header_extensions: RtpHeaderExtensionTranslator,
     rtp_binding_confirmed: Arc<AtomicBool>,
+    feedback_cancel: tokio_util::sync::CancellationToken,
 }
 
 impl ForwardTarget {
@@ -57,11 +59,16 @@ impl ForwardTarget {
             payload_type,
             header_extensions,
             rtp_binding_confirmed: Arc::new(AtomicBool::new(false)),
+            feedback_cancel: tokio_util::sync::CancellationToken::new(),
         }
     }
 
     fn peer_id(&self) -> &PeerId {
         &self.peer_id
+    }
+
+    pub(crate) fn feedback_cancel(&self) -> tokio_util::sync::CancellationToken {
+        self.feedback_cancel.clone()
     }
 
     /// The first successful write proves that the peer-connection driver has
@@ -97,6 +104,7 @@ pub struct Media {
     pub ssrc: SSRC,
     source_track: Option<Arc<dyn TrackRemote>>,
     targets: Arc<ArcSwap<Vec<ForwardTarget>>>,
+    subscriber_pli_gate: Arc<pli_gate::PliGate>,
     pub relay_rtp_tx: RelayRtpChannel,
 
     // This is the muted state of a media track.
@@ -143,6 +151,7 @@ impl Media {
             ssrc,
             source_track,
             targets: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            subscriber_pli_gate: Arc::new(pli_gate::PliGate::default()),
             relay_rtp_tx,
             muted,
             purpose,
@@ -201,6 +210,7 @@ impl Media {
             match target.track.write_rtp(packet).await {
                 Ok(()) => {
                     if self.kind == RtpCodecType::Video && target.confirm_rtp_binding() {
+                        self.start_subscriber_feedback(target);
                         log::info!(
                             "RTP target bound, requesting keyframe, media_id={}, subscriber_peer_id={}",
                             self.id,
@@ -220,6 +230,32 @@ impl Media {
         }
     }
 
+    fn start_subscriber_feedback(&self, target: &ForwardTarget) {
+        use webrtc::media_stream::track_local::TrackLocalEvent;
+        let source = self.clone();
+        let track = target.track.clone();
+        let cancel = target.feedback_cancel.clone();
+        let subscriber = target.peer_id.clone();
+        tokio::spawn(async move {
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    event = track.poll() => event,
+                };
+                let Some(TrackLocalEvent::OnRtcpPacket(packets)) = event else { break; };
+                let requests_source = crate::sfu::rtc::subscriber_pli::requests_ssrc(&packets, source.ssrc);
+                if requests_source {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        _ = source.request_keyframe(&subscriber) => {},
+                    }
+                }
+            }
+        });
+    }
+
     pub(crate) async fn request_keyframe(&self, subscriber_peer_id: &PeerId) {
         if self.kind != RtpCodecType::Video {
             return;
@@ -233,6 +269,12 @@ impl Media {
             );
             return;
         };
+
+        // All request sources share this gate: client feedback, live rhythm,
+        // subscription startup and relay recovery/cache protection.
+        if !self.subscriber_pli_gate.admit(std::time::Instant::now()) {
+            return;
+        }
 
         match source_track
             .write_rtcp(vec![Box::new(PictureLossIndication {

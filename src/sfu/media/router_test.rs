@@ -30,6 +30,7 @@ mod tests {
             ssrc: Default::default(),
             source_track: None,
             targets: Default::default(),
+            subscriber_pli_gate: Default::default(),
             relay_rtp_tx,
             purpose: Default::default(),
             muted: false,

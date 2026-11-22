@@ -31,6 +31,7 @@ pub struct SubscribeEndpoint {
     pending_subscriptions: HashMap<MediaId, PendingSubscription>,
     data_channel: Option<Arc<dyn DataChannel>>,
     video_codecs_negotiated: bool,
+    feedback_readers: HashMap<MediaId, crate::util::stop_guard::StopGuard>,
 }
 
 impl SubscribeEndpoint {
@@ -41,6 +42,7 @@ impl SubscribeEndpoint {
             pending_subscriptions: HashMap::new(),
             data_channel: None,
             video_codecs_negotiated: false,
+            feedback_readers: HashMap::new(),
         }
     }
 
@@ -115,6 +117,7 @@ impl SubscribeEndpoint {
     }
 
     pub async fn remove_track(&mut self, media_id: MediaId) -> RtcResult<()> {
+        self.feedback_readers.remove(&media_id);
         let media_id_string = media_id.to_string();
         let senders = self.endpoint.peer_connection.get_senders().await;
 
@@ -209,6 +212,12 @@ impl SubscribeEndpoint {
                 }
             };
             self.video_codecs_negotiated |= pending.media.kind == RtpCodecType::Video;
+            if pending.media.kind == RtpCodecType::Video {
+                self.feedback_readers.insert(
+                    media_id.clone(),
+                    crate::util::stop_guard::StopGuard(target.feedback_cancel()),
+                );
+            }
             activations.push(ActivateMedia { media_id, target });
         }
         Ok(activations)
@@ -279,6 +288,7 @@ impl SubscribeEndpoint {
     }
 
     pub async fn shutdown(&self) -> RtcResult<()> {
+        for reader in self.feedback_readers.values() { reader.0.cancel(); }
         self.endpoint
             .peer_connection
             .close()

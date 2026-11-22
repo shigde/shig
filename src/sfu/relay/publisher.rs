@@ -145,6 +145,12 @@ impl HangPublisher {
         let mut video_recovery = VideoRecovery::default();
         let mut keyframe_check = tokio::time::interval(Duration::from_millis(500));
         keyframe_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let live_keyframes = self.video.purpose == crate::sfu::media::MediaPurpose::STREAM;
+        let period = Duration::from_secs(2);
+        let mut live_keyframe_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + period, period,
+        );
+        live_keyframe_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut diagnostics = if matches!(self.video_codec, VideoCodec::H264) {
             match self.diagnostics_directory.as_deref() {
                 Some(directory) => H264Diagnostics::open(directory, &self.name).await,
@@ -165,6 +171,12 @@ impl HangPublisher {
                     changed = pipeline.failure.changed() => {
                         changed.context("GStreamer error channel closed")?;
                         bail!("{}", pipeline.failure.borrow().as_deref().unwrap_or("GStreamer stopped"));
+                    }
+                    _ = live_keyframe_tick.tick(), if live_keyframes => {
+                        tokio::select! {
+                            _ = cancel.cancelled() => break,
+                            _ = self.video.request_keyframe(&self.video.peer_id) => {}
+                        }
                     }
                     Some(()) = pipeline.keyframe_requests.recv() => {
                         video_group.reset();

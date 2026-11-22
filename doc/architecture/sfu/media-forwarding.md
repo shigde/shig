@@ -106,7 +106,11 @@ subscriber answer accepted
 
 The browser's ordinary PLI behavior remains the compatibility fallback. A future Dependency Descriptor optimization may identify a decodable start frame, but forwarding must not depend on that extension because browser support is not universal.
 
-Subscriber PLI and FIR feedback belongs to the same `MediaId` route: once feedback delivery from the subscriber WebRTC leg is enabled, the router relays those keyframe requests to the source publisher track. Ordinary RTCP reports stay on their own WebRTC leg and are not cross-routed.
+Subscriber PLI feedback follows the same `MediaId` route. A subscribe-only interceptor marks incoming PLI for application delivery after the standard RTCP interceptors have processed it. After the first successful RTP write confirms sender binding, a feedback reader consumes the local track's RTCP events and requests a keyframe on its source publisher track using the source SSRC.
+
+All keyframe request sources of one `Media` share a 200 ms PLI gate: the first request is forwarded immediately; further requests within that window are suppressed. A new request at or after 200 ms can pass. Different source tracks have independent gates. Removing the subscription, closing the endpoint or dropping it cancels its feedback reader. Ordinary RTCP reports and NACK remain on their own WebRTC leg; FIR forwarding is not included in this PLI path.
+
+While the live relay is running, its `STREAM` video track requests a keyframe every two seconds, starting two seconds after timer creation. Participant video tracks have no periodic rhythm. The timer stops with the relay publisher and skips missed ticks instead of sending a burst. The old group-age trigger at approximately 1–1.5 seconds is removed. Startup, recovery and projected group-cache-limit requests remain and use the same 200 ms gate as client PLI. A nearby client request can therefore satisfy/suppress a scheduled request; the timer does not guarantee exact keyframe arrival intervals.
 
 ## Unavoidable Per-Target Work
 
