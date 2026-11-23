@@ -72,6 +72,18 @@ impl EndpointBuilder {
 
         let registry = register_default_interceptors(Registry::new(), &mut media_engine)
             .map_err(|e| RtcError::EndpointBuild(e.to_string()))?;
+        let registry = if id.as_kind().is_publish() {
+            registry.with(
+                rtc::interceptor::Slot::JitterBuffer,
+                rtc::interceptor::JitterBufferBuilder::new().build(),
+            )
+        } else {
+            // Application-most: standard interceptors see RTCP before filtering.
+            registry.with(
+                rtc::interceptor::Slot::from(14_000),
+                super::subscriber_pli::SubscriberPli::default(),
+            )
+        };
 
         let configuration = RTCConfigurationBuilder::default().build();
 

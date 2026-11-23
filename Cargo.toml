@@ -1,5 +1,8 @@
+[workspace]
+exclude = ["patches/rtc-interceptor"]
+
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "Shig enables distributed live streams via the Ferdivers"
 license = "AGPL-3.0"
@@ -80,3 +83,7 @@ moq-mux = "0.10.19"
 gstreamer = { version = "0.24", features = ["v1_24"] }
 gstreamer-app = { version = "0.24", features = ["v1_24"] }
 sysinfo = "0.39.6"
+
+[patch.crates-io]
+# Fix false ten-second discontinuity resets; see patches/rtc-interceptor/PATCH.md.
+rtc-interceptor = { path = "patches/rtc-interceptor" }

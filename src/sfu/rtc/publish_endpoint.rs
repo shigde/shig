@@ -85,11 +85,36 @@ impl PublishEndpoint {
         );
 
         tokio::spawn(async move {
-            let mut media = None;
+            let mut media: Option<Media> = None;
             let (relay_rtp_tx, _relay_rtp_rx) = broadcast::channel(8192);
-            while let Some(event) = track.poll().await {
+            let mut diagnostics = super::receive_diagnostics::TrackDiagnostics::new();
+            let mut report = tokio::time::interval_at(
+                tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+                std::time::Duration::from_secs(1),
+            );
+            report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                let poll = track.poll();
+                tokio::pin!(poll);
+                let event = loop {
+                    tokio::select! {
+                        biased;
+                        _ = report.tick() => {
+                            if let Some(media) = &media {
+                                for (ssrc, stats) in &mut diagnostics {
+                                    stats.report(&media.id, *ssrc);
+                                }
+                            }
+                        },
+                        event = &mut poll => break event,
+                    }
+                };
+                let Some(event) = event else { break; };
                 match event {
                     TrackRemoteEvent::OnRtpPacket(packet) => {
+                        diagnostics.entry(packet.header.ssrc).or_default().observe(
+                            packet.header.sequence_number, std::time::Instant::now(),
+                        );
                         if media.is_none() {
                             let codec = track
                                 .codec(packet.header.ssrc)
@@ -119,7 +144,7 @@ impl PublishEndpoint {
 
                         if let Some(media) = &media {
                             let _ = media.relay_rtp_tx.send(Arc::new(packet.clone()));
-                            media.forward_rtp(packet).await;
+                            media.forward_rtp(packet);
                         }
                     }
                     TrackRemoteEvent::OnEnded | TrackRemoteEvent::OnError => {

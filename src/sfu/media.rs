@@ -25,6 +25,8 @@ pub mod recording;
 mod hls_writer;
 pub mod router;
 pub(crate) mod track_info;
+mod pli_gate;
+mod forward_queue;
 
 pub use media_service::MediaService;
 pub use recording::Recording;
@@ -42,6 +44,8 @@ pub(crate) struct ForwardTarget {
     payload_type: PayloadType,
     header_extensions: RtpHeaderExtensionTranslator,
     rtp_binding_confirmed: Arc<AtomicBool>,
+    feedback_cancel: tokio_util::sync::CancellationToken,
+    queue: Arc<forward_queue::ForwardQueue>,
 }
 
 impl ForwardTarget {
@@ -51,12 +55,15 @@ impl ForwardTarget {
         payload_type: PayloadType,
         header_extensions: RtpHeaderExtensionTranslator,
     ) -> Self {
+        let queue = Arc::new(forward_queue::ForwardQueue::new());
         Self {
             peer_id,
             track,
             payload_type,
             header_extensions,
             rtp_binding_confirmed: Arc::new(AtomicBool::new(false)),
+            feedback_cancel: queue.cancel.clone(),
+            queue,
         }
     }
 
@@ -64,13 +71,15 @@ impl ForwardTarget {
         &self.peer_id
     }
 
-    /// The first successful write proves that the peer-connection driver has
-    /// bound this local track to its sender.
-    fn confirm_rtp_binding(&self) -> bool {
-        self.rtp_binding_confirmed
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
+    pub(crate) fn feedback_cancel(&self) -> tokio_util::sync::CancellationToken {
+        self.feedback_cancel.clone()
     }
+
+    /// Only the first successful write starts feedback and requests a keyframe.
+    fn confirm_rtp_binding(binding: &AtomicBool) -> bool {
+        binding.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok()
+    }
+
 }
 
 /**
@@ -97,6 +106,7 @@ pub struct Media {
     pub ssrc: SSRC,
     source_track: Option<Arc<dyn TrackRemote>>,
     targets: Arc<ArcSwap<Vec<ForwardTarget>>>,
+    subscriber_pli_gate: Arc<pli_gate::PliGate>,
     pub relay_rtp_tx: RelayRtpChannel,
 
     // This is the muted state of a media track.
@@ -143,6 +153,7 @@ impl Media {
             ssrc,
             source_track,
             targets: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            subscriber_pli_gate: Arc::new(pli_gate::PliGate::default()),
             relay_rtp_tx,
             muted,
             purpose,
@@ -189,35 +200,203 @@ impl Media {
         self.targets.store(Arc::new(next));
     }
 
-    pub(crate) async fn forward_rtp(&self, packet: Packet) {
+    pub(crate) fn forward_rtp(&self, packet: Packet) {
         if packet.header.payload_type != self.payload_type {
             return;
         }
         let targets = self.targets.load();
+        if targets.is_empty() { return; }
+        let packet = Arc::new(packet);
         for target in targets.iter() {
-            let mut packet = packet.clone();
-            packet.header.payload_type = target.payload_type;
-            target.header_extensions.translate(&mut packet);
-            match target.track.write_rtp(packet).await {
+            self.start_forward_sender(target);
+            target.queue.enqueue(packet.clone());
+        }
+    }
+
+    fn keyframe_source(&self) -> KeyframeSource {
+        KeyframeSource {
+            id: self.id.clone(), peer_id: self.peer_id.clone(), kind: self.kind,
+            ssrc: self.ssrc, source_track: self.source_track.clone(),
+            subscriber_pli_gate: self.subscriber_pli_gate.clone(),
+        }
+    }
+
+    fn start_forward_sender(&self, target: &ForwardTarget) {
+        let Some(mut receiver) = target.queue.take_receiver() else { return; };
+        let track = target.track.clone();
+        let payload_type = target.payload_type;
+        let header_extensions = target.header_extensions.clone();
+        let bound = target.rtp_binding_confirmed.clone();
+        let cancel = target.feedback_cancel.clone();
+        let subscriber = target.peer_id.clone();
+        let source = self.keyframe_source();
+        tokio::spawn(async move {
+          let mut diagnostics = ForwardDiagnostics::default();
+          let mut report = tokio::time::interval_at(
+              tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+              std::time::Duration::from_secs(1),
+          );
+          report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+          loop {
+            let packet = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                _ = report.tick() => {
+                    diagnostics.report(&source.id, &subscriber, receiver.len(), None);
+                    continue;
+                },
+                packet = receiver.recv() => match packet {
+                    Ok(packet) => packet,
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        diagnostics.dropped += count;
+                        continue;
+                    },
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            };
+            diagnostics.observe_depth(receiver.len());
+            let mut packet = packet.as_ref().clone();
+            packet.header.payload_type = payload_type;
+            header_extensions.translate(&mut packet);
+            let started = std::time::Instant::now();
+            let write = track.write_rtp(packet);
+            tokio::pin!(write);
+            let result = loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return,
+                    _ = report.tick() => {
+                        diagnostics.report(&source.id, &subscriber, receiver.len(), Some(started.elapsed()));
+                    },
+                    result = &mut write => break result,
+                }
+            };
+            diagnostics.observe_write(started.elapsed(), result.is_err());
+            match result {
                 Ok(()) => {
-                    if self.kind == RtpCodecType::Video && target.confirm_rtp_binding() {
+                    if source.kind == RtpCodecType::Video
+                        && ForwardTarget::confirm_rtp_binding(&bound) {
+                        source.start_subscriber_feedback(track.clone(), subscriber.clone(), cancel.clone());
                         log::info!(
                             "RTP target bound, requesting keyframe, media_id={}, subscriber_peer_id={}",
-                            self.id,
-                            target.peer_id()
+                            source.id,
+                            subscriber
                         );
-                        self.request_keyframe(target.peer_id()).await;
+                        tokio::select! {
+                            biased;
+                            _ = cancel.cancelled() => break,
+                            _ = source.request_keyframe(&subscriber) => {},
+                        }
                     }
                 }
                 Err(err) => {
                     log::debug!(
                         "could not forward RTP, media_id={}, peer_id={}: {err}",
-                        self.id,
-                        target.peer_id()
+                        source.id,
+                        subscriber
                     );
                 }
             }
-        }
+          }
+        });
+    }
+
+    pub(crate) async fn request_keyframe(&self, subscriber_peer_id: &PeerId) {
+        self.keyframe_source().request_keyframe(subscriber_peer_id).await;
+    }
+}
+
+/// One-second diagnostic windows, local to a subscriber sender task.
+#[derive(Default)]
+struct ForwardDiagnostics {
+    writes: u64,
+    errors: u64,
+    dropped: u64,
+    max_depth: usize,
+    total_write: std::time::Duration,
+    max_write: std::time::Duration,
+}
+
+impl ForwardDiagnostics {
+    fn observe_depth(&mut self, pending: usize) {
+        self.max_depth = self.max_depth.max(pending.min(forward_queue::CAPACITY));
+    }
+
+    fn observe_write(&mut self, elapsed: std::time::Duration, failed: bool) {
+        self.writes += 1;
+        self.errors += u64::from(failed);
+        self.total_write += elapsed;
+        self.max_write = self.max_write.max(elapsed);
+    }
+
+    fn report(&mut self, media: &MediaId, subscriber: &PeerId, pending: usize,
+        in_flight: Option<std::time::Duration>) {
+        self.observe_depth(pending);
+        log::debug!(
+            "RTP forward queue: media_id={}, subscriber_peer_id={}, queue_pending={}, queue_capacity={}, queue_max_observed={}, queue_dropped={}, writes_completed={}, write_errors={}, write_avg_ms={:.3}, write_max_ms={:.3}, write_pending_ms={:.3}",
+            media, subscriber, pending.min(forward_queue::CAPACITY), forward_queue::CAPACITY,
+            self.max_depth, self.dropped, self.writes, self.errors,
+            if self.writes == 0 { 0.0 } else { self.total_write.as_secs_f64() * 1000.0 / self.writes as f64 },
+            self.max_write.as_secs_f64() * 1000.0,
+            in_flight.unwrap_or_default().as_secs_f64() * 1000.0,
+        );
+        *self = Self::default();
+    }
+}
+
+#[cfg(test)]
+mod forward_diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_bound_depth_and_include_failed_write_time() {
+        let mut stats = ForwardDiagnostics::default();
+        stats.observe_depth(600);
+        stats.observe_depth(10);
+        stats.observe_write(std::time::Duration::from_millis(5), false);
+        stats.observe_write(std::time::Duration::from_millis(25), true);
+        assert_eq!(stats.max_depth, 512);
+        assert_eq!(stats.writes, 2);
+        assert_eq!(stats.errors, 1);
+        assert_eq!(stats.total_write, std::time::Duration::from_millis(30));
+        assert_eq!(stats.max_write, std::time::Duration::from_millis(25));
+    }
+}
+
+/// Feedback state deliberately excludes routes and their queues to avoid task cycles.
+#[derive(Clone)]
+struct KeyframeSource {
+    id: MediaId,
+    peer_id: PeerId,
+    kind: RtpCodecType,
+    ssrc: SSRC,
+    source_track: Option<Arc<dyn TrackRemote>>,
+    subscriber_pli_gate: Arc<pli_gate::PliGate>,
+}
+
+impl KeyframeSource {
+    fn start_subscriber_feedback(&self, track: Arc<TrackLocalStaticRTP>, subscriber: PeerId,
+        cancel: tokio_util::sync::CancellationToken) {
+        use webrtc::media_stream::track_local::TrackLocalEvent;
+        let source = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    event = track.poll() => event,
+                };
+                let Some(TrackLocalEvent::OnRtcpPacket(packets)) = event else { break; };
+                let requests_source = crate::sfu::rtc::subscriber_pli::requests_ssrc(&packets, source.ssrc);
+                if requests_source {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => break,
+                        _ = source.request_keyframe(&subscriber) => {},
+                    }
+                }
+            }
+        });
     }
 
     pub(crate) async fn request_keyframe(&self, subscriber_peer_id: &PeerId) {
@@ -233,6 +412,12 @@ impl Media {
             );
             return;
         };
+
+        // All request sources share this gate: client feedback, live rhythm,
+        // subscription startup and relay recovery/cache protection.
+        if !self.subscriber_pli_gate.admit(std::time::Instant::now()) {
+            return;
+        }
 
         match source_track
             .write_rtcp(vec![Box::new(PictureLossIndication {
