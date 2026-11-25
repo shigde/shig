@@ -108,6 +108,18 @@ fn config(codec: VideoCodec) -> PipelineConfig {
 }
 
 #[test]
+fn upstream_keyframe_requests_reach_publisher_for_every_video_codec() {
+    for codec in [VideoCodec::Vp8, VideoCodec::Vp9, VideoCodec::H264, VideoCodec::H265, VideoCodec::Av1] {
+        let mut pipeline = MediaPipeline::start(config(codec)).unwrap();
+        let event = gst::event::CustomUpstream::new(gst::Structure::new_empty("GstForceKeyUnit"));
+        // Delivery to the probe is what matters; appsrc may reject the event afterwards.
+        let _ = pipeline.video.static_pad("src").unwrap().send_event(event);
+        assert!(pipeline.keyframe_requests.try_recv().is_ok(), "codec={codec:?}");
+        pipeline.stop().unwrap();
+    }
+}
+
+#[test]
 fn unsupported_video_codec_is_rejected() {
     assert!(VideoCodec::from_mime("video/unknown").is_err());
     assert!(matches!(
@@ -120,8 +132,8 @@ fn unsupported_video_codec_is_rejected() {
 async fn depayload(codec: VideoCodec, encoder: &str, payloader: &str) {
     let mut pipeline = MediaPipeline::start(config(codec)).unwrap();
     let source = gst::parse::launch(&format!(
-        "videotestsrc num-buffers=4 ! video/x-raw,width=320,height=240,framerate=30/1 \
-         ! {encoder} ! {payloader} pt=96 mtu=800 ! appsink name=rtp sync=false"
+        "videotestsrc is-live=true num-buffers=4 ! video/x-raw,width=320,height=240,framerate=30/1 \
+         ! {encoder} ! {payloader} pt=96 mtu=800 ! appsink name=rtp sync=true"
     ))
     .unwrap()
     .downcast::<gst::Pipeline>()

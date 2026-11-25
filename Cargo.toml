@@ -30,7 +30,6 @@ actix-rt = "2.11.0"
 actix-service = { version = "^2.0.2" }
 async-trait = "0.1"
 arc-swap = "1.9.2"
-enclose = "1.2"
 jsonwebtoken = "^9.3.0"
 lettre = { version = "0.11.11", features = ["tokio1", "tokio1-native-tls"] }
 handlebars = "^6.3.0"
@@ -54,35 +53,35 @@ derive_more = "^0.99.18"
 serde_json = "^1.0.133"
 mime = "^0.3.17"
 sanitize-filename = "^0.6.0"
+anyhow = "1.0.99"
+bytes = "1.9.0"
+regex = "1.11.1"
+futures-util = "0.3.31"
+hex = "0.4.3"
+
+## WebRTC Lobby
 webrtc = { version = "0.21.1" }
 rtc = { version = "0.21.1" }
 rtcp = { version = "0.21.1", package = "rtc-rtcp" }
 rtp = { version = "0.21.1", package = "rtc-rtp" }
 rtc-sdp = { version = "0.21.1" }
-anyhow = "1.0.99"
-bytes = "1.9.0"
-regex = "1.11.1"
-futures-util = "0.3.31"
-prometheus = "0.13.4"
 
-## MoQ relay
-moq-auth = "0.2.1"
+## MoQ relay serve ##########
 axum = "0.8"
 tower = { version = "0.5", features = ["util"] }
-moq-tokio = { version = "0.19.26", features = ["iroh"] }
-moq-relay = "0.17.5"
-base64 = "0.22.1"
-rustls = "0.23.36"
-tracing = "0.1.44"
-async-stream = "0.3.6"
-libc = "0.2.180"
-hex = "0.4.3"
-moq-hls = { version = "=0.5.19", default-features = false }
-moq-net = "0.3.18"
-moq-mux = "0.10.19"
-gstreamer = { version = "0.24", features = ["v1_24"] }
-gstreamer-app = { version = "0.24", features = ["v1_24"] }
+## MoQ
+moq-auth = "0.2.4"
+moq-tokio = { version = "0.19.38", features = ["iroh"] }
+moq-relay = "0.17.18"
+moq-hls = { version = "=0.5.25", default-features = false }
+moq-net = "0.3.24"
+moq-mux = "0.10.25"
+gstreamer = { version = "0.25", features = ["v1_24"] }
+gstreamer-app = { version = "0.25", features = ["v1_24"] }
+
+## Monitoring
 sysinfo = "0.39.6"
+prometheus = "0.13.4"
 
 [patch.crates-io]
 # Fix false ten-second discontinuity resets; see patches/rtc-interceptor/PATCH.md.

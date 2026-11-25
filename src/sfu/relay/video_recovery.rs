@@ -48,7 +48,24 @@ impl VideoRecovery {
     ) -> Result<VideoOutcome> {
         let buffer = frame.sample.buffer().context("Missing video buffer")?;
         let flags = buffer.flags();
-        let pts = buffer.pts().context("Missing video PTS")?.useconds();
+        let Some(pts) = buffer.pts().map(|pts| pts.useconds()) else {
+            // Do not invent presentation times or keep decoding across a discarded
+            // access unit. Close the group and let the publisher request recovery.
+            track.cut(None).context("close untimed relay video group")?;
+            self.waiting = true;
+            self.dropped += 1;
+            if self
+                .last_warning
+                .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(5))
+            {
+                log::warn!(
+                    "relay video buffer without PTS; waiting for keyframe, stream_id={}, dts={:?}, flags={:?}, bytes={}, group_frames={}, group_bytes={}, dropped={}",
+                    stream, buffer.dts(), flags, buffer.size(), group_frames, group_bytes, self.dropped
+                );
+                self.last_warning = Some(now);
+            }
+            return Ok(VideoOutcome::Resync);
+        };
         let keyframe = !flags.contains(BufferFlags::DELTA_UNIT);
         let broken = flags.intersects(BufferFlags::DISCONT | BufferFlags::CORRUPTED);
         if broken {
