@@ -2,7 +2,7 @@
 exclude = ["patches/rtc-interceptor"]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 description = "Shig enables distributed live streams via the Ferdivers"
 license = "AGPL-3.0"
