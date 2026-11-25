@@ -20,6 +20,37 @@ fn check_stream_owner(pool: &DbPool, stream: &str, owner: i32) -> Result<(), Api
     Ok(())
 }
 
+/// Authorize native HLS requests for one replay using a path-scoped cookie.
+#[post("/{uuid}/playback-session")]
+pub async fn playback_session(
+    pool: web::Data<DbPool>,
+    path: web::Path<String>,
+    session: web::ReqData<Session>,
+    req: actix_web::HttpRequest,
+) -> Result<HttpResponse, ApiError> {
+    let uuid = path.into_inner();
+    uuid::Uuid::parse_str(&uuid).map_err(|_| ApiError::NotFound {
+        error_message: "Replay is not available".into(),
+    })?;
+    let video = recorded_videos::find(&mut *pool.get()?, &uuid)?;
+    if !video.is_visible_to(Some(session.principal.id)) {
+        return Err(ApiError::NotFound { error_message: "Replay is not available".into() });
+    }
+    // The account middleware has already validated this Bearer token.
+    let token = req.headers().get(actix_web::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split_once(' ')).map(|(_, token)| token.trim())
+        .ok_or_else(|| ApiError::NotFound { error_message: "Replay is not available".into() })?;
+    let cookie = actix_web::cookie::Cookie::build("shig_replay", token.to_owned())
+        .path(format!("/static/recordings/{uuid}/"))
+        .http_only(true)
+        .secure(req.connection_info().scheme() == "https")
+        .same_site(actix_web::cookie::SameSite::Strict)
+        .finish();
+    Ok(HttpResponse::NoContent().cookie(cookie)
+        .insert_header(("Cache-Control", "private, no-store")).finish())
+}
+
 /// Serve HLS files only when the replay itself is visible to this visitor.
 pub async fn recording_file(
     pool: web::Data<DbPool>,

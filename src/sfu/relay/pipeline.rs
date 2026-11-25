@@ -78,12 +78,14 @@ impl MediaPipeline {
     pub fn start(config: PipelineConfig) -> anyhow::Result<Self> {
         gst::init().context("Initialize GStreamer")?;
         let (encoding, depay) = config.video_codec.elements();
+        // Keep audio and video on the same jitter-buffer latency budget.
+        const JITTER_BUFFER_LATENCY_MS: u32 = 50;
         let description = format!(
-            "appsrc name=video_in is-live=true format=time do-timestamp=true block=false \
-             ! rtpjitterbuffer latency=50 do-lost=true ! {depay} \
+            "appsrc name=video_in is-live=true format=time block=false \
+             ! rtpjitterbuffer latency={JITTER_BUFFER_LATENCY_MS} do-lost=true drop-on-latency=true ! {depay} \
              ! appsink name=video_out sync=false async=false \
-             appsrc name=audio_in is-live=true format=time do-timestamp=true block=false \
-             ! rtpjitterbuffer latency=50 do-lost=true ! rtpopusdepay \
+             appsrc name=audio_in is-live=true format=time block=false \
+             ! rtpjitterbuffer latency={JITTER_BUFFER_LATENCY_MS} do-lost=true drop-on-latency=true ! rtpopusdepay \
              ! appsink name=audio_out sync=false async=false"
         );
         let pipeline = gst::parse::launch(&description)?
@@ -98,7 +100,7 @@ impl MediaPipeline {
                 .unwrap();
             let guard = std::sync::Mutex::new(super::h264_guard::H264Guard::default());
             pad.add_probe(
-                gst::PadProbeType::BUFFER | gst::PadProbeType::EVENT_UPSTREAM,
+                gst::PadProbeType::BUFFER,
                 move |_, info| {
                     match info.data.as_mut() {
                         Some(gst::PadProbeData::Buffer(buffer)) => {
@@ -108,14 +110,6 @@ impl MediaPipeline {
                                 }
                                 Some(false) => {}
                                 None => return gst::PadProbeReturn::Drop,
-                            }
-                        }
-                        Some(gst::PadProbeData::Event(event)) => {
-                            if event
-                                .structure()
-                                .is_some_and(|s| s.name() == "GstForceKeyUnit")
-                            {
-                                let _ = keyframe_tx.try_send(());
                             }
                         }
                         _ => {}
@@ -129,6 +123,19 @@ impl MediaPipeline {
             .unwrap()
             .downcast::<AppSrc>()
             .unwrap();
+        // Every video codec shares this upstream request path; only the RTP
+        // packet guard above is H264-specific.
+        video.static_pad("src").unwrap().add_probe(
+            gst::PadProbeType::EVENT_UPSTREAM,
+            move |_, info| {
+                if let Some(gst::PadProbeData::Event(event)) = info.data.as_ref() {
+                    if event.structure().is_some_and(|s| s.name() == "GstForceKeyUnit") {
+                        let _ = keyframe_tx.try_send(());
+                    }
+                }
+                gst::PadProbeReturn::Ok
+            },
+        );
         let audio = pipeline
             .by_name("audio_in")
             .unwrap()

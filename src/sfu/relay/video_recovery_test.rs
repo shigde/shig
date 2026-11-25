@@ -42,6 +42,52 @@ fn frame(key: bool, pts_ms: u64, flags: gst::BufferFlags) -> Frame {
 }
 
 #[tokio::test]
+async fn missing_pts_recovers_on_keyframe_without_ending_publication() {
+    gst::init().unwrap();
+    let mut broadcast = moq_net::broadcast::Info::new().produce();
+    let catalog =
+        moq_mux::catalog::Producer::<()>::new(&mut broadcast, Default::default()).unwrap();
+    let mut track = Track::video(
+        broadcast.reserve_track("video").unwrap(),
+        catalog.reserve(),
+        VideoInit::new(VideoFormat::Vp8, Bytes::new()),
+    )
+    .unwrap();
+    let mut recovery = VideoRecovery::default();
+    let mut push = |f| recovery.publish(&mut track, f, "test", 0, 0, Instant::now());
+    assert!(matches!(
+        push(frame(true, 1000, gst::BufferFlags::empty())).unwrap(),
+        VideoOutcome::Published
+    ));
+    let mut untimed = frame(false, 1033, gst::BufferFlags::empty())
+        .sample
+        .buffer_owned()
+        .unwrap();
+    untimed.make_mut().set_pts(None);
+    assert!(matches!(
+        push(Frame {
+            video: true,
+            sample: gst::Sample::builder().buffer(&untimed).build(),
+        })
+        .unwrap(),
+        VideoOutcome::Resync
+    ));
+    assert!(matches!(
+        push(frame(false, 1066, gst::BufferFlags::empty())).unwrap(),
+        VideoOutcome::Dropped
+    ));
+    assert!(matches!(
+        push(frame(true, 1100, gst::BufferFlags::empty())).unwrap(),
+        VideoOutcome::Published
+    ));
+    assert!(matches!(
+        push(frame(false, 1133, gst::BufferFlags::empty())).unwrap(),
+        VideoOutcome::Published
+    ));
+    track.finish().unwrap();
+}
+
+#[tokio::test]
 async fn rewind_recovers_on_valid_keyframe_without_restarting_track() {
     gst::init().unwrap();
     let mut broadcast = moq_net::broadcast::Info::new().produce();

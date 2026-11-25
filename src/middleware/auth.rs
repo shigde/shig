@@ -73,7 +73,7 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let public = self.scopes.contains(&RequireScope::Public);
         let public_only = self.scopes == [RequireScope::Public];
-        let anonymous = public && (public_only || !req.headers().contains_key(AUTHORIZATION));
+        let anonymous = public && (public_only || credentials(&req).is_none());
 
         if req.method() != Method::OPTIONS && !anonymous {
             let session = match authenticate(&req) {
@@ -99,17 +99,57 @@ where
     }
 }
 
-fn authenticate(req: &ServiceRequest) -> Option<Session> {
-    let value = req.headers().get(AUTHORIZATION)?.to_str().ok()?;
-    let (scheme, token) = value.split_once(' ')?;
-    if !scheme.eq_ignore_ascii_case("bearer") {
-        return None;
+fn credentials(req: &ServiceRequest) -> Option<String> {
+    if let Some(value) = req.headers().get(AUTHORIZATION) {
+        // Preserve rejection of malformed explicit Authorization headers.
+        return Some(value.to_str().unwrap_or("").to_owned());
     }
+    // Native HLS cannot attach Authorization headers. Never accept this cookie
+    // on API routes, where cookie-based authentication would enable CSRF.
+    if req.path().starts_with("/static/recordings/") {
+        return req.cookie("shig_replay").map(|cookie| format!("Bearer {}", cookie.value()));
+    }
+    None
+}
+
+fn authenticate(req: &ServiceRequest) -> Option<Session> {
+    let value = credentials(req)?;
+    let (scheme, token) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") { return None; }
     let pool = req.app_data::<Data<DbPool>>()?;
     let config = req.app_data::<Data<JWTConfig>>()?;
     let data = decode_auth_token(token.trim().to_owned(), config).ok()?;
     match &data.claims.scope {
         SessionScope::Account => verify_auth_token(&data, pool).ok(),
         SessionScope::Device(_) => verify_device_token(&data, pool).ok(),
+    }
+}
+
+#[cfg(test)]
+mod replay_cookie_tests {
+    use super::*;
+    use actix_web::{cookie::Cookie, test::TestRequest};
+
+    #[test]
+    fn replay_cookie_is_only_accepted_on_recording_file_routes() {
+        for path in ["/api/videos", "/api/auth/user", "/static/other/file", "/static/recordings-spoof/file"] {
+            let req = TestRequest::get().uri(path).cookie(Cookie::new("shig_replay", "token")).to_srv_request();
+            assert!(credentials(&req).is_none(), "{path}");
+        }
+        let req = TestRequest::get().uri("/static/recordings/video/track/seg.m4s")
+            .cookie(Cookie::new("shig_replay", "token")).to_srv_request();
+        assert_eq!(credentials(&req).as_deref(), Some("Bearer token"));
+    }
+
+    #[test]
+    fn explicit_authorization_takes_precedence_over_replay_cookie() {
+        let req = TestRequest::get().uri("/static/recordings/video/master.m3u8")
+            .cookie(Cookie::new("shig_replay", "old"))
+            .insert_header((AUTHORIZATION, "Bearer fresh")).to_srv_request();
+        assert_eq!(credentials(&req).as_deref(), Some("Bearer fresh"));
+        let malformed = TestRequest::get().uri("/static/recordings/video/master.m3u8")
+            .cookie(Cookie::new("shig_replay", "old"))
+            .insert_header((AUTHORIZATION, "invalid")).to_srv_request();
+        assert_eq!(credentials(&malformed).as_deref(), Some("invalid"));
     }
 }

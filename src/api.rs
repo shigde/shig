@@ -50,7 +50,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 .service(user::stream_settings::update))
             .service(web::scope("/videos")
                 .wrap(Authentication::new(RequireScope::Account))
-                .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording))
+                .service(videos::list_owned_videos).service(videos::get_video).service(videos::update_video).service(videos::delete_video).service(videos::stop_recording).service(videos::playback_session))
             .service(web::scope("/reactions")
                 .wrap(Authentication::new(RequireScope::Account))
                 .service(reactions::set_like))
