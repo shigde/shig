@@ -1,4 +1,5 @@
 [workspace]
+members = ["crates/media-bridge"]
 exclude = ["patches/rtc-interceptor"]
 
 [workspace.package]
