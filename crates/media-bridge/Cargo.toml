@@ -8,3 +8,5 @@ description = "RTP depacketization and encoded frame assembly for Shig"
 publish = false
 
 [dependencies]
+rtp = { version = "0.21.1", package = "rtc-rtp" }
+rtcp = { version = "0.21.1", package = "rtc-rtcp" }
