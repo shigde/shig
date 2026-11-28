@@ -6,8 +6,10 @@ Initial scope: H264 and Opus. Selected packet-processing implementations and the
 tests will be adapted from str0m to Shig's RTP objects. The existing WebRTC lobby,
 GStreamer pipeline, MoQ publishing, and recording paths are unchanged.
 
-This crate currently contains the package scaffold only. No depacketizer or frame
-buffer implementation has been imported or connected to the server yet.
+Original str0m files, including their embedded tests, are copied unchanged into
+`upstream/str0m/src/packet/`. They are review material and are not compiled or
+connected to the server yet. See [UPSTREAM.md](UPSTREAM.md) for the file inventory
+and review order.
 
 ## Upstream and licensing
 
